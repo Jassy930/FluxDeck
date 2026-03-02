@@ -15,6 +15,15 @@ pub enum GatewayRuntimeStatus {
     Stopped,
 }
 
+impl GatewayRuntimeStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GatewayRuntimeStatus::Running => "running",
+            GatewayRuntimeStatus::Stopped => "stopped",
+        }
+    }
+}
+
 struct RunningGateway {
     shutdown_tx: oneshot::Sender<()>,
     task: JoinHandle<()>,
@@ -24,6 +33,7 @@ pub struct GatewayManager {
     repo: GatewayRepo,
     pool: SqlitePool,
     running: RwLock<HashMap<String, RunningGateway>>,
+    last_errors: RwLock<HashMap<String, String>>,
 }
 
 impl GatewayManager {
@@ -32,6 +42,7 @@ impl GatewayManager {
             repo: GatewayRepo::new(pool.clone()),
             pool,
             running: RwLock::new(HashMap::new()),
+            last_errors: RwLock::new(HashMap::new()),
         }
     }
 
@@ -43,6 +54,20 @@ impl GatewayManager {
             }
         }
 
+        let result = self.start_gateway_inner(gateway_id).await;
+        match result {
+            Ok(_) => {
+                self.clear_error(gateway_id).await;
+                Ok(())
+            }
+            Err(err) => {
+                self.set_error(gateway_id, err.to_string()).await;
+                Err(err)
+            }
+        }
+    }
+
+    async fn start_gateway_inner(&self, gateway_id: &str) -> Result<()> {
         let gateway = self
             .repo
             .get_by_id(gateway_id)
@@ -82,6 +107,7 @@ impl GatewayManager {
             let _ = running_gateway.task.await;
         }
 
+        self.clear_error(gateway_id).await;
         Ok(())
     }
 
@@ -92,5 +118,20 @@ impl GatewayManager {
         } else {
             GatewayRuntimeStatus::Stopped
         }
+    }
+
+    pub async fn last_error(&self, gateway_id: &str) -> Option<String> {
+        let errors = self.last_errors.read().await;
+        errors.get(gateway_id).cloned()
+    }
+
+    async fn set_error(&self, gateway_id: &str, error: String) {
+        let mut errors = self.last_errors.write().await;
+        errors.insert(gateway_id.to_string(), error);
+    }
+
+    async fn clear_error(&self, gateway_id: &str) {
+        let mut errors = self.last_errors.write().await;
+        errors.remove(gateway_id);
     }
 }

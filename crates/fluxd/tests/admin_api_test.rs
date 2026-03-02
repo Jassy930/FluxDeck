@@ -197,6 +197,106 @@ async fn admin_api_response_shape_is_stable() {
     assert!(log_item.get("created_at").is_some());
 }
 
+#[tokio::test]
+async fn admin_api_returns_gateway_runtime_status() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_status_1",
+            "name": "Status Provider",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-status",
+            "models": ["gpt-4o-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider request");
+
+    client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_status_1",
+            "name": "Status Gateway",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "default_provider_id": "provider_status_1",
+            "default_model": "gpt-4o-mini",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create gateway request");
+
+    let before_start: serde_json::Value = client
+        .get(format!("{base}/admin/gateways"))
+        .send()
+        .await
+        .expect("list gateways request before start")
+        .json()
+        .await
+        .expect("decode gateways before start");
+    let gateway_before = before_start
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("gateway exists before start");
+    assert_eq!(gateway_before.get("runtime_status"), Some(&json!("stopped")));
+
+    let start_resp = client
+        .post(format!("{base}/admin/gateways/gateway_status_1/start"))
+        .send()
+        .await
+        .expect("start gateway request");
+    assert_eq!(start_resp.status(), reqwest::StatusCode::OK);
+
+    let after_start: serde_json::Value = client
+        .get(format!("{base}/admin/gateways"))
+        .send()
+        .await
+        .expect("list gateways request after start")
+        .json()
+        .await
+        .expect("decode gateways after start");
+    let gateway_after_start = after_start
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("gateway exists after start");
+    assert_eq!(gateway_after_start.get("runtime_status"), Some(&json!("running")));
+
+    let stop_resp = client
+        .post(format!("{base}/admin/gateways/gateway_status_1/stop"))
+        .send()
+        .await
+        .expect("stop gateway request");
+    assert_eq!(stop_resp.status(), reqwest::StatusCode::OK);
+
+    let after_stop: serde_json::Value = client
+        .get(format!("{base}/admin/gateways"))
+        .send()
+        .await
+        .expect("list gateways request after stop")
+        .json()
+        .await
+        .expect("decode gateways after stop");
+    let gateway_after_stop = after_stop
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("gateway exists after stop");
+    assert_eq!(gateway_after_stop.get("runtime_status"), Some(&json!("stopped")));
+}
+
 struct SpawnedServer {
     addr: SocketAddr,
 }

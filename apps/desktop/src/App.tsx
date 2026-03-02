@@ -35,9 +35,10 @@ export async function loadDashboard(api: AdminApi = createAdminApi()): Promise<D
 
 export async function renderDashboardText(api?: AdminApi): Promise<string[]> {
   const data = await loadDashboard(api);
+  const runtimeLine = renderGatewayRuntimeLine(data.gateways);
   return [
     renderProviderPanel(data.providers),
-    renderGatewayPanel(data.gateways),
+    runtimeLine ? `${renderGatewayPanel(data.gateways)} | ${runtimeLine}` : renderGatewayPanel(data.gateways),
     renderLogPanel(data.logs),
   ];
 }
@@ -50,4 +51,20 @@ export async function createProviderAndGatewayFromUi(
   await submitProviderForm(api, providerInput);
   await submitGatewayForm(api, gatewayInput);
   return loadDashboard(api);
+}
+
+type GatewayRuntimeView = Gateway & {
+  runtime_status?: string;
+  last_error?: string | null;
+};
+
+function renderGatewayRuntimeLine(gateways: Gateway[]): string {
+  const lines = (gateways as GatewayRuntimeView[])
+    .map((item) => {
+      const status = item.runtime_status ?? 'unknown';
+      const error = item.last_error ? `,error=${item.last_error}` : '';
+      return `${item.id}:${status}${error}`;
+    })
+    .join(' | ');
+  return lines ? `Runtime: ${lines}` : '';
 }
