@@ -10,6 +10,9 @@
 		AA0000000000000000000020 /* FluxDeckNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000010 /* FluxDeckNativeApp.swift */; };
 		AA0000000000000000000021 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* ContentView.swift */; };
 		AA0000000000000000000022 /* FluxDeckNativeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000012 /* FluxDeckNativeTests.swift */; };
+		AA0000000000000000000023 /* AdminApiClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000015 /* AdminApiClient.swift */; };
+		AA0000000000000000000024 /* ProviderListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000016 /* ProviderListView.swift */; };
+		AA0000000000000000000025 /* GatewayListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000017 /* GatewayListView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,6 +31,9 @@
 		AA0000000000000000000012 /* FluxDeckNativeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxDeckNativeTests.swift; sourceTree = "<group>"; };
 		AA0000000000000000000013 /* FluxDeckNative.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FluxDeckNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000014 /* FluxDeckNativeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FluxDeckNativeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000015 /* AdminApiClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminApiClient.swift; sourceTree = "<group>"; };
+		AA0000000000000000000016 /* ProviderListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderListView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000017 /* GatewayListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayListView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -52,6 +58,8 @@
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000004 /* App */,
+				AA0000000000000000000006 /* Features */,
+				AA0000000000000000000007 /* Networking */,
 				AA0000000000000000000005 /* FluxDeckNativeTests */,
 				AA0000000000000000000003 /* Products */,
 			);
@@ -81,6 +89,23 @@
 				AA0000000000000000000012 /* FluxDeckNativeTests.swift */,
 			);
 			path = FluxDeckNativeTests;
+			sourceTree = SOURCE_ROOT;
+		};
+		AA0000000000000000000006 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000016 /* ProviderListView.swift */,
+				AA0000000000000000000017 /* GatewayListView.swift */,
+			);
+			path = FluxDeckNative/Features;
+			sourceTree = SOURCE_ROOT;
+		};
+		AA0000000000000000000007 /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000015 /* AdminApiClient.swift */,
+			);
+			path = FluxDeckNative/Networking;
 			sourceTree = SOURCE_ROOT;
 		};
 /* End PBXGroup section */
@@ -175,6 +200,9 @@
 			files = (
 				AA0000000000000000000020 /* FluxDeckNativeApp.swift in Sources */,
 				AA0000000000000000000021 /* ContentView.swift in Sources */,
+				AA0000000000000000000023 /* AdminApiClient.swift in Sources */,
+				AA0000000000000000000024 /* ProviderListView.swift in Sources */,
+				AA0000000000000000000025 /* GatewayListView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -239,6 +267,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0;
+				DEFINES_MODULE = YES;
+				ENABLE_TESTABILITY = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.fluxdeck.native;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -255,6 +285,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0;
+				DEFINES_MODULE = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.fluxdeck.native;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
