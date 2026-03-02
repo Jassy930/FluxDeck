@@ -1,0 +1,11 @@
+{
+  "name": "fluxdeck-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.2.2",
+  "scripts": {
+    "dev": "echo 'desktop dev placeholder'",
+    "test": "bun test"
+  }
+}

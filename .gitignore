@@ -1,2 +1,4 @@
 .worktrees/
 worktrees/
+target/
+**/node_modules/
