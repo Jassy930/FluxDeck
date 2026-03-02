@@ -27,5 +27,6 @@ cargo run -p fluxd
 
 更多操作见：
 
+- `docs/USAGE.md`
 - `docs/ops/local-runbook.md`
 - `docs/testing/mvp-e2e.md`
