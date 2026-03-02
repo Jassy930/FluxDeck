@@ -326,6 +326,7 @@ dependencies = [
  "anyhow",
  "axum",
  "reqwest",
+ "serde",
  "serde_json",
  "sqlx",
  "tokio",

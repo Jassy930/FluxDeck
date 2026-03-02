@@ -74,4 +74,33 @@ impl GatewayRepo {
             enabled: row.get::<i64, _>("enabled") != 0,
         }))
     }
+
+    pub async fn list(&self) -> Result<Vec<Gateway>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, name, listen_host, listen_port, inbound_protocol,
+                   default_provider_id, default_model, enabled
+            FROM gateways
+            ORDER BY created_at DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let gateways = rows
+            .into_iter()
+            .map(|row| Gateway {
+                id: row.get("id"),
+                name: row.get("name"),
+                listen_host: row.get("listen_host"),
+                listen_port: row.get("listen_port"),
+                inbound_protocol: row.get("inbound_protocol"),
+                default_provider_id: row.get("default_provider_id"),
+                default_model: row.get("default_model"),
+                enabled: row.get::<i64, _>("enabled") != 0,
+            })
+            .collect();
+
+        Ok(gateways)
+    }
 }
