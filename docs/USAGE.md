@@ -141,11 +141,15 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway start gateway_
 
 ```bash
 cargo test -q
-bun run test --cwd apps/desktop
+cd apps/desktop && bun run test
 ./scripts/e2e/smoke.sh
 ```
 
 `smoke.sh` 输出 `smoke ok` 表示核心链路正常。
+
+并行交付验收清单见：
+
+- [docs/testing/frontend-parallel-checklist.md](./testing/frontend-parallel-checklist.md)
 
 ## 9. 常见问题
 
