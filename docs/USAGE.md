@@ -161,3 +161,10 @@ bun run test --cwd apps/desktop
 4. 数据库文件问题  
 确认 `FLUXDECK_DB_PATH` 所在目录有写权限。
 
+## 10. Admin API 契约
+
+前端（Tauri 与 macOS 原生壳）统一依赖以下稳定契约：
+
+- [docs/contracts/admin-api-v1.md](./contracts/admin-api-v1.md)
+
+如需调整 `provider / gateway / logs` 返回字段，请先更新契约文档并补齐对应测试。
