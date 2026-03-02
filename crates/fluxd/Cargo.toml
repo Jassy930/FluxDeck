@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.97"
 sqlx = { version = "0.8.3", features = ["runtime-tokio-rustls", "sqlite", "migrate"] }
-tokio = { version = "1.44.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.44.0", features = ["macros", "net", "rt-multi-thread", "sync"] }
