@@ -6,6 +6,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{oneshot, RwLock};
 use tokio::task::JoinHandle;
 
+use crate::http::openai_routes::{build_openai_router, OpenAiRouteState};
 use crate::repo::gateway_repo::GatewayRepo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,13 +22,15 @@ struct RunningGateway {
 
 pub struct GatewayManager {
     repo: GatewayRepo,
+    pool: SqlitePool,
     running: RwLock<HashMap<String, RunningGateway>>,
 }
 
 impl GatewayManager {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
-            repo: GatewayRepo::new(pool),
+            repo: GatewayRepo::new(pool.clone()),
+            pool,
             running: RwLock::new(HashMap::new()),
         }
     }
@@ -49,20 +52,14 @@ impl GatewayManager {
         let bind_addr = format!("{}:{}", gateway.listen_host, gateway.listen_port);
         let listener = TcpListener::bind(bind_addr).await?;
 
-        let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let app = build_openai_router(OpenAiRouteState::new(self.pool.clone(), gateway.id));
         let task = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = &mut shutdown_rx => {
-                        break;
-                    }
-                    accept_result = listener.accept() => {
-                        if accept_result.is_err() {
-                            break;
-                        }
-                    }
-                }
-            }
+            let _ = axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
         });
 
         let mut running = self.running.write().await;
