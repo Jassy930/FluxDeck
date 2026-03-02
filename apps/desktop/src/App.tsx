@@ -1,6 +1,16 @@
-import { createAdminApi, type AdminApi, type Gateway, type Provider, type RequestLog } from './api/admin';
+import {
+  createAdminApi,
+  type AdminApi,
+  type CreateGatewayInput,
+  type CreateProviderInput,
+  type Gateway,
+  type Provider,
+  type RequestLog,
+} from './api/admin';
+import { submitGatewayForm } from './components/GatewayForm';
 import { renderGatewayPanel } from './components/GatewayPanel';
 import { renderLogPanel } from './components/LogPanel';
+import { submitProviderForm } from './components/ProviderForm';
 import { renderProviderPanel } from './components/ProviderPanel';
 
 export type DashboardData = {
@@ -30,4 +40,14 @@ export async function renderDashboardText(api?: AdminApi): Promise<string[]> {
     renderGatewayPanel(data.gateways),
     renderLogPanel(data.logs),
   ];
+}
+
+export async function createProviderAndGatewayFromUi(
+  api: AdminApi,
+  providerInput: CreateProviderInput,
+  gatewayInput: CreateGatewayInput,
+): Promise<DashboardData> {
+  await submitProviderForm(api, providerInput);
+  await submitGatewayForm(api, gatewayInput);
+  return loadDashboard(api);
 }
