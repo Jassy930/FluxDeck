@@ -141,11 +141,15 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway start gateway_
 
 ```bash
 cargo test -q
-bun run test --cwd apps/desktop
+cd apps/desktop && bun run test
 ./scripts/e2e/smoke.sh
 ```
 
 `smoke.sh` 输出 `smoke ok` 表示核心链路正常。
+
+并行交付验收清单见：
+
+- [docs/testing/frontend-parallel-checklist.md](./testing/frontend-parallel-checklist.md)
 
 ## 9. 常见问题
 
@@ -161,3 +165,10 @@ bun run test --cwd apps/desktop
 4. 数据库文件问题  
 确认 `FLUXDECK_DB_PATH` 所在目录有写权限。
 
+## 10. Admin API 契约
+
+前端（Tauri 与 macOS 原生壳）统一依赖以下稳定契约：
+
+- [docs/contracts/admin-api-v1.md](./contracts/admin-api-v1.md)
+
+如需调整 `provider / gateway / logs` 返回字段，请先更新契约文档并补齐对应测试。

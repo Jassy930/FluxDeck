@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use serde::Serialize;
 use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
 
@@ -95,11 +96,33 @@ async fn create_gateway(
     }
 }
 
-async fn list_gateways(State(state): State<AdminApiState>) -> (StatusCode, Json<Vec<Gateway>>) {
+async fn list_gateways(
+    State(state): State<AdminApiState>,
+) -> (StatusCode, Json<Vec<GatewayWithRuntime>>) {
     match state.gateway_repo.list().await {
-        Ok(items) => (StatusCode::OK, Json(items)),
+        Ok(items) => {
+            let mut gateways = Vec::with_capacity(items.len());
+            for gateway in items {
+                let runtime_status = state.gateway_manager.status(&gateway.id).await;
+                let last_error = state.gateway_manager.last_error(&gateway.id).await;
+                gateways.push(GatewayWithRuntime {
+                    gateway,
+                    runtime_status: runtime_status.as_str().to_string(),
+                    last_error,
+                });
+            }
+            (StatusCode::OK, Json(gateways))
+        }
         Err(_) => (StatusCode::OK, Json(vec![])),
     }
+}
+
+#[derive(Debug, Serialize)]
+struct GatewayWithRuntime {
+    #[serde(flatten)]
+    gateway: Gateway,
+    runtime_status: String,
+    last_error: Option<String>,
 }
 
 async fn start_gateway(

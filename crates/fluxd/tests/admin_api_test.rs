@@ -76,6 +76,227 @@ async fn admin_api_manages_resources() {
     assert!(logs.is_array());
 }
 
+#[tokio::test]
+async fn admin_api_response_shape_is_stable() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool.clone()));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_contract_1",
+            "name": "Contract Provider",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-contract",
+            "models": ["gpt-4o-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider request");
+
+    client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_contract_1",
+            "name": "Contract Gateway",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "default_provider_id": "provider_contract_1",
+            "default_model": "gpt-4o-mini",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create gateway request");
+
+    sqlx::query(
+        r#"
+        INSERT INTO request_logs (request_id, gateway_id, provider_id, model, status_code, latency_ms, error)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "#,
+    )
+    .bind("req_contract_1")
+    .bind("gateway_contract_1")
+    .bind("provider_contract_1")
+    .bind("gpt-4o-mini")
+    .bind(200_i64)
+    .bind(12_i64)
+    .bind(Option::<String>::None)
+    .execute(&pool)
+    .await
+    .expect("insert test log");
+
+    let providers: serde_json::Value = client
+        .get(format!("{base}/admin/providers"))
+        .send()
+        .await
+        .expect("list providers request")
+        .json()
+        .await
+        .expect("decode providers");
+    let provider = providers
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("providers contains one item");
+    assert!(provider.get("id").is_some());
+    assert!(provider.get("name").is_some());
+    assert!(provider.get("kind").is_some());
+    assert!(provider.get("base_url").is_some());
+    assert!(provider.get("models").is_some());
+    assert!(provider.get("enabled").is_some());
+
+    let gateways: serde_json::Value = client
+        .get(format!("{base}/admin/gateways"))
+        .send()
+        .await
+        .expect("list gateways request")
+        .json()
+        .await
+        .expect("decode gateways");
+    let gateway = gateways
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("gateways contains one item");
+    assert!(gateway.get("id").is_some());
+    assert!(gateway.get("name").is_some());
+    assert!(gateway.get("listen_host").is_some());
+    assert!(gateway.get("listen_port").is_some());
+    assert!(gateway.get("inbound_protocol").is_some());
+    assert!(gateway.get("default_provider_id").is_some());
+    assert!(gateway.get("enabled").is_some());
+
+    let logs: serde_json::Value = client
+        .get(format!("{base}/admin/logs"))
+        .send()
+        .await
+        .expect("list logs request")
+        .json()
+        .await
+        .expect("decode logs");
+    let log_item = logs
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("logs contains one item");
+    assert!(log_item.get("request_id").is_some());
+    assert!(log_item.get("gateway_id").is_some());
+    assert!(log_item.get("provider_id").is_some());
+    assert!(log_item.get("model").is_some());
+    assert!(log_item.get("status_code").is_some());
+    assert!(log_item.get("latency_ms").is_some());
+    assert!(log_item.get("error").is_some());
+    assert!(log_item.get("created_at").is_some());
+}
+
+#[tokio::test]
+async fn admin_api_returns_gateway_runtime_status() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_status_1",
+            "name": "Status Provider",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-status",
+            "models": ["gpt-4o-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider request");
+
+    client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_status_1",
+            "name": "Status Gateway",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "default_provider_id": "provider_status_1",
+            "default_model": "gpt-4o-mini",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create gateway request");
+
+    let before_start: serde_json::Value = client
+        .get(format!("{base}/admin/gateways"))
+        .send()
+        .await
+        .expect("list gateways request before start")
+        .json()
+        .await
+        .expect("decode gateways before start");
+    let gateway_before = before_start
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("gateway exists before start");
+    assert_eq!(gateway_before.get("runtime_status"), Some(&json!("stopped")));
+
+    let start_resp = client
+        .post(format!("{base}/admin/gateways/gateway_status_1/start"))
+        .send()
+        .await
+        .expect("start gateway request");
+    assert_eq!(start_resp.status(), reqwest::StatusCode::OK);
+
+    let after_start: serde_json::Value = client
+        .get(format!("{base}/admin/gateways"))
+        .send()
+        .await
+        .expect("list gateways request after start")
+        .json()
+        .await
+        .expect("decode gateways after start");
+    let gateway_after_start = after_start
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("gateway exists after start");
+    assert_eq!(gateway_after_start.get("runtime_status"), Some(&json!("running")));
+
+    let stop_resp = client
+        .post(format!("{base}/admin/gateways/gateway_status_1/stop"))
+        .send()
+        .await
+        .expect("stop gateway request");
+    assert_eq!(stop_resp.status(), reqwest::StatusCode::OK);
+
+    let after_stop: serde_json::Value = client
+        .get(format!("{base}/admin/gateways"))
+        .send()
+        .await
+        .expect("list gateways request after stop")
+        .json()
+        .await
+        .expect("decode gateways after stop");
+    let gateway_after_stop = after_stop
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("gateway exists after stop");
+    assert_eq!(gateway_after_stop.get("runtime_status"), Some(&json!("stopped")));
+}
+
 struct SpawnedServer {
     addr: SocketAddr,
 }
