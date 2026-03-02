@@ -1,3 +1,5 @@
+import { appSections } from './App';
+
 export function bootstrapDesktop() {
-  return 'fluxdeck-desktop-bootstrap';
+  return appSections();
 }

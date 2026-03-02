@@ -6,6 +6,6 @@
   "packageManager": "bun@1.2.2",
   "scripts": {
     "dev": "echo 'desktop dev placeholder'",
-    "test": "echo 'desktop test placeholder'"
+    "test": "bun test"
   }
 }
