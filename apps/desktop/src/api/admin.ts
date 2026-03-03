@@ -60,6 +60,23 @@ export type AdminApi = {
   createGateway: (input: CreateGatewayInput) => Promise<Gateway>;
 };
 
+export type DashboardLists = {
+  providers: Provider[];
+  gateways: Gateway[];
+  logs: RequestLog[];
+};
+
+export async function listDashboardLists(
+  api: Pick<AdminApi, 'listProviders' | 'listGateways' | 'listLogs'>,
+): Promise<DashboardLists> {
+  const [providers, gateways, logs] = await Promise.all([
+    api.listProviders(),
+    api.listGateways(),
+    api.listLogs(),
+  ]);
+  return { providers, gateways, logs };
+}
+
 export function createAdminApi(baseUrl = ''): AdminApi {
   const normalized = baseUrl.replace(/\/$/, '');
   const buildUrl = (path: string) => (normalized ? `${normalized}${path}` : path);

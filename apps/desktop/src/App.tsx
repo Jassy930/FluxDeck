@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from './ui/layout/AppShell';
-import type { AdminApi, CreateGatewayInput, CreateProviderInput } from './api/admin';
-import { createAdminApi } from './api/admin';
-import { createProviderAndRefresh, ProviderSection } from './ui/providers/ProviderSection';
-import { createGatewayAndRefresh, GatewaySection } from './ui/gateways/GatewaySection';
+import type {
+  AdminApi,
+  CreateGatewayInput,
+  CreateProviderInput,
+  DashboardLists,
+} from './api/admin';
+import { createAdminApi, listDashboardLists } from './api/admin';
+import { ProviderSection } from './ui/providers/ProviderSection';
+import { GatewaySection } from './ui/gateways/GatewaySection';
 import { LogSection } from './ui/logs/LogSection';
+import { submitProviderForm } from './components/ProviderForm';
+import { submitGatewayForm } from './components/GatewayForm';
 
-type DashboardState = {
-  providers: Awaited<ReturnType<AdminApi['listProviders']>>;
-  gateways: Awaited<ReturnType<AdminApi['listGateways']>>;
-  logs: Awaited<ReturnType<AdminApi['listLogs']>>;
-};
+type DashboardState = DashboardLists;
 
 const EMPTY_DASHBOARD: DashboardState = {
   providers: [],
@@ -19,20 +22,17 @@ const EMPTY_DASHBOARD: DashboardState = {
 };
 
 export async function createProviderFromUi(api: AdminApi, input: CreateProviderInput) {
-  return createProviderAndRefresh(api, input);
+  await submitProviderForm(api, input);
+  return refreshAll(api);
 }
 
 export async function createGatewayFromUi(api: AdminApi, input: CreateGatewayInput) {
-  return createGatewayAndRefresh(api, input);
+  await submitGatewayForm(api, input);
+  return refreshAll(api);
 }
 
 export async function refreshAll(api: AdminApi): Promise<DashboardState> {
-  const [providers, gateways, logs] = await Promise.all([
-    api.listProviders(),
-    api.listGateways(),
-    api.listLogs(),
-  ]);
-  return { providers, gateways, logs };
+  return listDashboardLists(api);
 }
 
 export function App() {
@@ -77,8 +77,8 @@ export function App() {
         error={loadError}
         onCreate={(input) =>
           createProviderFromUi(api, input)
-            .then((providers) => {
-              setDashboard((prev) => ({ ...prev, providers }));
+            .then((next) => {
+              setDashboard(next);
               setLoadError(null);
             })
             .catch((error: unknown) => {
@@ -91,8 +91,8 @@ export function App() {
         error={loadError}
         onCreate={(input) =>
           createGatewayFromUi(api, input)
-            .then((gateways) => {
-              setDashboard((prev) => ({ ...prev, gateways }));
+            .then((next) => {
+              setDashboard(next);
               setLoadError(null);
             })
             .catch((error: unknown) => {

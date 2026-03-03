@@ -44,7 +44,7 @@ describe('desktop app shell', () => {
 });
 
 describe('provider section', () => {
-  it('creates provider from ui and refreshes provider list', async () => {
+  it('creates provider from ui and refreshes all dashboard lists', async () => {
     const calls: string[] = [];
     const api: AdminApi = {
       listProviders: async () => {
@@ -93,7 +93,12 @@ describe('provider section', () => {
       enabled: true,
     });
 
-    expect(calls).toEqual(['createProvider:provider_ui_1', 'listProviders']);
+    expect(calls).toEqual([
+      'createProvider:provider_ui_1',
+      'listProviders',
+      'listGateways',
+      'listLogs',
+    ]);
   });
 });
 
@@ -151,7 +156,7 @@ describe('gateway section', () => {
     expect(html).toContain('Last error: upstream timeout');
   });
 
-  it('creates gateway from ui and refreshes gateway list', async () => {
+  it('creates gateway from ui and refreshes all dashboard lists', async () => {
     const calls: string[] = [];
     const api: AdminApi = {
       listProviders: async () => {
@@ -194,6 +199,11 @@ describe('gateway section', () => {
       enabled: true,
     });
 
-    expect(calls).toEqual(['createGateway:gateway_ui_1', 'listGateways']);
+    expect(calls).toEqual([
+      'createGateway:gateway_ui_1',
+      'listProviders',
+      'listGateways',
+      'listLogs',
+    ]);
   });
 });
