@@ -1,6 +1,14 @@
 import { AppShell } from './ui/layout/AppShell';
+import type { AdminApi, CreateProviderInput } from './api/admin';
+import { createAdminApi } from './api/admin';
+import { createProviderAndRefresh, ProviderSection } from './ui/providers/ProviderSection';
+
+export async function createProviderFromUi(api: AdminApi, input: CreateProviderInput) {
+  return createProviderAndRefresh(api, input);
+}
 
 export function App() {
+  const api = createAdminApi();
   return (
     <AppShell
       title="FluxDeck Admin"
@@ -11,10 +19,7 @@ export function App() {
         </section>
       }
     >
-      <section className="app-card">
-        <h2>Providers</h2>
-        <p className="muted">No providers yet.</p>
-      </section>
+      <ProviderSection providers={[]} onCreate={(input) => createProviderFromUi(api, input).then(() => {})} />
 
       <section className="app-card">
         <h2>Gateways</h2>
