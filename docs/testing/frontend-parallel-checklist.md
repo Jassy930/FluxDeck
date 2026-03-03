@@ -39,6 +39,8 @@ cd ../..
 ```
 
 > 说明：`bun run test --cwd apps/desktop` 在当前 bun 版本下会被解析为脚本参数，建议使用上面的等价写法。
+>
+> 若 `cargo test -q` 出现 `E0463 can't find crate`，先执行 `cargo clean` 再重试。
 
 ## 六、交付标准
 

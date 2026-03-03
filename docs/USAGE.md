@@ -181,6 +181,15 @@ cd apps/desktop && bun run test
 4. 数据库文件问题  
 确认 `FLUXDECK_DB_PATH` 所在目录有写权限。
 
+5. `cargo test` 出现 `E0463 can't find crate`  
+通常是工具链切换后遗留了不兼容构建产物。执行：
+
+```bash
+cargo clean
+```
+
+再重跑总验收命令。
+
 ## 10. Admin API 契约
 
 前端（Tauri 与 macOS 原生壳）统一依赖以下稳定契约：
