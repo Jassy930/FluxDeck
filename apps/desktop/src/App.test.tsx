@@ -1,16 +1,49 @@
 import { describe, expect, it } from 'bun:test';
-import { appSections, createProviderAndGatewayFromUi } from './App';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { mountApp } from './entry';
+import { App, createProviderFromUi } from './App';
 import type { AdminApi } from './api/admin';
 
-describe('desktop app shell', () => {
-  it('renders core management panels', () => {
-    const sections = appSections();
-    expect(sections).toContain('Providers');
-    expect(sections).toContain('Gateways');
-    expect(sections).toContain('Logs');
-  });
+describe('desktop entry', () => {
+  it('mounts app root into #root', () => {
+    const calls: string[] = [];
+    const rootElement = { id: 'root' };
+    const fakeDocument = {
+      getElementById: (id: string) => {
+        calls.push(`getElementById:${id}`);
+        return id === 'root' ? (rootElement as unknown as HTMLElement) : null;
+      },
+    } as Pick<Document, 'getElementById'>;
 
-  it('can create provider and gateway from ui actions', async () => {
+    const fakeCreateRoot = (container: Element | DocumentFragment) => {
+      calls.push(`createRoot:${(container as HTMLElement).id}`);
+      return {
+        render: () => {
+          calls.push('render');
+        },
+      };
+    };
+
+    mountApp(fakeDocument, fakeCreateRoot);
+
+    expect(calls).toEqual(['getElementById:root', 'createRoot:root', 'render']);
+  });
+});
+
+describe('desktop app shell', () => {
+  it('renders app shell with header sidebar and content sections', () => {
+    const html = renderToStaticMarkup(<App />);
+
+    expect(html).toContain('FluxDeck Admin');
+    expect(html).toContain('Sidebar');
+    expect(html).toContain('Providers');
+    expect(html).toContain('Gateways');
+    expect(html).toContain('Logs');
+  });
+});
+
+describe('provider section', () => {
+  it('creates provider from ui and refreshes provider list', async () => {
     const calls: string[] = [];
     const api: AdminApi = {
       listProviders: async () => {
@@ -49,35 +82,16 @@ describe('desktop app shell', () => {
       },
     };
 
-    await createProviderAndGatewayFromUi(
-      api,
-      {
-        id: 'provider_ui_1',
-        name: 'UI Provider',
-        kind: 'openai',
-        base_url: 'https://api.openai.com/v1',
-        api_key: 'sk-ui',
-        models: ['gpt-4o-mini'],
-        enabled: true,
-      },
-      {
-        id: 'gateway_ui_1',
-        name: 'UI Gateway',
-        listen_host: '127.0.0.1',
-        listen_port: 18080,
-        inbound_protocol: 'openai',
-        default_provider_id: 'provider_ui_1',
-        default_model: 'gpt-4o-mini',
-        enabled: true,
-      },
-    );
+    await createProviderFromUi(api, {
+      id: 'provider_ui_1',
+      name: 'UI Provider',
+      kind: 'openai',
+      base_url: 'https://api.openai.com/v1',
+      api_key: 'sk-ui',
+      models: ['gpt-4o-mini'],
+      enabled: true,
+    });
 
-    expect(calls).toEqual([
-      'createProvider:provider_ui_1',
-      'createGateway:gateway_ui_1',
-      'listProviders',
-      'listGateways',
-      'listLogs',
-    ]);
+    expect(calls).toEqual(['createProvider:provider_ui_1', 'listProviders']);
   });
 });
