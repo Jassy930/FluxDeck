@@ -60,11 +60,12 @@ export type AdminApi = {
   createGateway: (input: CreateGatewayInput) => Promise<Gateway>;
 };
 
-export function createAdminApi(baseUrl = 'http://127.0.0.1:7777'): AdminApi {
+export function createAdminApi(baseUrl = ''): AdminApi {
   const normalized = baseUrl.replace(/\/$/, '');
+  const buildUrl = (path: string) => (normalized ? `${normalized}${path}` : path);
 
   async function getJson<T>(path: string): Promise<T> {
-    const response = await fetch(`${normalized}${path}`);
+    const response = await fetch(buildUrl(path));
     if (!response.ok) {
       throw new Error(`admin api failed: ${response.status}`);
     }
@@ -72,7 +73,7 @@ export function createAdminApi(baseUrl = 'http://127.0.0.1:7777'): AdminApi {
   }
 
   async function postJson<TReq, TResp>(path: string, body: TReq): Promise<TResp> {
-    const response = await fetch(`${normalized}${path}`, {
+    const response = await fetch(buildUrl(path), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),

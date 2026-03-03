@@ -42,6 +42,22 @@ cargo run -p fluxd
 curl http://127.0.0.1:7777/admin/providers
 ```
 
+## 2.1 启动桌面前端（开发模式）
+
+在另一个终端进入前端目录：
+
+```bash
+cd apps/desktop
+bun install
+bun run dev
+```
+
+说明：
+
+- 开发服务器默认地址：`http://127.0.0.1:5173`
+- 已配置 Vite 代理：`/admin -> http://127.0.0.1:7777`
+- 因此前端会通过同源路径 `/admin/*` 访问 Admin API，避免浏览器跨域拦截
+
 ## 3. 配置 Provider
 
 当前 MVP 先支持标准 OpenAI Provider。
