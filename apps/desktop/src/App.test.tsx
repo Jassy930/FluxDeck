@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { mountApp } from './entry';
-import { App, createProviderFromUi, refreshAll } from './App';
+import { App, createGatewayFromUi, createProviderFromUi, refreshAll } from './App';
 import type { AdminApi } from './api/admin';
+import { GatewaySection } from './ui/gateways/GatewaySection';
 
 describe('desktop entry', () => {
   it('mounts app root into #root', () => {
@@ -123,5 +124,76 @@ describe('dashboard refresh', () => {
     await refreshAll(api);
 
     expect(calls.sort()).toEqual(['listGateways', 'listLogs', 'listProviders']);
+  });
+});
+
+describe('gateway section', () => {
+  it('shows gateway runtime status and last error in ui', () => {
+    const html = renderToStaticMarkup(
+      <GatewaySection
+        gateways={[
+          {
+            id: 'gateway_main',
+            name: 'Gateway Main',
+            listen_host: '127.0.0.1',
+            listen_port: 18080,
+            inbound_protocol: 'openai',
+            default_provider_id: 'provider_main',
+            enabled: true,
+            runtime_status: 'error',
+            last_error: 'upstream timeout',
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain('Runtime: error');
+    expect(html).toContain('Last error: upstream timeout');
+  });
+
+  it('creates gateway from ui and refreshes gateway list', async () => {
+    const calls: string[] = [];
+    const api: AdminApi = {
+      listProviders: async () => {
+        calls.push('listProviders');
+        return [];
+      },
+      listGateways: async () => {
+        calls.push('listGateways');
+        return [];
+      },
+      listLogs: async () => {
+        calls.push('listLogs');
+        return [];
+      },
+      createProvider: async () => {
+        throw new Error('not used');
+      },
+      createGateway: async (input) => {
+        calls.push(`createGateway:${input.id}`);
+        return {
+          id: input.id,
+          name: input.name,
+          listen_host: input.listen_host,
+          listen_port: input.listen_port,
+          inbound_protocol: input.inbound_protocol,
+          default_provider_id: input.default_provider_id,
+          enabled: input.enabled,
+        };
+      },
+    };
+
+    await createGatewayFromUi(api, {
+      id: 'gateway_ui_1',
+      name: 'UI Gateway',
+      listen_host: '127.0.0.1',
+      listen_port: 18080,
+      inbound_protocol: 'openai',
+      default_provider_id: 'provider_ui_1',
+      default_model: 'gpt-4o-mini',
+      enabled: true,
+    });
+
+    expect(calls).toEqual(['createGateway:gateway_ui_1', 'listGateways']);
   });
 });

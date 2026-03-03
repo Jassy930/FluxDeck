@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from './ui/layout/AppShell';
-import type { AdminApi, CreateProviderInput } from './api/admin';
+import type { AdminApi, CreateGatewayInput, CreateProviderInput } from './api/admin';
 import { createAdminApi } from './api/admin';
 import { createProviderAndRefresh, ProviderSection } from './ui/providers/ProviderSection';
-import { GatewaySection } from './ui/gateways/GatewaySection';
+import { createGatewayAndRefresh, GatewaySection } from './ui/gateways/GatewaySection';
 import { LogSection } from './ui/logs/LogSection';
 
 type DashboardState = {
@@ -20,6 +20,10 @@ const EMPTY_DASHBOARD: DashboardState = {
 
 export async function createProviderFromUi(api: AdminApi, input: CreateProviderInput) {
   return createProviderAndRefresh(api, input);
+}
+
+export async function createGatewayFromUi(api: AdminApi, input: CreateGatewayInput) {
+  return createGatewayAndRefresh(api, input);
 }
 
 export async function refreshAll(api: AdminApi): Promise<DashboardState> {
@@ -82,7 +86,20 @@ export function App() {
             })
         }
       />
-      <GatewaySection gateways={dashboard.gateways} />
+      <GatewaySection
+        gateways={dashboard.gateways}
+        error={loadError}
+        onCreate={(input) =>
+          createGatewayFromUi(api, input)
+            .then((gateways) => {
+              setDashboard((prev) => ({ ...prev, gateways }));
+              setLoadError(null);
+            })
+            .catch((error: unknown) => {
+              setLoadError(error instanceof Error ? error.message : 'failed to create gateway');
+            })
+        }
+      />
       <LogSection logs={dashboard.logs} />
     </AppShell>
   );
