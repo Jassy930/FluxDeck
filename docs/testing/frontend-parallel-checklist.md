@@ -19,6 +19,7 @@
 - [ ] 桌面端测试通过：`cd apps/desktop && bun run test`
 - [ ] 可通过 UI 动作创建 Provider/Gateway，并触发刷新
 - [ ] 能看到 Gateway 运行状态和错误信息
+- [ ] CLI 与桌面 Admin API 结果一致：`./scripts/e2e/smoke.sh` 输出 `cli-desktop consistency ok`
 
 ## 四、macOS 原生壳支线
 

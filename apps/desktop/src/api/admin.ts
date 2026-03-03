@@ -16,6 +16,8 @@ export type Gateway = {
   inbound_protocol: string;
   default_provider_id: string;
   enabled: boolean;
+  runtime_status?: 'running' | 'stopped' | 'error' | string;
+  last_error?: string | null;
 };
 
 export type RequestLog = {

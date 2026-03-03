@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { mountApp } from './entry';
-import { App, createProviderFromUi } from './App';
+import { App, createProviderFromUi, refreshAll } from './App';
 import type { AdminApi } from './api/admin';
 
 describe('desktop entry', () => {
@@ -93,5 +93,35 @@ describe('provider section', () => {
     });
 
     expect(calls).toEqual(['createProvider:provider_ui_1', 'listProviders']);
+  });
+});
+
+describe('dashboard refresh', () => {
+  it('loads providers gateways logs in one refresh action', async () => {
+    const calls: string[] = [];
+    const api: AdminApi = {
+      listProviders: async () => {
+        calls.push('listProviders');
+        return [];
+      },
+      listGateways: async () => {
+        calls.push('listGateways');
+        return [];
+      },
+      listLogs: async () => {
+        calls.push('listLogs');
+        return [];
+      },
+      createProvider: async () => {
+        throw new Error('not used');
+      },
+      createGateway: async () => {
+        throw new Error('not used');
+      },
+    };
+
+    await refreshAll(api);
+
+    expect(calls.sort()).toEqual(['listGateways', 'listLogs', 'listProviders']);
   });
 });
