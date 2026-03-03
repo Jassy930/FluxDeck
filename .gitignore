@@ -2,3 +2,5 @@
 worktrees/
 target/
 **/node_modules/
+*.xcuserstate
+**/xcuserdata/
