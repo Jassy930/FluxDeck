@@ -1,5 +1,6 @@
 import { StrictMode, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { App } from './App';
 
 type CreateRootFn = (container: Element | DocumentFragment) => {
   render(node: ReactNode): void;
@@ -15,7 +16,7 @@ export function mountApp(
   }
   createRootFn(root).render(
     <StrictMode>
-      <main>FluxDeck Desktop</main>
+      <App />
     </StrictMode>,
   );
 }

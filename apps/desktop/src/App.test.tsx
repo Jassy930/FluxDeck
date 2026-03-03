@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { mountApp } from './entry';
+import { App } from './App';
 
 describe('desktop entry', () => {
   it('mounts app root into #root', () => {
@@ -24,5 +26,17 @@ describe('desktop entry', () => {
     mountApp(fakeDocument, fakeCreateRoot);
 
     expect(calls).toEqual(['getElementById:root', 'createRoot:root', 'render']);
+  });
+});
+
+describe('desktop app shell', () => {
+  it('renders app shell with header sidebar and content sections', () => {
+    const html = renderToStaticMarkup(<App />);
+
+    expect(html).toContain('FluxDeck Admin');
+    expect(html).toContain('Sidebar');
+    expect(html).toContain('Providers');
+    expect(html).toContain('Gateways');
+    expect(html).toContain('Logs');
   });
 });
