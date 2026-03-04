@@ -15,6 +15,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::protocol::adapters::anthropic::{decode_anthropic_request, AnthropicSseEncoder};
 use crate::protocol::adapters::openai::{encode_openai_chat_request, OpenAiSseDecoder};
+use crate::protocol::token_count::count_tokens as count_tokens_with_fallback;
 use crate::service::request_log_service::{RequestLogEntry, RequestLogService};
 use crate::upstream::openai_client::OpenAiClient;
 
@@ -40,6 +41,7 @@ impl AnthropicRouteState {
 pub fn build_anthropic_router(state: AnthropicRouteState) -> Router {
     Router::new()
         .route("/v1/messages", post(forward_messages))
+        .route("/v1/messages/count_tokens", post(count_tokens_handler))
         .with_state(state)
 }
 
@@ -305,6 +307,217 @@ async fn forward_messages(
     }
 }
 
+async fn count_tokens_handler(
+    State(state): State<AnthropicRouteState>,
+    Json(payload): Json<Value>,
+) -> Response {
+    let request_id = next_request_id();
+    let model = payload
+        .get("model")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let started_at = Instant::now();
+    let log_service = RequestLogService::new(state.pool.clone());
+
+    let ir = match decode_anthropic_request(&payload) {
+        Ok(ir) => ir,
+        Err(err) => {
+            append_log(
+                &log_service,
+                RequestLogEntry {
+                    request_id,
+                    gateway_id: state.gateway_id.clone(),
+                    provider_id: "unknown".to_string(),
+                    model: model.clone(),
+                    status_code: i64::from(StatusCode::BAD_REQUEST.as_u16()),
+                    latency_ms: started_at.elapsed().as_millis() as i64,
+                    error: Some(err.to_string()),
+                },
+            )
+            .await;
+
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(anthropic_error_response(
+                    format!("invalid request: {err}"),
+                    "invalid_request_error",
+                )),
+            )
+                .into_response();
+        }
+    };
+
+    match fetch_provider_target(&state).await {
+        Ok(target) => {
+            let response = state
+                .client
+                .anthropic_messages_count_tokens(&target.base_url, &target.api_key, &payload)
+                .await;
+
+            match response {
+                Ok((status, body)) => {
+                    let status_code =
+                        StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+
+                    if status_code.is_success() {
+                        let Some(upstream_tokens) = extract_upstream_input_tokens(body.as_ref()) else {
+                            append_log(
+                                &log_service,
+                                RequestLogEntry {
+                                    request_id: request_id.clone(),
+                                    gateway_id: state.gateway_id.clone(),
+                                    provider_id: target.provider_id.clone(),
+                                    model: model.clone(),
+                                    status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
+                                    latency_ms: started_at.elapsed().as_millis() as i64,
+                                    error: Some(
+                                        "upstream count_tokens response missing input_tokens"
+                                            .to_string(),
+                                    ),
+                                },
+                            )
+                            .await;
+
+                            return (
+                                StatusCode::BAD_GATEWAY,
+                                Json(anthropic_error_response(
+                                    "upstream count_tokens response missing `input_tokens`"
+                                        .to_string(),
+                                    "api_error",
+                                )),
+                            )
+                                .into_response();
+                        };
+
+                        let counted = count_tokens_with_fallback(&ir, Some(upstream_tokens));
+                        append_log(
+                            &log_service,
+                            RequestLogEntry {
+                                request_id: request_id.clone(),
+                                gateway_id: state.gateway_id.clone(),
+                                provider_id: target.provider_id.clone(),
+                                model: model.clone(),
+                                status_code: i64::from(StatusCode::OK.as_u16()),
+                                latency_ms: started_at.elapsed().as_millis() as i64,
+                                error: None,
+                            },
+                        )
+                        .await;
+
+                        return (
+                            StatusCode::OK,
+                            Json(json!({
+                                "input_tokens": counted.input_tokens,
+                                "estimated": counted.estimated
+                            })),
+                        )
+                            .into_response();
+                    }
+
+                    if is_count_tokens_unsupported(status_code) {
+                        let counted = count_tokens_with_fallback(&ir, None);
+                        append_log(
+                            &log_service,
+                            RequestLogEntry {
+                                request_id: request_id.clone(),
+                                gateway_id: state.gateway_id.clone(),
+                                provider_id: target.provider_id.clone(),
+                                model: model.clone(),
+                                status_code: i64::from(StatusCode::OK.as_u16()),
+                                latency_ms: started_at.elapsed().as_millis() as i64,
+                                error: None,
+                            },
+                        )
+                        .await;
+
+                        return (
+                            StatusCode::OK,
+                            Json(json!({
+                                "input_tokens": counted.input_tokens,
+                                "estimated": counted.estimated
+                            })),
+                        )
+                            .into_response();
+                    }
+
+                    let message = body
+                        .as_ref()
+                        .and_then(extract_error_message_from_json)
+                        .unwrap_or_else(|| "upstream returned an error".to_string());
+
+                    append_log(
+                        &log_service,
+                        RequestLogEntry {
+                            request_id: request_id.clone(),
+                            gateway_id: state.gateway_id.clone(),
+                            provider_id: target.provider_id,
+                            model: model.clone(),
+                            status_code: i64::from(status_code.as_u16()),
+                            latency_ms: started_at.elapsed().as_millis() as i64,
+                            error: None,
+                        },
+                    )
+                    .await;
+
+                    (
+                        status_code,
+                        Json(anthropic_error_response(message, "api_error")),
+                    )
+                        .into_response()
+                }
+                Err(err) => {
+                    append_log(
+                        &log_service,
+                        RequestLogEntry {
+                            request_id,
+                            gateway_id: state.gateway_id.clone(),
+                            provider_id: target.provider_id,
+                            model: model.clone(),
+                            status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
+                            latency_ms: started_at.elapsed().as_millis() as i64,
+                            error: Some(err.to_string()),
+                        },
+                    )
+                    .await;
+
+                    (
+                        StatusCode::BAD_GATEWAY,
+                        Json(anthropic_error_response(
+                            format!("upstream forward failed: {err}"),
+                            "api_error",
+                        )),
+                    )
+                        .into_response()
+                }
+            }
+        }
+        Err(err) => {
+            append_log(
+                &log_service,
+                RequestLogEntry {
+                    request_id,
+                    gateway_id: state.gateway_id.clone(),
+                    provider_id: "unknown".to_string(),
+                    model: model.clone(),
+                    status_code: i64::from(StatusCode::BAD_REQUEST.as_u16()),
+                    latency_ms: started_at.elapsed().as_millis() as i64,
+                    error: Some(err.to_string()),
+                },
+            )
+            .await;
+
+            (
+                StatusCode::BAD_REQUEST,
+                Json(anthropic_error_response(
+                    format!("invalid gateway/provider state: {err}"),
+                    "invalid_request_error",
+                )),
+            )
+                .into_response()
+        }
+    }
+}
+
 fn map_upstream_to_anthropic_stream<S, E>(
     upstream: S,
 ) -> impl Stream<Item = Result<Bytes, anyhow::Error>> + Send + 'static
@@ -388,6 +601,35 @@ fn extract_json_error_message_from_text(body: &str) -> Option<String> {
                 .and_then(Value::as_str)
                 .map(ToOwned::to_owned)
         })
+}
+
+fn extract_upstream_input_tokens(body: Option<&Value>) -> Option<u64> {
+    body.and_then(|item| item.get("input_tokens"))
+        .and_then(Value::as_u64)
+}
+
+fn extract_error_message_from_json(body: &Value) -> Option<String> {
+    body.get("error")
+        .and_then(|item| item.get("message"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            body.get("message")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| {
+            body.get("error")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+}
+
+fn is_count_tokens_unsupported(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED | StatusCode::NOT_IMPLEMENTED
+    )
 }
 
 #[derive(Debug)]

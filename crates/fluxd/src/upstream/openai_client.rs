@@ -59,6 +59,33 @@ impl OpenAiClient {
         Ok((status, response))
     }
 
+    pub async fn anthropic_messages_count_tokens(
+        &self,
+        base_url: &str,
+        api_key: &str,
+        payload: &Value,
+    ) -> Result<(StatusCode, Option<Value>)> {
+        let url = format!("{}/messages/count_tokens", base_url.trim_end_matches('/'));
+
+        let response = self
+            .http
+            .post(url)
+            .bearer_auth(api_key)
+            .json(payload)
+            .send()
+            .await?;
+
+        let status = response.status();
+        let body = response.bytes().await?;
+        let parsed = if body.is_empty() {
+            None
+        } else {
+            serde_json::from_slice::<Value>(&body).ok()
+        };
+
+        Ok((status, parsed))
+    }
+
     pub async fn chat_completions_from_ir(
         &self,
         base_url: &str,
