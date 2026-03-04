@@ -1,4 +1,5 @@
 use anyhow::Result;
+use serde_json::{from_str, Value};
 use sqlx::{Row, SqlitePool};
 
 use crate::domain::gateway::{CreateGatewayInput, Gateway};
@@ -18,9 +19,10 @@ impl GatewayRepo {
             r#"
             INSERT INTO gateways (
                 id, name, listen_host, listen_port, inbound_protocol,
+                upstream_protocol, protocol_config_json,
                 default_provider_id, default_model, enabled
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             "#,
         )
         .bind(&input.id)
@@ -28,6 +30,8 @@ impl GatewayRepo {
         .bind(&input.listen_host)
         .bind(input.listen_port)
         .bind(&input.inbound_protocol)
+        .bind("provider_default")
+        .bind("{}")
         .bind(&input.default_provider_id)
         .bind(&input.default_model)
         .bind(if input.enabled { 1_i64 } else { 0_i64 })
@@ -40,6 +44,8 @@ impl GatewayRepo {
             listen_host: input.listen_host,
             listen_port: input.listen_port,
             inbound_protocol: input.inbound_protocol,
+            upstream_protocol: "provider_default".to_string(),
+            protocol_config_json: Value::Object(Default::default()),
             default_provider_id: input.default_provider_id,
             default_model: input.default_model,
             enabled: input.enabled,
@@ -50,6 +56,7 @@ impl GatewayRepo {
         let row_opt = sqlx::query(
             r#"
             SELECT id, name, listen_host, listen_port, inbound_protocol,
+                   upstream_protocol, protocol_config_json,
                    default_provider_id, default_model, enabled
             FROM gateways
             WHERE id = ?1
@@ -63,12 +70,17 @@ impl GatewayRepo {
             return Ok(None);
         };
 
+        let protocol_config_json: Value =
+            from_str(&row.get::<String, _>("protocol_config_json"))?;
+
         Ok(Some(Gateway {
             id: row.get("id"),
             name: row.get("name"),
             listen_host: row.get("listen_host"),
             listen_port: row.get("listen_port"),
             inbound_protocol: row.get("inbound_protocol"),
+            upstream_protocol: row.get("upstream_protocol"),
+            protocol_config_json,
             default_provider_id: row.get("default_provider_id"),
             default_model: row.get("default_model"),
             enabled: row.get::<i64, _>("enabled") != 0,
@@ -79,6 +91,7 @@ impl GatewayRepo {
         let rows = sqlx::query(
             r#"
             SELECT id, name, listen_host, listen_port, inbound_protocol,
+                   upstream_protocol, protocol_config_json,
                    default_provider_id, default_model, enabled
             FROM gateways
             ORDER BY created_at DESC
@@ -89,17 +102,23 @@ impl GatewayRepo {
 
         let gateways = rows
             .into_iter()
-            .map(|row| Gateway {
-                id: row.get("id"),
-                name: row.get("name"),
-                listen_host: row.get("listen_host"),
-                listen_port: row.get("listen_port"),
-                inbound_protocol: row.get("inbound_protocol"),
-                default_provider_id: row.get("default_provider_id"),
-                default_model: row.get("default_model"),
-                enabled: row.get::<i64, _>("enabled") != 0,
+            .map(|row| -> Result<Gateway> {
+                let protocol_config_json: Value =
+                    from_str(&row.get::<String, _>("protocol_config_json"))?;
+                Ok(Gateway {
+                    id: row.get("id"),
+                    name: row.get("name"),
+                    listen_host: row.get("listen_host"),
+                    listen_port: row.get("listen_port"),
+                    inbound_protocol: row.get("inbound_protocol"),
+                    upstream_protocol: row.get("upstream_protocol"),
+                    protocol_config_json,
+                    default_provider_id: row.get("default_provider_id"),
+                    default_model: row.get("default_model"),
+                    enabled: row.get::<i64, _>("enabled") != 0,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(gateways)
     }

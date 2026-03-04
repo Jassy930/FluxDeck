@@ -172,6 +172,8 @@ async fn admin_api_response_shape_is_stable() {
     assert!(gateway.get("listen_host").is_some());
     assert!(gateway.get("listen_port").is_some());
     assert!(gateway.get("inbound_protocol").is_some());
+    assert!(gateway.get("upstream_protocol").is_some());
+    assert!(gateway.get("protocol_config_json").is_some());
     assert!(gateway.get("default_provider_id").is_some());
     assert!(gateway.get("enabled").is_some());
 
