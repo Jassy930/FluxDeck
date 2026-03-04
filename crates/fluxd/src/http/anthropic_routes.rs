@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
 
 use crate::protocol::adapters::anthropic::{decode_anthropic_request, AnthropicSseEncoder};
+use crate::protocol::ir::IrRequest;
 use crate::protocol::adapters::openai::{encode_openai_chat_request, OpenAiSseDecoder};
 use crate::protocol::token_count::count_tokens as count_tokens_with_fallback;
 use crate::service::request_log_service::{RequestLogEntry, RequestLogService};
@@ -91,6 +92,33 @@ async fn forward_messages(
 
     match fetch_provider_target(&state).await {
         Ok(target) => {
+            if target.compatibility_mode == CompatibilityMode::Strict && !ir.extensions.is_empty() {
+                let message = "strict compatibility mode does not allow extension fields".to_string();
+                append_log_with_dimensions(
+                    &log_service,
+                    RequestLogEntry {
+                        request_id,
+                        gateway_id: state.gateway_id.clone(),
+                        provider_id: target.provider_id,
+                        model,
+                        status_code: i64::from(StatusCode::UNPROCESSABLE_ENTITY.as_u16()),
+                        latency_ms: started_at.elapsed().as_millis() as i64,
+                        error: Some(message.clone()),
+                    },
+                    &json!({
+                        "compatibility_mode": "strict",
+                        "event": "reject_extension_fields"
+                    }),
+                )
+                .await;
+
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(anthropic_error_response(message, "capability_error")),
+                )
+                    .into_response();
+            }
+
             let mut upstream_payload = match encode_openai_chat_request(&ir) {
                 Ok(payload) => payload,
                 Err(err) => {
@@ -118,6 +146,10 @@ async fn forward_messages(
                         .into_response();
                 }
             };
+
+            if target.compatibility_mode == CompatibilityMode::Permissive {
+                apply_extension_passthrough(&ir, &mut upstream_payload);
+            }
 
             if stream_requested {
                 if let Some(object) = upstream_payload.as_object_mut() {
@@ -415,8 +447,38 @@ async fn count_tokens_handler(
                     }
 
                     if is_count_tokens_unsupported(status_code) {
+                        if target.compatibility_mode == CompatibilityMode::Strict {
+                            let message =
+                                "upstream does not support count_tokens in strict mode".to_string();
+                            append_log_with_dimensions(
+                                &log_service,
+                                RequestLogEntry {
+                                    request_id: request_id.clone(),
+                                    gateway_id: state.gateway_id.clone(),
+                                    provider_id: target.provider_id.clone(),
+                                    model: model.clone(),
+                                    status_code: i64::from(
+                                        StatusCode::UNPROCESSABLE_ENTITY.as_u16(),
+                                    ),
+                                    latency_ms: started_at.elapsed().as_millis() as i64,
+                                    error: Some(message.clone()),
+                                },
+                                &json!({
+                                    "compatibility_mode": "strict",
+                                    "event": "count_tokens_unsupported"
+                                }),
+                            )
+                            .await;
+
+                            return (
+                                StatusCode::UNPROCESSABLE_ENTITY,
+                                Json(anthropic_error_response(message, "capability_error")),
+                            )
+                                .into_response();
+                        }
+
                         let counted = count_tokens_with_fallback(&ir, None);
-                        append_log(
+                        append_log_with_dimensions(
                             &log_service,
                             RequestLogEntry {
                                 request_id: request_id.clone(),
@@ -427,6 +489,13 @@ async fn count_tokens_handler(
                                 latency_ms: started_at.elapsed().as_millis() as i64,
                                 error: None,
                             },
+                            &json!({
+                                "compatibility_mode": match target.compatibility_mode {
+                                    CompatibilityMode::Permissive => "permissive",
+                                    _ => "compatible"
+                                },
+                                "event": "degraded_to_estimate"
+                            }),
                         )
                         .await;
 
@@ -434,7 +503,8 @@ async fn count_tokens_handler(
                             StatusCode::OK,
                             Json(json!({
                                 "input_tokens": counted.input_tokens,
-                                "estimated": counted.estimated
+                                "estimated": counted.estimated,
+                                "notice": "degraded_to_estimate"
                             })),
                         )
                             .into_response();
@@ -637,6 +707,28 @@ struct ProviderRoutingTarget {
     provider_id: String,
     base_url: String,
     api_key: String,
+    compatibility_mode: CompatibilityMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompatibilityMode {
+    Strict,
+    Compatible,
+    Permissive,
+}
+
+impl CompatibilityMode {
+    fn from_protocol_config(config: &Value) -> Self {
+        let mode = config
+            .get("compatibility_mode")
+            .and_then(Value::as_str)
+            .unwrap_or("compatible");
+        match mode {
+            "strict" => CompatibilityMode::Strict,
+            "permissive" => CompatibilityMode::Permissive,
+            _ => CompatibilityMode::Compatible,
+        }
+    }
 }
 
 async fn fetch_provider_target(
@@ -644,7 +736,7 @@ async fn fetch_provider_target(
 ) -> anyhow::Result<ProviderRoutingTarget> {
     let row = sqlx::query(
         r#"
-        SELECT p.id AS provider_id, p.base_url, p.api_key
+        SELECT p.id AS provider_id, p.base_url, p.api_key, g.protocol_config_json
         FROM gateways g
         JOIN providers p ON p.id = g.default_provider_id
         WHERE g.id = ?1
@@ -655,12 +747,30 @@ async fn fetch_provider_target(
     .await?;
 
     let row = row.ok_or_else(|| anyhow::anyhow!("gateway not found: {}", state.gateway_id))?;
+    let protocol_config_json: Value = serde_json::from_str(
+        &row.get::<String, _>("protocol_config_json"),
+    )
+    .unwrap_or_else(|_| json!({}));
 
     Ok(ProviderRoutingTarget {
         provider_id: row.get("provider_id"),
         base_url: row.get("base_url"),
         api_key: row.get("api_key"),
+        compatibility_mode: CompatibilityMode::from_protocol_config(&protocol_config_json),
     })
+}
+
+fn apply_extension_passthrough(ir: &IrRequest, upstream_payload: &mut Value) {
+    let Some(payload) = upstream_payload.as_object_mut() else {
+        return;
+    };
+
+    for (key, value) in &ir.extensions {
+        if payload.contains_key(key) {
+            continue;
+        }
+        payload.insert(key.clone(), value.clone());
+    }
 }
 
 fn map_openai_to_anthropic_message(
@@ -846,6 +956,16 @@ fn anthropic_error_response(message: String, error_type: &str) -> Value {
 
 async fn append_log(service: &RequestLogService, entry: RequestLogEntry) {
     let _ = service.append_and_trim(entry, REQUEST_LOG_KEEP).await;
+}
+
+async fn append_log_with_dimensions(
+    service: &RequestLogService,
+    entry: RequestLogEntry,
+    dimensions: &Value,
+) {
+    let _ = service
+        .append_and_trim_with_dimensions(entry, REQUEST_LOG_KEEP, dimensions)
+        .await;
 }
 
 fn next_request_id() -> String {

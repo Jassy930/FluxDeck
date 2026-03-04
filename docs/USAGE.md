@@ -89,6 +89,8 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
   --listen-host 127.0.0.1 \
   --listen-port 18080 \
   --inbound-protocol openai \
+  --upstream-protocol provider_default \
+  --protocol-config-json '{"compatibility_mode":"compatible"}' \
   --default-provider-id provider_main \
   --default-model gpt-4o-mini
 ```
@@ -122,6 +124,29 @@ curl -X POST http://127.0.0.1:18080/v1/chat/completions \
 ```
 
 如果配置正确，会返回上游模型响应（JSON）。
+
+### 5.1 Anthropics 入站与兼容模式示例
+
+创建 Anthropics 入站网关（转发到 OpenAI 兼容上游）：
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
+  --id gateway_anthropic \
+  --name "Gateway Anthropic" \
+  --listen-host 127.0.0.1 \
+  --listen-port 18081 \
+  --inbound-protocol anthropic \
+  --upstream-protocol openai \
+  --protocol-config-json '{"compatibility_mode":"compatible"}' \
+  --default-provider-id provider_main \
+  --default-model claude-3-7-sonnet
+```
+
+兼容模式说明：
+
+- `strict`：遇到不兼容能力直接返回 `capability_error`
+- `compatible`：优先保证可用（例如 `count_tokens` 降级为本地估算）
+- `permissive`：允许扩展字段透传到上游
 
 ## 6. 查看请求日志
 
@@ -162,6 +187,18 @@ cd apps/desktop && bun run test
 ```
 
 `smoke.sh` 输出 `smoke ok` 表示核心链路正常。
+
+Anthropic 兼容模式专项验证：
+
+```bash
+uv run python scripts/e2e/anthropic_compat.py \
+  --admin-url http://127.0.0.1:7777 \
+  --upstream-base-url http://127.0.0.1:18000/v1
+```
+
+更多说明见：
+
+- [docs/testing/anthropic-compat-e2e.md](./testing/anthropic-compat-e2e.md)
 
 并行交付验收清单见：
 
