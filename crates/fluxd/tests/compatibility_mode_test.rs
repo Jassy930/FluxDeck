@@ -15,6 +15,7 @@ use tokio::net::TcpListener;
 #[tokio::test]
 async fn compatibility_mode_controls_degrade_or_reject() {
     strict_mode_rejects_extension_fields().await;
+    strict_mode_allows_known_anthropic_fields().await;
     compatible_mode_downgrades_count_tokens_with_notice().await;
     permissive_mode_passes_extension_to_upstream().await;
 }
@@ -42,6 +43,33 @@ async fn strict_mode_rejects_extension_fields() {
     assert_eq!(resp.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
     let body: Value = resp.json().await.expect("decode strict response");
     assert_eq!(body["error"]["type"], "capability_error");
+}
+
+async fn strict_mode_allows_known_anthropic_fields() {
+    let upstream = spawn_upstream_router(
+        Router::new().route("/v1/chat/completions", post(upstream_chat_echo_basic)),
+    )
+    .await;
+    let gateway = setup_gateway(upstream.addr, "strict", "gw_strict_known_fields").await;
+
+    let payload = json!({
+        "model": "claude-3-7-sonnet",
+        "max_tokens": 512,
+        "temperature": 0.2,
+        "top_p": 0.95,
+        "stream": false,
+        "metadata": {"trace_id": "known-1"},
+        "messages": [{"role": "user", "content": "hello"}]
+    });
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages", gateway.addr))
+        .json(&payload)
+        .send()
+        .await
+        .expect("call strict gateway with known fields");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
 }
 
 async fn compatible_mode_downgrades_count_tokens_with_notice() {

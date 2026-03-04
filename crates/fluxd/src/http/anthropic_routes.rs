@@ -92,8 +92,14 @@ async fn forward_messages(
 
     match fetch_provider_target(&state).await {
         Ok(target) => {
-            if target.compatibility_mode == CompatibilityMode::Strict && !ir.extensions.is_empty() {
-                let message = "strict compatibility mode does not allow extension fields".to_string();
+            let strict_unsupported_extensions = strict_unsupported_extension_keys(&ir);
+            if target.compatibility_mode == CompatibilityMode::Strict
+                && !strict_unsupported_extensions.is_empty()
+            {
+                let message = format!(
+                    "strict compatibility mode does not allow extension fields: {}",
+                    strict_unsupported_extensions.join(", ")
+                );
                 append_log_with_dimensions(
                     &log_service,
                     RequestLogEntry {
@@ -107,7 +113,8 @@ async fn forward_messages(
                     },
                     &json!({
                         "compatibility_mode": "strict",
-                        "event": "reject_extension_fields"
+                        "event": "reject_extension_fields",
+                        "unsupported_extension_fields": strict_unsupported_extensions
                     }),
                 )
                 .await;
@@ -729,6 +736,32 @@ impl CompatibilityMode {
             _ => CompatibilityMode::Compatible,
         }
     }
+}
+
+fn strict_unsupported_extension_keys(ir: &IrRequest) -> Vec<String> {
+    ir.extensions
+        .keys()
+        .filter(|key| !is_strict_known_extension_field(key))
+        .cloned()
+        .collect()
+}
+
+fn is_strict_known_extension_field(key: &str) -> bool {
+    matches!(
+        key,
+        "max_tokens"
+            | "max_output_tokens"
+            | "temperature"
+            | "top_p"
+            | "top_k"
+            | "metadata"
+            | "stream"
+            | "stop_sequences"
+            | "tool_choice"
+            | "thinking"
+            | "service_tier"
+            | "betas"
+    )
 }
 
 async fn fetch_provider_target(

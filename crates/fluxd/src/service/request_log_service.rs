@@ -29,7 +29,10 @@ impl RequestLogService {
         keep: i64,
         dimensions: &Value,
     ) -> Result<()> {
-        if dimensions.as_object().is_some_and(|item| !item.is_empty()) {
+        let should_attach_dimensions =
+            dimensions.as_object().is_some_and(|item| !item.is_empty())
+                && (entry.status_code >= 400 || entry.error.is_some());
+        if should_attach_dimensions {
             let dimensions_text = format!("dimensions={dimensions}");
             entry.error = Some(match entry.error.take() {
                 Some(error) => format!("{error} | {dimensions_text}"),
