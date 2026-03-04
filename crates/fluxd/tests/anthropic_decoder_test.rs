@@ -60,3 +60,95 @@ fn decode_anthropic_request_requires_model() {
         })
     );
 }
+
+#[test]
+fn decode_anthropic_request_rejects_non_array_messages() {
+    let payload = json!({
+        "model": "claude-3-7-sonnet",
+        "messages": {
+            "role": "user",
+            "content": "hello"
+        }
+    });
+
+    let result = decode_anthropic_request(&payload);
+    assert_eq!(
+        result,
+        Err(FluxError::DecodeError {
+            protocol: "anthropic".to_string(),
+            kind: DecodeErrorKind::InvalidFieldType {
+                field: "messages".to_string(),
+                expected: "array".to_string(),
+                actual: "object".to_string(),
+            },
+        })
+    );
+}
+
+#[test]
+fn decode_anthropic_request_rejects_non_array_tools() {
+    let payload = json!({
+        "model": "claude-3-7-sonnet",
+        "messages": [],
+        "tools": {
+            "name": "weather"
+        }
+    });
+
+    let result = decode_anthropic_request(&payload);
+    assert_eq!(
+        result,
+        Err(FluxError::DecodeError {
+            protocol: "anthropic".to_string(),
+            kind: DecodeErrorKind::InvalidFieldType {
+                field: "tools".to_string(),
+                expected: "array".to_string(),
+                actual: "object".to_string(),
+            },
+        })
+    );
+}
+
+#[test]
+fn decode_anthropic_request_rejects_non_object_message_item() {
+    let payload = json!({
+        "model": "claude-3-7-sonnet",
+        "messages": [
+            "hello"
+        ]
+    });
+
+    let result = decode_anthropic_request(&payload);
+    assert_eq!(
+        result,
+        Err(FluxError::DecodeError {
+            protocol: "anthropic".to_string(),
+            kind: DecodeErrorKind::InvalidFieldType {
+                field: "messages[0]".to_string(),
+                expected: "object".to_string(),
+                actual: "string".to_string(),
+            },
+        })
+    );
+}
+
+#[test]
+fn decode_anthropic_request_rejects_non_string_model() {
+    let payload = json!({
+        "model": 7,
+        "messages": []
+    });
+
+    let result = decode_anthropic_request(&payload);
+    assert_eq!(
+        result,
+        Err(FluxError::DecodeError {
+            protocol: "anthropic".to_string(),
+            kind: DecodeErrorKind::InvalidFieldType {
+                field: "model".to_string(),
+                expected: "string".to_string(),
+                actual: "number".to_string(),
+            },
+        })
+    );
+}

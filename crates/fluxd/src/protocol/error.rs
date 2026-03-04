@@ -5,6 +5,11 @@ use std::fmt::{Display, Formatter};
 pub enum DecodeErrorKind {
     InvalidPayload,
     MissingRequiredField { field: String },
+    InvalidFieldType {
+        field: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +38,16 @@ impl Display for FluxError {
                     write!(
                         f,
                         "decode error for {protocol}: missing required field `{field}`"
+                    )
+                }
+                DecodeErrorKind::InvalidFieldType {
+                    field,
+                    expected,
+                    actual,
+                } => {
+                    write!(
+                        f,
+                        "decode error for {protocol}: field `{field}` expected `{expected}` but got `{actual}`"
                     )
                 }
             },
