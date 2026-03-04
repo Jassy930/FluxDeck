@@ -2,6 +2,9 @@ use anyhow::Result;
 use reqwest::StatusCode;
 use serde_json::Value;
 
+use crate::protocol::adapters::openai::encode_openai_chat_request;
+use crate::protocol::ir::IrRequest;
+
 #[derive(Clone)]
 pub struct OpenAiClient {
     http: reqwest::Client,
@@ -34,5 +37,15 @@ impl OpenAiClient {
         let body: Value = response.json().await?;
 
         Ok((status, body))
+    }
+
+    pub async fn chat_completions_from_ir(
+        &self,
+        base_url: &str,
+        api_key: &str,
+        ir: &IrRequest,
+    ) -> Result<(StatusCode, Value)> {
+        let payload = encode_openai_chat_request(ir)?;
+        self.chat_completions(base_url, api_key, &payload).await
     }
 }
