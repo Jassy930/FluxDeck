@@ -2,15 +2,16 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::{
     extract::{Json, State},
-    http::StatusCode,
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
     routing::post,
     Router,
 };
 use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
 
-use crate::protocol::adapters::anthropic::decode_anthropic_request;
-use crate::protocol::adapters::openai::encode_openai_chat_request;
+use crate::protocol::adapters::anthropic::{decode_anthropic_request, encode_anthropic_sse};
+use crate::protocol::adapters::openai::{decode_openai_sse_events, encode_openai_chat_request};
 use crate::service::request_log_service::{RequestLogEntry, RequestLogService};
 use crate::upstream::openai_client::OpenAiClient;
 
@@ -42,12 +43,16 @@ pub fn build_anthropic_router(state: AnthropicRouteState) -> Router {
 async fn forward_messages(
     State(state): State<AnthropicRouteState>,
     Json(payload): Json<Value>,
-) -> (StatusCode, Json<Value>) {
+) -> Response {
     let request_id = next_request_id();
     let model = payload
         .get("model")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
+    let stream_requested = payload
+        .get("stream")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let started_at = Instant::now();
     let log_service = RequestLogService::new(state.pool.clone());
 
@@ -74,13 +79,14 @@ async fn forward_messages(
                     format!("invalid request: {err}"),
                     "invalid_request_error",
                 )),
-            );
+            )
+                .into_response();
         }
     };
 
     match fetch_provider_target(&state).await {
         Ok(target) => {
-            let payload = match encode_openai_chat_request(&ir) {
+            let mut upstream_payload = match encode_openai_chat_request(&ir) {
                 Ok(payload) => payload,
                 Err(err) => {
                     append_log(
@@ -103,69 +109,192 @@ async fn forward_messages(
                             format!("invalid request: {err}"),
                             "invalid_request_error",
                         )),
-                    );
+                    )
+                        .into_response();
                 }
             };
 
-            let response = state
-                .client
-                .chat_completions(&target.base_url, &target.api_key, &payload)
-                .await;
-
-            match response {
-                Ok((status, value)) => {
-                    let status_code =
-                        StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-
-                    append_log(
-                        &log_service,
-                        RequestLogEntry {
-                            request_id: request_id.clone(),
-                            gateway_id: state.gateway_id.clone(),
-                            provider_id: target.provider_id,
-                            model,
-                            status_code: i64::from(status_code.as_u16()),
-                            latency_ms: started_at.elapsed().as_millis() as i64,
-                            error: None,
-                        },
-                    )
-                    .await;
-
-                    if status_code.is_success() {
-                        return (status_code, Json(map_openai_to_anthropic_message(&value, &ir)));
-                    }
-
-                    let message = value
-                        .get("error")
-                        .and_then(|item| item.get("message"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("upstream returned an error")
-                        .to_string();
-
-                    (status_code, Json(anthropic_error_response(message, "api_error")))
+            if stream_requested {
+                if let Some(object) = upstream_payload.as_object_mut() {
+                    object.insert("stream".to_string(), Value::Bool(true));
                 }
-                Err(err) => {
-                    append_log(
-                        &log_service,
-                        RequestLogEntry {
-                            request_id,
-                            gateway_id: state.gateway_id.clone(),
-                            provider_id: target.provider_id,
-                            model,
-                            status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
-                            latency_ms: started_at.elapsed().as_millis() as i64,
-                            error: Some(err.to_string()),
-                        },
-                    )
+
+                let response = state
+                    .client
+                    .chat_completions_stream(&target.base_url, &target.api_key, &upstream_payload)
                     .await;
 
-                    (
-                        StatusCode::BAD_GATEWAY,
-                        Json(anthropic_error_response(
-                            format!("upstream forward failed: {err}"),
-                            "api_error",
-                        )),
-                    )
+                match response {
+                    Ok((status, raw_sse)) => {
+                        let status_code = StatusCode::from_u16(status.as_u16())
+                            .unwrap_or(StatusCode::BAD_GATEWAY);
+
+                        if status_code.is_success() {
+                            let events = match decode_openai_sse_events(&raw_sse) {
+                                Ok(events) => events,
+                                Err(err) => {
+                                    append_log(
+                                        &log_service,
+                                        RequestLogEntry {
+                                            request_id,
+                                            gateway_id: state.gateway_id.clone(),
+                                            provider_id: target.provider_id,
+                                            model,
+                                            status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
+                                            latency_ms: started_at.elapsed().as_millis() as i64,
+                                            error: Some(err.to_string()),
+                                        },
+                                    )
+                                    .await;
+
+                                    return (
+                                        StatusCode::BAD_GATEWAY,
+                                        Json(anthropic_error_response(
+                                            format!("upstream stream decode failed: {err}"),
+                                            "api_error",
+                                        )),
+                                    )
+                                        .into_response();
+                                }
+                            };
+
+                            append_log(
+                                &log_service,
+                                RequestLogEntry {
+                                    request_id: request_id.clone(),
+                                    gateway_id: state.gateway_id.clone(),
+                                    provider_id: target.provider_id,
+                                    model,
+                                    status_code: i64::from(status_code.as_u16()),
+                                    latency_ms: started_at.elapsed().as_millis() as i64,
+                                    error: None,
+                                },
+                            )
+                            .await;
+
+                            let anthropic_sse = encode_anthropic_sse(&events);
+                            return (
+                                status_code,
+                                [(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")],
+                                anthropic_sse,
+                            )
+                                .into_response();
+                        }
+
+                        append_log(
+                            &log_service,
+                            RequestLogEntry {
+                                request_id: request_id.clone(),
+                                gateway_id: state.gateway_id.clone(),
+                                provider_id: target.provider_id,
+                                model,
+                                status_code: i64::from(status_code.as_u16()),
+                                latency_ms: started_at.elapsed().as_millis() as i64,
+                                error: None,
+                            },
+                        )
+                        .await;
+
+                        let message = extract_upstream_error_message_from_text(&raw_sse);
+
+                        (
+                            status_code,
+                            Json(anthropic_error_response(message, "api_error")),
+                        )
+                            .into_response()
+                    }
+                    Err(err) => {
+                        append_log(
+                            &log_service,
+                            RequestLogEntry {
+                                request_id,
+                                gateway_id: state.gateway_id.clone(),
+                                provider_id: target.provider_id,
+                                model,
+                                status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
+                                latency_ms: started_at.elapsed().as_millis() as i64,
+                                error: Some(err.to_string()),
+                            },
+                        )
+                        .await;
+
+                        (
+                            StatusCode::BAD_GATEWAY,
+                            Json(anthropic_error_response(
+                                format!("upstream forward failed: {err}"),
+                                "api_error",
+                            )),
+                        )
+                            .into_response()
+                    }
+                }
+            } else {
+                let response = state
+                    .client
+                    .chat_completions(&target.base_url, &target.api_key, &upstream_payload)
+                    .await;
+
+                match response {
+                    Ok((status, value)) => {
+                        let status_code = StatusCode::from_u16(status.as_u16())
+                            .unwrap_or(StatusCode::BAD_GATEWAY);
+
+                        append_log(
+                            &log_service,
+                            RequestLogEntry {
+                                request_id: request_id.clone(),
+                                gateway_id: state.gateway_id.clone(),
+                                provider_id: target.provider_id,
+                                model,
+                                status_code: i64::from(status_code.as_u16()),
+                                latency_ms: started_at.elapsed().as_millis() as i64,
+                                error: None,
+                            },
+                        )
+                        .await;
+
+                        if status_code.is_success() {
+                            return (status_code, Json(map_openai_to_anthropic_message(&value, &ir)))
+                                .into_response();
+                        }
+
+                        let message = value
+                            .get("error")
+                            .and_then(|item| item.get("message"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("upstream returned an error")
+                            .to_string();
+
+                        (
+                            status_code,
+                            Json(anthropic_error_response(message, "api_error")),
+                        )
+                            .into_response()
+                    }
+                    Err(err) => {
+                        append_log(
+                            &log_service,
+                            RequestLogEntry {
+                                request_id,
+                                gateway_id: state.gateway_id.clone(),
+                                provider_id: target.provider_id,
+                                model,
+                                status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
+                                latency_ms: started_at.elapsed().as_millis() as i64,
+                                error: Some(err.to_string()),
+                            },
+                        )
+                        .await;
+
+                        (
+                            StatusCode::BAD_GATEWAY,
+                            Json(anthropic_error_response(
+                                format!("upstream forward failed: {err}"),
+                                "api_error",
+                            )),
+                        )
+                            .into_response()
+                    }
                 }
             }
         }
@@ -191,7 +320,27 @@ async fn forward_messages(
                     "invalid_request_error",
                 )),
             )
+                .into_response()
         }
+    }
+}
+
+fn extract_upstream_error_message_from_text(body: &str) -> String {
+    if let Ok(value) = serde_json::from_str::<Value>(body) {
+        if let Some(message) = value
+            .get("error")
+            .and_then(|item| item.get("message"))
+            .and_then(Value::as_str)
+        {
+            return message.to_string();
+        }
+    }
+
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        "upstream returned an error".to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 

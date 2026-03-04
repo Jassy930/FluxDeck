@@ -2,6 +2,7 @@ pub mod adapters;
 pub mod error;
 pub mod ir;
 pub mod registry;
+pub mod stream;
 
 pub use error::FluxError;
 pub use ir::{ProtocolIrMessage, ProtocolIrRequest, ProtocolIrResponse};

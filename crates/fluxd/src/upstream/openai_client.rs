@@ -39,6 +39,28 @@ impl OpenAiClient {
         Ok((status, body))
     }
 
+    pub async fn chat_completions_stream(
+        &self,
+        base_url: &str,
+        api_key: &str,
+        payload: &Value,
+    ) -> Result<(StatusCode, String)> {
+        let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+
+        let response = self
+            .http
+            .post(url)
+            .bearer_auth(api_key)
+            .json(payload)
+            .send()
+            .await?;
+
+        let status = response.status();
+        let body = response.text().await?;
+
+        Ok((status, body))
+    }
+
     pub async fn chat_completions_from_ir(
         &self,
         base_url: &str,
