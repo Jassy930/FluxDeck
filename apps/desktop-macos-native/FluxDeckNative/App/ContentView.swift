@@ -1,13 +1,11 @@
 import SwiftUI
 
-enum SidebarSection: String, CaseIterable, Identifiable {
+enum SidebarSection: String, CaseIterable, Hashable {
     case overview = "Overview"
     case providers = "Providers"
     case gateways = "Gateways"
     case logs = "Logs"
     case settings = "Settings"
-
-    var id: String { rawValue }
 
     var icon: String {
         switch self {
@@ -44,7 +42,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(SidebarSection.allCases, selection: $selectedSection) { section in
+            List(SidebarSection.allCases, id: \.self, selection: $selectedSection) { section in
                 Label(section.rawValue, systemImage: section.icon)
                     .tag(section as SidebarSection?)
             }
@@ -54,6 +52,7 @@ struct ContentView: View {
                 headerBar
                 Divider()
                 detailView(for: selectedSection ?? .overview)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .frame(minWidth: 920, minHeight: 560)
         }
@@ -431,21 +430,7 @@ private struct LogsPanelView: View {
                     .foregroundStyle(.red)
             }
 
-            if isLoading && logs.isEmpty {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Loading logs...")
-                        .foregroundStyle(.secondary)
-                }
-                .font(.caption)
-            } else if logs.isEmpty {
-                EmptyStateView(
-                    title: "No logs",
-                    systemImage: "list.bullet.rectangle.portrait",
-                    message: "No request logs match current filters."
-                )
-            } else {
+            ZStack {
                 List(logs) { log in
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text(log.requestID)
@@ -480,10 +465,33 @@ private struct LogsPanelView: View {
                     .padding(.vertical, 2)
                 }
                 .listStyle(.inset)
+
+                if isLoading && logs.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Loading logs...")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
+                    .padding(12)
+                    .background(.thinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                } else if logs.isEmpty {
+                    EmptyStateView(
+                        title: "No logs",
+                        systemImage: "list.bullet.rectangle.portrait",
+                        message: "No request logs match current filters."
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .transaction { transaction in
+                transaction.animation = nil
             }
         }
         .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
     private func color(for statusCode: Int) -> Color {
