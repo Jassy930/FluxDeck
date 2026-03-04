@@ -56,3 +56,16 @@ cargo test -p fluxd -q
 
 结果：均通过。
 
+## 本轮补充（tool_use.input 对象化）
+
+- 问题：当 OpenAI `function.arguments` 为合法 JSON 但非对象（例如数组）时，之前会直接透传，导致 Anthropic `tool_use.input` 不是 object。
+- 修复：
+  - 若 arguments 是 object：直接使用；
+  - 若是合法 JSON 但非 object：包装为 `{ "_value": <parsed> }`；
+  - 若解析失败：包装为 `{ "_raw": "..." }`。
+- 结果：`tool_use.input` 始终为 JSON object。
+
+### 本轮 TDD
+
+- RED：新增 `wraps_non_object_tool_call_arguments_into_object_input`，先失败（`input.is_object()` 断言失败）。
+- GREEN：修复后定向测试与 `cargo test -p fluxd -q` 全部通过。

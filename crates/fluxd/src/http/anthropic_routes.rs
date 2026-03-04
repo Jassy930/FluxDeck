@@ -369,10 +369,14 @@ fn map_openai_tool_call_item(item: &Value) -> Option<Value> {
 
 fn parse_openai_tool_arguments(arguments: &Value) -> Value {
     match arguments {
-        Value::String(raw) => serde_json::from_str(raw).unwrap_or_else(|_| json!({ "raw": raw })),
+        Value::String(raw) => match serde_json::from_str::<Value>(raw) {
+            Ok(object @ Value::Object(_)) => object,
+            Ok(other) => json!({ "_value": other }),
+            Err(_) => json!({ "_raw": raw }),
+        },
         Value::Object(_) => arguments.clone(),
         Value::Null => json!({}),
-        other => json!({ "raw": other }),
+        other => json!({ "_value": other }),
     }
 }
 

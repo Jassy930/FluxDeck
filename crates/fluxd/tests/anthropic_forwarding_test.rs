@@ -69,6 +69,43 @@ async fn maps_openai_tool_calls_to_anthropic_tool_use_blocks() {
 }
 
 #[tokio::test]
+async fn wraps_non_object_tool_call_arguments_into_object_input() {
+    let upstream = spawn_upstream_tool_call_array_args_mock().await;
+    let gateway = setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages", gateway.addr))
+        .json(&json!({
+            "model": "claude-3-7-sonnet",
+            "max_tokens": 128,
+            "messages": [{"role": "user", "content": "请查询城市列表"}],
+            "tools": [{
+                "name": "lookup_weather",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "cities": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                        }
+                    }
+                }
+            }]
+        }))
+        .send()
+        .await
+        .expect("call gateway");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let body: Value = resp.json().await.expect("decode gateway response");
+    assert_eq!(body["content"][0]["type"], "tool_use");
+    assert!(body["content"][0]["input"].is_object());
+    assert_eq!(body["content"][0]["input"]["_value"][0], "Hangzhou");
+    assert_eq!(body["content"][0]["input"]["_value"][1], "Shanghai");
+}
+
+#[tokio::test]
 async fn returns_bad_request_for_local_openai_encoding_failure() {
     let gateway = setup_gateway_with_provider_base_url("http://127.0.0.1:9/v1".to_string()).await;
 
@@ -110,6 +147,14 @@ async fn spawn_upstream_mock() -> SpawnedServer {
 
 async fn spawn_upstream_tool_call_mock() -> SpawnedServer {
     let app = Router::new().route("/v1/chat/completions", post(upstream_chat_completions_with_tool_calls));
+    spawn_gateway(app).await
+}
+
+async fn spawn_upstream_tool_call_array_args_mock() -> SpawnedServer {
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(upstream_chat_completions_with_tool_calls_array_arguments),
+    );
     spawn_gateway(app).await
 }
 
@@ -206,6 +251,45 @@ async fn upstream_chat_completions_with_tool_calls(Json(payload): Json<Value>) -
                             "function": {
                                 "name": "lookup_weather",
                                 "arguments": "{\"city\":\"Hangzhou\"}"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 25,
+            "completion_tokens": 8,
+            "total_tokens": 33
+        }
+    }))
+}
+
+async fn upstream_chat_completions_with_tool_calls_array_arguments(
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
+    assert_eq!(payload["messages"][0]["role"], "user");
+    assert_eq!(payload["messages"][0]["content"], "请查询城市列表");
+    assert_eq!(payload["tools"][0]["function"]["name"], "lookup_weather");
+
+    Json(json!({
+        "id": "chatcmpl_mock_tool_002",
+        "object": "chat.completion",
+        "model": payload["model"],
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": Value::Null,
+                    "tool_calls": [
+                        {
+                            "id": "call_weather_002",
+                            "type": "function",
+                            "function": {
+                                "name": "lookup_weather",
+                                "arguments": "[\"Hangzhou\",\"Shanghai\"]"
                             }
                         }
                     ]
