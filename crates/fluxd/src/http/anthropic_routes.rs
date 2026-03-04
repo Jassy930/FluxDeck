@@ -1,17 +1,20 @@
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::{
+    body::Body,
     extract::{Json, State},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::post,
     Router,
 };
+use bytes::Bytes;
+use futures_util::{Stream, StreamExt};
 use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
 
-use crate::protocol::adapters::anthropic::{decode_anthropic_request, encode_anthropic_sse};
-use crate::protocol::adapters::openai::{decode_openai_sse_events, encode_openai_chat_request};
+use crate::protocol::adapters::anthropic::{decode_anthropic_request, AnthropicSseEncoder};
+use crate::protocol::adapters::openai::{encode_openai_chat_request, OpenAiSseDecoder};
 use crate::service::request_log_service::{RequestLogEntry, RequestLogService};
 use crate::upstream::openai_client::OpenAiClient;
 
@@ -125,39 +128,11 @@ async fn forward_messages(
                     .await;
 
                 match response {
-                    Ok((status, raw_sse)) => {
+                    Ok((status, upstream_response)) => {
                         let status_code = StatusCode::from_u16(status.as_u16())
                             .unwrap_or(StatusCode::BAD_GATEWAY);
 
                         if status_code.is_success() {
-                            let events = match decode_openai_sse_events(&raw_sse) {
-                                Ok(events) => events,
-                                Err(err) => {
-                                    append_log(
-                                        &log_service,
-                                        RequestLogEntry {
-                                            request_id,
-                                            gateway_id: state.gateway_id.clone(),
-                                            provider_id: target.provider_id,
-                                            model,
-                                            status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
-                                            latency_ms: started_at.elapsed().as_millis() as i64,
-                                            error: Some(err.to_string()),
-                                        },
-                                    )
-                                    .await;
-
-                                    return (
-                                        StatusCode::BAD_GATEWAY,
-                                        Json(anthropic_error_response(
-                                            format!("upstream stream decode failed: {err}"),
-                                            "api_error",
-                                        )),
-                                    )
-                                        .into_response();
-                                }
-                            };
-
                             append_log(
                                 &log_service,
                                 RequestLogEntry {
@@ -172,11 +147,12 @@ async fn forward_messages(
                             )
                             .await;
 
-                            let anthropic_sse = encode_anthropic_sse(&events);
+                            let anthropic_stream =
+                                map_upstream_to_anthropic_stream(upstream_response.bytes_stream());
                             return (
                                 status_code,
                                 [(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")],
-                                anthropic_sse,
+                                Body::from_stream(anthropic_stream),
                             )
                                 .into_response();
                         }
@@ -195,6 +171,7 @@ async fn forward_messages(
                         )
                         .await;
 
+                        let raw_sse = upstream_response.text().await.unwrap_or_default();
                         let message = extract_upstream_error_message_from_text(&raw_sse);
 
                         (
@@ -254,7 +231,10 @@ async fn forward_messages(
                         .await;
 
                         if status_code.is_success() {
-                            return (status_code, Json(map_openai_to_anthropic_message(&value, &ir)))
+                            return (
+                                status_code,
+                                Json(map_openai_to_anthropic_message(&value, &ir)),
+                            )
                                 .into_response();
                         }
 
@@ -325,14 +305,58 @@ async fn forward_messages(
     }
 }
 
+fn map_upstream_to_anthropic_stream<S, E>(
+    upstream: S,
+) -> impl Stream<Item = Result<Bytes, anyhow::Error>> + Send + 'static
+where
+    S: Stream<Item = Result<Bytes, E>> + Send + 'static,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    async_stream::try_stream! {
+        let mut decoder = OpenAiSseDecoder::new();
+        let mut encoder = AnthropicSseEncoder::new();
+        futures_util::pin_mut!(upstream);
+
+        while let Some(chunk_result) = upstream.next().await {
+            let chunk = chunk_result
+                .map_err(|err| anyhow::anyhow!("failed to read upstream stream chunk: {err}"))?;
+            let events = decoder.push_chunk(chunk.as_ref())?;
+            for event in events {
+                let encoded = encoder.encode_event(&event);
+                if !encoded.is_empty() {
+                    yield Bytes::from(encoded);
+                }
+            }
+        }
+
+        let tail_events = decoder.finish()?;
+        for event in tail_events {
+            let encoded = encoder.encode_event(&event);
+            if !encoded.is_empty() {
+                yield Bytes::from(encoded);
+            }
+        }
+    }
+}
+
 fn extract_upstream_error_message_from_text(body: &str) -> String {
-    if let Ok(value) = serde_json::from_str::<Value>(body) {
-        if let Some(message) = value
-            .get("error")
-            .and_then(|item| item.get("message"))
-            .and_then(Value::as_str)
-        {
-            return message.to_string();
+    if let Some(message) = extract_json_error_message_from_text(body) {
+        return message;
+    }
+
+    for raw_line in body.lines() {
+        let line = raw_line.trim();
+        if !line.starts_with("data:") {
+            continue;
+        }
+
+        let data = line.trim_start_matches("data:").trim();
+        if data.is_empty() || data == "[DONE]" {
+            continue;
+        }
+
+        if let Some(message) = extract_json_error_message_from_text(data) {
+            return message;
         }
     }
 
@@ -342,6 +366,28 @@ fn extract_upstream_error_message_from_text(body: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+fn extract_json_error_message_from_text(body: &str) -> Option<String> {
+    let value = serde_json::from_str::<Value>(body).ok()?;
+
+    value
+        .get("error")
+        .and_then(|item| item.get("message"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            value
+                .get("message")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| {
+            value
+                .get("error")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
 }
 
 #[derive(Debug)]
@@ -375,7 +421,10 @@ async fn fetch_provider_target(
     })
 }
 
-fn map_openai_to_anthropic_message(openai_response: &Value, ir: &crate::protocol::ir::IrRequest) -> Value {
+fn map_openai_to_anthropic_message(
+    openai_response: &Value,
+    ir: &crate::protocol::ir::IrRequest,
+) -> Value {
     let openai_id = openai_response
         .get("id")
         .and_then(Value::as_str)

@@ -44,7 +44,7 @@ impl OpenAiClient {
         base_url: &str,
         api_key: &str,
         payload: &Value,
-    ) -> Result<(StatusCode, String)> {
+    ) -> Result<(StatusCode, reqwest::Response)> {
         let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
         let response = self
@@ -56,9 +56,7 @@ impl OpenAiClient {
             .await?;
 
         let status = response.status();
-        let body = response.text().await?;
-
-        Ok((status, body))
+        Ok((status, response))
     }
 
     pub async fn chat_completions_from_ir(
