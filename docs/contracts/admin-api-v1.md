@@ -37,6 +37,8 @@
 - `listen_host: string`
 - `listen_port: number`
 - `inbound_protocol: string`
+- `upstream_protocol: string`
+- `protocol_config_json: object`
 - `default_provider_id: string`
 - `default_model: string | null`
 - `enabled: boolean`
