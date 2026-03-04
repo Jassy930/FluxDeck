@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
 
 use crate::protocol::adapters::anthropic::decode_anthropic_request;
+use crate::protocol::adapters::openai::encode_openai_chat_request;
 use crate::service::request_log_service::{RequestLogEntry, RequestLogService};
 use crate::upstream::openai_client::OpenAiClient;
 
@@ -79,9 +80,36 @@ async fn forward_messages(
 
     match fetch_provider_target(&state).await {
         Ok(target) => {
+            let payload = match encode_openai_chat_request(&ir) {
+                Ok(payload) => payload,
+                Err(err) => {
+                    append_log(
+                        &log_service,
+                        RequestLogEntry {
+                            request_id,
+                            gateway_id: state.gateway_id.clone(),
+                            provider_id: target.provider_id,
+                            model,
+                            status_code: i64::from(StatusCode::BAD_REQUEST.as_u16()),
+                            latency_ms: started_at.elapsed().as_millis() as i64,
+                            error: Some(err.to_string()),
+                        },
+                    )
+                    .await;
+
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(anthropic_error_response(
+                            format!("invalid request: {err}"),
+                            "invalid_request_error",
+                        )),
+                    );
+                }
+            };
+
             let response = state
                 .client
-                .chat_completions_from_ir(&target.base_url, &target.api_key, &ir)
+                .chat_completions(&target.base_url, &target.api_key, &payload)
                 .await;
 
             match response {
@@ -218,13 +246,20 @@ fn map_openai_to_anthropic_message(openai_response: &Value, ir: &crate::protocol
         .and_then(|choice| choice.get("finish_reason"))
         .and_then(Value::as_str);
 
-    let message_content = first_choice
-        .and_then(|choice| choice.get("message"))
+    let first_message = first_choice.and_then(|choice| choice.get("message"));
+
+    let message_content = first_message
         .and_then(|message| message.get("content"))
         .cloned()
         .unwrap_or(Value::Null);
 
-    let content = map_content_to_anthropic_blocks(&message_content);
+    let mut content = map_content_to_anthropic_blocks(&message_content);
+    content.extend(map_tool_calls_to_anthropic_blocks(
+        first_message.and_then(|message| message.get("tool_calls")),
+    ));
+    let has_tool_use_block = content
+        .iter()
+        .any(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"));
 
     let usage = openai_response.get("usage").and_then(Value::as_object);
     let input_tokens = usage
@@ -248,7 +283,7 @@ fn map_openai_to_anthropic_message(openai_response: &Value, ir: &crate::protocol
         "role": "assistant",
         "model": model,
         "content": content,
-        "stop_reason": map_finish_reason(finish_reason),
+        "stop_reason": map_finish_reason(finish_reason, has_tool_use_block),
         "stop_sequence": Value::Null,
         "usage": {
             "input_tokens": input_tokens,
@@ -298,11 +333,55 @@ fn map_openai_content_item(item: &Value) -> Option<Value> {
     }
 }
 
-fn map_finish_reason(finish_reason: Option<&str>) -> Value {
+fn map_tool_calls_to_anthropic_blocks(tool_calls: Option<&Value>) -> Vec<Value> {
+    match tool_calls {
+        Some(Value::Array(items)) => items.iter().filter_map(map_openai_tool_call_item).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn map_openai_tool_call_item(item: &Value) -> Option<Value> {
+    let object = item.as_object()?;
+    let name = object
+        .get("function")
+        .and_then(Value::as_object)
+        .and_then(|function| function.get("name"))
+        .and_then(Value::as_str)?;
+    let id = object
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("toolu_unknown");
+
+    let input = object
+        .get("function")
+        .and_then(Value::as_object)
+        .and_then(|function| function.get("arguments"))
+        .map(parse_openai_tool_arguments)
+        .unwrap_or_else(|| json!({}));
+
+    Some(json!({
+        "type": "tool_use",
+        "id": id,
+        "name": name,
+        "input": input
+    }))
+}
+
+fn parse_openai_tool_arguments(arguments: &Value) -> Value {
+    match arguments {
+        Value::String(raw) => serde_json::from_str(raw).unwrap_or_else(|_| json!({ "raw": raw })),
+        Value::Object(_) => arguments.clone(),
+        Value::Null => json!({}),
+        other => json!({ "raw": other }),
+    }
+}
+
+fn map_finish_reason(finish_reason: Option<&str>, has_tool_use_block: bool) -> Value {
     match finish_reason {
         Some("stop") => json!("end_turn"),
         Some("length") => json!("max_tokens"),
-        Some("tool_calls") => json!("tool_use"),
+        Some("tool_calls") if has_tool_use_block => json!("tool_use"),
+        Some("tool_calls") => Value::Null,
         _ => Value::Null,
     }
 }
