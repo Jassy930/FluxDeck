@@ -2,22 +2,24 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use crate::protocol::error::FluxError;
+use crate::protocol::error::{DecodeErrorKind, FluxError};
 use crate::protocol::ir::{IrRequest, ProtocolIrMessage};
 
 pub fn decode_anthropic_request(payload: &Value) -> Result<IrRequest, FluxError> {
-    let root = payload.as_object().ok_or_else(|| FluxError::CapabilityUnsupported {
-        source: "anthropic".to_string(),
-        target: "decode:invalid-payload".to_string(),
+    let root = payload.as_object().ok_or_else(|| FluxError::DecodeError {
+        protocol: "anthropic".to_string(),
+        kind: DecodeErrorKind::InvalidPayload,
     })?;
 
     let model = root
         .get("model")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
-        .ok_or_else(|| FluxError::CapabilityUnsupported {
-            source: "anthropic".to_string(),
-            target: "decode:missing-model".to_string(),
+        .ok_or_else(|| FluxError::DecodeError {
+            protocol: "anthropic".to_string(),
+            kind: DecodeErrorKind::MissingRequiredField {
+                field: "model".to_string(),
+            },
         })?;
 
     let system_parts = decode_system(root.get("system"));

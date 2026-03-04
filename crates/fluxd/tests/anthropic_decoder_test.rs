@@ -1,4 +1,5 @@
 use fluxd::protocol::adapters::anthropic::decode_anthropic_request;
+use fluxd::protocol::error::{DecodeErrorKind, FluxError};
 use serde_json::json;
 
 #[test]
@@ -19,13 +20,22 @@ fn decode_anthropic_request_maps_messages_system_tools_to_ir() {
                     "type": "object"
                 }
             }
-        ]
+        ],
+        "temperature": 0.3,
+        "x_extra": {
+            "trace_id": "req-1"
+        }
     });
 
     let ir = decode_anthropic_request(&payload).expect("decode anthropic request");
     assert_eq!(ir.model.as_deref(), Some("claude-3-7-sonnet"));
     assert_eq!(ir.system_parts.len(), 1);
     assert_eq!(ir.tools.len(), 1);
+    assert_eq!(ir.extensions.get("temperature"), Some(&json!(0.3)));
+    assert_eq!(
+        ir.extensions.get("x_extra"),
+        Some(&json!({ "trace_id": "req-1" }))
+    );
 }
 
 #[test]
@@ -40,5 +50,13 @@ fn decode_anthropic_request_requires_model() {
     });
 
     let result = decode_anthropic_request(&payload);
-    assert!(result.is_err());
+    assert_eq!(
+        result,
+        Err(FluxError::DecodeError {
+            protocol: "anthropic".to_string(),
+            kind: DecodeErrorKind::MissingRequiredField {
+                field: "model".to_string(),
+            },
+        })
+    );
 }
