@@ -128,3 +128,95 @@ fn returns_error_when_model_missing() {
         })
     );
 }
+
+#[test]
+fn returns_error_when_tool_name_missing() {
+    let ir = IrRequest {
+        source_protocol: "anthropic".to_string(),
+        target_protocol: "openai".to_string(),
+        model: Some("gpt-4o-mini".to_string()),
+        system_parts: Vec::new(),
+        messages: vec![ProtocolIrMessage {
+            role: "user".to_string(),
+            content: Value::String("hello".to_string()),
+        }],
+        tools: vec![json!({
+            "input_schema": {
+                "type": "object"
+            }
+        })],
+        extensions: BTreeMap::new(),
+        metadata: BTreeMap::new(),
+    };
+
+    let result = encode_openai_chat_request(&ir);
+    assert_eq!(
+        result,
+        Err(FluxError::DecodeError {
+            protocol: "openai".to_string(),
+            kind: DecodeErrorKind::MissingRequiredField {
+                field: "tools[0].name".to_string(),
+            },
+        })
+    );
+}
+
+#[test]
+fn returns_error_when_tool_input_schema_missing() {
+    let ir = IrRequest {
+        source_protocol: "anthropic".to_string(),
+        target_protocol: "openai".to_string(),
+        model: Some("gpt-4o-mini".to_string()),
+        system_parts: Vec::new(),
+        messages: vec![ProtocolIrMessage {
+            role: "user".to_string(),
+            content: Value::String("hello".to_string()),
+        }],
+        tools: vec![json!({
+            "name": "weather"
+        })],
+        extensions: BTreeMap::new(),
+        metadata: BTreeMap::new(),
+    };
+
+    let result = encode_openai_chat_request(&ir);
+    assert_eq!(
+        result,
+        Err(FluxError::DecodeError {
+            protocol: "openai".to_string(),
+            kind: DecodeErrorKind::MissingRequiredField {
+                field: "tools[0].input_schema".to_string(),
+            },
+        })
+    );
+}
+
+#[test]
+fn returns_error_when_tool_is_not_object() {
+    let ir = IrRequest {
+        source_protocol: "anthropic".to_string(),
+        target_protocol: "openai".to_string(),
+        model: Some("gpt-4o-mini".to_string()),
+        system_parts: Vec::new(),
+        messages: vec![ProtocolIrMessage {
+            role: "user".to_string(),
+            content: Value::String("hello".to_string()),
+        }],
+        tools: vec![Value::String("weather".to_string())],
+        extensions: BTreeMap::new(),
+        metadata: BTreeMap::new(),
+    };
+
+    let result = encode_openai_chat_request(&ir);
+    assert_eq!(
+        result,
+        Err(FluxError::DecodeError {
+            protocol: "openai".to_string(),
+            kind: DecodeErrorKind::InvalidFieldType {
+                field: "tools[0]".to_string(),
+                expected: "object".to_string(),
+                actual: "string".to_string(),
+            },
+        })
+    );
+}
