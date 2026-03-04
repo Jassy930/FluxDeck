@@ -30,8 +30,8 @@ impl GatewayRepo {
         .bind(&input.listen_host)
         .bind(input.listen_port)
         .bind(&input.inbound_protocol)
-        .bind("provider_default")
-        .bind("{}")
+        .bind(&input.upstream_protocol)
+        .bind(input.protocol_config_json.to_string())
         .bind(&input.default_provider_id)
         .bind(&input.default_model)
         .bind(if input.enabled { 1_i64 } else { 0_i64 })
@@ -44,8 +44,8 @@ impl GatewayRepo {
             listen_host: input.listen_host,
             listen_port: input.listen_port,
             inbound_protocol: input.inbound_protocol,
-            upstream_protocol: "provider_default".to_string(),
-            protocol_config_json: Value::Object(Default::default()),
+            upstream_protocol: input.upstream_protocol,
+            protocol_config_json: input.protocol_config_json,
             default_provider_id: input.default_provider_id,
             default_model: input.default_model,
             enabled: input.enabled,

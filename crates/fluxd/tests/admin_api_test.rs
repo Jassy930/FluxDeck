@@ -310,6 +310,65 @@ async fn admin_api_returns_gateway_runtime_status() {
     assert_eq!(gateway_after_stop.get("runtime_status"), Some(&json!("stopped")));
 }
 
+#[tokio::test]
+async fn admin_api_accepts_gateway_protocol_config_fields() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_protocol_1",
+            "name": "Protocol Provider",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-protocol",
+            "models": ["gpt-4o-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider request");
+
+    let create_gateway_resp = client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_protocol_1",
+            "name": "Protocol Gateway",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "anthropic",
+            "upstream_protocol": "openai",
+            "protocol_config_json": {
+                "compatibility_mode": "compatible"
+            },
+            "default_provider_id": "provider_protocol_1",
+            "default_model": "claude-3-7-sonnet",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create gateway request");
+    assert_eq!(create_gateway_resp.status(), reqwest::StatusCode::CREATED);
+    let created_gateway: serde_json::Value = create_gateway_resp
+        .json()
+        .await
+        .expect("decode create gateway response");
+    assert_eq!(created_gateway.get("inbound_protocol"), Some(&json!("anthropic")));
+    assert_eq!(created_gateway.get("upstream_protocol"), Some(&json!("openai")));
+    assert_eq!(
+        created_gateway.get("protocol_config_json"),
+        Some(&json!({ "compatibility_mode": "compatible" }))
+    );
+}
+
 struct SpawnedServer {
     addr: SocketAddr,
 }
