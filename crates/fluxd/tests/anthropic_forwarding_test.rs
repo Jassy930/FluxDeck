@@ -162,6 +162,100 @@ async fn surfaces_upstream_error_message_for_nonstandard_error_shape() {
     );
 }
 
+#[tokio::test]
+async fn rewrites_model_with_mapping_rule_before_forwarding() {
+    let upstream = spawn_upstream_model_rewrite_mock().await;
+    let gateway = setup_gateway_with_provider_base_url_and_protocol_config(
+        format!("http://{}/v1", upstream.addr),
+        json!({
+            "model_mapping": {
+                "rules": [
+                    {"from": "claude-*", "to": "qwen3-coder-plus"}
+                ]
+            }
+        }),
+    )
+    .await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages", gateway.addr))
+        .json(&json!({
+            "model": "claude-3-7-sonnet",
+            "max_tokens": 128,
+            "messages": [{"role": "user", "content": "hello"}]
+        }))
+        .send()
+        .await
+        .expect("call gateway");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: Value = resp.json().await.expect("decode gateway response");
+    assert_eq!(body["model"], "qwen3-coder-plus");
+}
+
+#[tokio::test]
+async fn falls_back_to_fallback_model_when_rule_not_matched() {
+    let upstream = spawn_upstream_model_rewrite_mock().await;
+    let gateway = setup_gateway_with_provider_base_url_and_protocol_config(
+        format!("http://{}/v1", upstream.addr),
+        json!({
+            "model_mapping": {
+                "rules": [
+                    {"from": "claude-*", "to": "qwen3-coder-plus"}
+                ],
+                "fallback_model": "qwen3-coder-plus"
+            }
+        }),
+    )
+    .await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages", gateway.addr))
+        .json(&json!({
+            "model": "unknown-model",
+            "max_tokens": 128,
+            "messages": [{"role": "user", "content": "hello"}]
+        }))
+        .send()
+        .await
+        .expect("call gateway");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: Value = resp.json().await.expect("decode gateway response");
+    assert_eq!(body["model"], "qwen3-coder-plus");
+}
+
+#[tokio::test]
+async fn keeps_original_model_when_rule_not_matched_and_no_fallback() {
+    let upstream = spawn_upstream_echo_model_mock().await;
+    let gateway = setup_gateway_with_provider_base_url_and_protocol_config(
+        format!("http://{}/v1", upstream.addr),
+        json!({
+            "model_mapping": {
+                "rules": [
+                    {"from": "claude-*", "to": "qwen3-coder-plus"}
+                ]
+            }
+        }),
+    )
+    .await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages", gateway.addr))
+        .json(&json!({
+            "model": "unknown-model",
+            "max_tokens": 128,
+            "messages": [{"role": "user", "content": "hello"}]
+        }))
+        .send()
+        .await
+        .expect("call gateway");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: Value = resp.json().await.expect("decode gateway response");
+    assert_eq!(body["model"], "unknown-model");
+}
+
 struct SpawnedServer {
     addr: SocketAddr,
 }
@@ -192,6 +286,19 @@ async fn spawn_upstream_nonstandard_error_mock() -> SpawnedServer {
     spawn_gateway(app).await
 }
 
+async fn spawn_upstream_model_rewrite_mock() -> SpawnedServer {
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(upstream_chat_completions_expect_rewritten_model),
+    );
+    spawn_gateway(app).await
+}
+
+async fn spawn_upstream_echo_model_mock() -> SpawnedServer {
+    let app = Router::new().route("/v1/chat/completions", post(upstream_chat_completions_echo_model));
+    spawn_gateway(app).await
+}
+
 async fn spawn_gateway(app: Router) -> SpawnedServer {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind random port");
     let addr = listener.local_addr().expect("read listener addr");
@@ -204,6 +311,13 @@ async fn spawn_gateway(app: Router) -> SpawnedServer {
 }
 
 async fn setup_gateway_with_provider_base_url(base_url: String) -> SpawnedServer {
+    setup_gateway_with_provider_base_url_and_protocol_config(base_url, json!({})).await
+}
+
+async fn setup_gateway_with_provider_base_url_and_protocol_config(
+    base_url: String,
+    protocol_config_json: Value,
+) -> SpawnedServer {
     let pool = sqlx::SqlitePool::connect("sqlite::memory:")
         .await
         .expect("connect sqlite memory db");
@@ -222,7 +336,7 @@ async fn setup_gateway_with_provider_base_url(base_url: String) -> SpawnedServer
     .expect("insert provider");
 
     sqlx::query(
-        "INSERT INTO gateways (id, name, listen_host, listen_port, inbound_protocol, upstream_protocol, default_provider_id, default_model, enabled) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
+        "INSERT INTO gateways (id, name, listen_host, listen_port, inbound_protocol, upstream_protocol, protocol_config_json, default_provider_id, default_model, enabled) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
     )
     .bind("gw_anthropic")
     .bind("Gateway Anthropic")
@@ -230,6 +344,7 @@ async fn setup_gateway_with_provider_base_url(base_url: String) -> SpawnedServer
     .bind(18889_i64)
     .bind("anthropic")
     .bind("openai")
+    .bind(protocol_config_json.to_string())
     .bind("provider_openai")
     .bind("gpt-4o-mini")
     .execute(&pool)
@@ -347,4 +462,47 @@ async fn upstream_chat_completions_nonstandard_error(_: Json<Value>) -> impl Int
             "code": "BadRequest"
         })),
     )
+}
+
+async fn upstream_chat_completions_expect_rewritten_model(Json(payload): Json<Value>) -> impl IntoResponse {
+    assert_eq!(payload["model"], "qwen3-coder-plus");
+    assert_eq!(payload["messages"][0]["role"], "user");
+
+    Json(json!({
+        "id": "chatcmpl_model_rewrite_001",
+        "object": "chat.completion",
+        "model": payload["model"],
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "pong"},
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 1,
+            "total_tokens": 11
+        }
+    }))
+}
+
+async fn upstream_chat_completions_echo_model(Json(payload): Json<Value>) -> impl IntoResponse {
+    Json(json!({
+        "id": "chatcmpl_echo_001",
+        "object": "chat.completion",
+        "model": payload["model"],
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "pong"},
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 1,
+            "total_tokens": 11
+        }
+    }))
 }

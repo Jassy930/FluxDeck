@@ -51,7 +51,7 @@ async fn forward_messages(
     Json(payload): Json<Value>,
 ) -> Response {
     let request_id = next_request_id();
-    let model = payload
+    let mut model = payload
         .get("model")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
@@ -62,7 +62,7 @@ async fn forward_messages(
     let started_at = Instant::now();
     let log_service = RequestLogService::new(state.pool.clone());
 
-    let ir = match decode_anthropic_request(&payload) {
+    let mut ir = match decode_anthropic_request(&payload) {
         Ok(ir) => ir,
         Err(err) => {
             append_log(
@@ -124,6 +124,14 @@ async fn forward_messages(
                     Json(anthropic_error_response(message, "capability_error")),
                 )
                     .into_response();
+            }
+
+            if let Some(requested_model) = ir.model.as_deref() {
+                let resolved_model = target.model_mapping.resolve(requested_model);
+                if resolved_model != requested_model {
+                    ir.model = Some(resolved_model.clone());
+                    model = Some(resolved_model);
+                }
             }
 
             let mut upstream_payload = match encode_openai_chat_request(&ir) {
@@ -346,17 +354,17 @@ async fn forward_messages(
 
 async fn count_tokens_handler(
     State(state): State<AnthropicRouteState>,
-    Json(payload): Json<Value>,
+    Json(mut payload): Json<Value>,
 ) -> Response {
     let request_id = next_request_id();
-    let model = payload
+    let mut model = payload
         .get("model")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
     let started_at = Instant::now();
     let log_service = RequestLogService::new(state.pool.clone());
 
-    let ir = match decode_anthropic_request(&payload) {
+    let mut ir = match decode_anthropic_request(&payload) {
         Ok(ir) => ir,
         Err(err) => {
             append_log(
@@ -386,6 +394,15 @@ async fn count_tokens_handler(
 
     match fetch_provider_target(&state).await {
         Ok(target) => {
+            if let Some(requested_model) = ir.model.as_deref() {
+                let resolved_model = target.model_mapping.resolve(requested_model);
+                if resolved_model != requested_model {
+                    ir.model = Some(resolved_model.clone());
+                    rewrite_payload_model(&mut payload, &resolved_model);
+                    model = Some(resolved_model);
+                }
+            }
+
             let response = state
                 .client
                 .anthropic_messages_count_tokens(&target.base_url, &target.api_key, &payload)
@@ -730,6 +747,7 @@ struct ProviderRoutingTarget {
     base_url: String,
     api_key: String,
     compatibility_mode: CompatibilityMode,
+    model_mapping: ModelMappingConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -750,6 +768,78 @@ impl CompatibilityMode {
             "permissive" => CompatibilityMode::Permissive,
             _ => CompatibilityMode::Compatible,
         }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct ModelMappingConfig {
+    fallback_model: Option<String>,
+    rules: Vec<ModelMappingRule>,
+}
+
+#[derive(Debug, Clone)]
+struct ModelMappingRule {
+    from: String,
+    to: String,
+}
+
+impl ModelMappingConfig {
+    fn from_protocol_config(config: &Value) -> Self {
+        let Some(mapping) = config.get("model_mapping").and_then(Value::as_object) else {
+            return Self::default();
+        };
+
+        if matches!(mapping.get("enabled").and_then(Value::as_bool), Some(false)) {
+            return Self::default();
+        }
+
+        let fallback_model = mapping
+            .get("fallback_model")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(ToOwned::to_owned);
+
+        let rules = mapping
+            .get("rules")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| {
+                        let object = item.as_object()?;
+                        let from = object.get("from")?.as_str()?.trim();
+                        let to = object.get("to")?.as_str()?.trim();
+                        if from.is_empty() || to.is_empty() {
+                            return None;
+                        }
+                        Some(ModelMappingRule {
+                            from: from.to_string(),
+                            to: to.to_string(),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        Self {
+            fallback_model,
+            rules,
+        }
+    }
+
+    fn resolve(&self, requested_model: &str) -> String {
+        for rule in &self.rules {
+            if model_pattern_matches(&rule.from, requested_model) {
+                return rule.to.clone();
+            }
+        }
+
+        if let Some(fallback) = &self.fallback_model {
+            return fallback.clone();
+        }
+
+        requested_model.to_string()
     }
 }
 
@@ -805,6 +895,7 @@ async fn fetch_provider_target(
         base_url: row.get("base_url"),
         api_key: row.get("api_key"),
         compatibility_mode: CompatibilityMode::from_protocol_config(&protocol_config_json),
+        model_mapping: ModelMappingConfig::from_protocol_config(&protocol_config_json),
     })
 }
 
@@ -819,6 +910,62 @@ fn apply_extension_passthrough(ir: &IrRequest, upstream_payload: &mut Value) {
         }
         payload.insert(key.clone(), value.clone());
     }
+}
+
+fn rewrite_payload_model(payload: &mut Value, model: &str) {
+    let Some(object) = payload.as_object_mut() else {
+        return;
+    };
+    object.insert("model".to_string(), Value::String(model.to_string()));
+}
+
+fn model_pattern_matches(pattern: &str, model: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    if !pattern.contains('*') {
+        return pattern == model;
+    }
+
+    let starts_with_wildcard = pattern.starts_with('*');
+    let ends_with_wildcard = pattern.ends_with('*');
+    let segments: Vec<&str> = pattern.split('*').filter(|item| !item.is_empty()).collect();
+    if segments.is_empty() {
+        return true;
+    }
+
+    let mut remainder = model;
+    let mut start_index = 0;
+
+    if !starts_with_wildcard {
+        let first = segments[0];
+        if !remainder.starts_with(first) {
+            return false;
+        }
+        remainder = &remainder[first.len()..];
+        start_index = 1;
+    }
+
+    let end_index = if ends_with_wildcard {
+        segments.len()
+    } else {
+        segments.len().saturating_sub(1)
+    };
+
+    for segment in &segments[start_index..end_index] {
+        let Some(position) = remainder.find(segment) else {
+            return false;
+        };
+        remainder = &remainder[position + segment.len()..];
+    }
+
+    if !ends_with_wildcard {
+        if let Some(last) = segments.last() {
+            return remainder.ends_with(last);
+        }
+    }
+
+    true
 }
 
 fn map_openai_to_anthropic_message(

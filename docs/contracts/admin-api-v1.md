@@ -54,6 +54,15 @@
   - `strict`：禁用降级与扩展能力
   - `compatible`：优先兼容（必要时降级）
   - `permissive`：允许扩展字段透传
+- `model_mapping?: object`
+  - `enabled?: boolean`（可选，默认启用；显式 `false` 时关闭模型映射）
+  - `rules?: Array<{ from: string, to: string }>`
+    - `from` 支持 `*` 通配（例如 `claude-*`）
+    - 命中首条规则后，入站请求 `model` 会重写为对应 `to`
+  - `fallback_model?: string`
+    - 当未命中任何 `rules` 时：
+      - 若配置了 `fallback_model`，使用 `fallback_model`
+      - 若未配置 `fallback_model`，保留原始 `model`
 
 ### `POST /admin/gateways/{id}/start`
 ### `POST /admin/gateways/{id}/stop`

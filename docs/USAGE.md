@@ -148,6 +148,36 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
 - `compatible`：优先保证可用（例如 `count_tokens` 降级为本地估算）
 - `permissive`：允许扩展字段透传到上游
 
+模型映射（用于将 Claude Code 的多模型请求统一到目标模型）：
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
+  --id gateway_anthropic_map \
+  --name "Gateway Anthropic Map" \
+  --listen-host 127.0.0.1 \
+  --listen-port 18082 \
+  --inbound-protocol anthropic \
+  --upstream-protocol openai \
+  --default-provider-id provider_main \
+  --default-model qwen3-coder-plus \
+  --protocol-config-json '{
+    "compatibility_mode":"compatible",
+    "model_mapping":{
+      "rules":[
+        {"from":"claude-*","to":"qwen3-coder-plus"},
+        {"from":"sonnet","to":"qwen3-coder-plus"}
+      ],
+      "fallback_model":"qwen3-coder-plus"
+    }
+  }'
+```
+
+语义说明：
+
+- 规则按顺序匹配，命中后将 `model` 重写为 `to`
+- 未命中规则且配置了 `fallback_model`：使用 `fallback_model`
+- 未命中规则且未配置 `fallback_model`：保留原始 `model`
+
 ## 6. 查看请求日志
 
 ```bash
