@@ -110,18 +110,6 @@ impl OpenAiSseDecoder {
             }
         }
 
-        let finish_reason = chunk
-            .get("choices")
-            .and_then(Value::as_array)
-            .and_then(|choices| choices.first())
-            .and_then(|choice| choice.get("finish_reason"))
-            .and_then(Value::as_str);
-
-        if finish_reason.is_some() && !self.seen_stop {
-            events.push(StreamEvent::MessageStop);
-            self.seen_stop = true;
-        }
-
         Ok(())
     }
 }
@@ -139,5 +127,40 @@ fn trim_line_endings(line: &mut Vec<u8>) {
     }
     if line.ends_with(b"\r") {
         line.pop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_openai_sse_events;
+    use crate::protocol::stream::StreamEvent;
+
+    #[test]
+    fn does_not_stop_early_when_finish_reason_arrives_before_done() {
+        let body = r#"data: {"id":"chat","choices":[{"index":0,"delta":{"content":"{\n"},"finish_reason":"stop"}]}
+
+data: {"id":"chat","choices":[{"index":0,"delta":{"content":"  \"title\":\"GLM\""}}]}
+
+data: [DONE]
+
+"#;
+
+        let events = decode_openai_sse_events(body).expect("decode stream events");
+        assert_eq!(
+            events,
+            vec![
+                StreamEvent::MessageStart {
+                    id: "chat".to_string(),
+                    model: None
+                },
+                StreamEvent::TextDelta {
+                    text: "{\n".to_string()
+                },
+                StreamEvent::TextDelta {
+                    text: "  \"title\":\"GLM\"".to_string()
+                },
+                StreamEvent::MessageStop
+            ]
+        );
     }
 }
