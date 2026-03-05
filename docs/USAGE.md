@@ -178,6 +178,39 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
 - 未命中规则且配置了 `fallback_model`：使用 `fallback_model`
 - 未命中规则且未配置 `fallback_model`：保留原始 `model`
 
+请求调试日志（定位“回复过短/提前结束”时建议开启）：
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
+  --id gateway_anthropic_debug \
+  --name "Gateway Anthropic Debug" \
+  --listen-host 127.0.0.1 \
+  --listen-port 18083 \
+  --inbound-protocol anthropic \
+  --upstream-protocol openai \
+  --default-provider-id provider_main \
+  --default-model qwen3-coder-plus \
+  --protocol-config-json '{
+    "compatibility_mode":"compatible",
+    "debug":{
+      "log_request_payload":true,
+      "max_payload_chars":8000
+    }
+  }'
+```
+
+也可用环境变量全局强制开启（重启 `fluxd` 后生效）：
+
+```bash
+FLUXDECK_DEBUG_ANTHROPIC_REQUEST_PAYLOAD=1 cargo run -p fluxd
+```
+
+开启后，`fluxd` 控制台会输出类似日志：
+
+```text
+[fluxd][anthropic-debug] gateway_id=... request_id=... route=/v1/messages model=... stream=... max_tokens=... messages=... payload=...
+```
+
 ## 6. 查看请求日志
 
 ```bash

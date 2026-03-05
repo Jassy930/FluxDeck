@@ -63,6 +63,14 @@
     - 当未命中任何 `rules` 时：
       - 若配置了 `fallback_model`，使用 `fallback_model`
       - 若未配置 `fallback_model`，保留原始 `model`
+- `debug?: object`
+  - `log_request_payload?: boolean`（默认 `false`）
+  - `max_payload_chars?: number`（默认 `4000`，范围会被约束到 `64..=200000`）
+  - 生效后会在 `fluxd` 进程标准输出打印 Anthropic 入站请求摘要（包含 `model/max_tokens/messages` 与截断后的 payload）
+
+此外支持环境变量强制开启（优先级高于 `debug.log_request_payload`）：
+
+- `FLUXDECK_DEBUG_ANTHROPIC_REQUEST_PAYLOAD=1|true|yes|on`
 
 ### `POST /admin/gateways/{id}/start`
 ### `POST /admin/gateways/{id}/stop`

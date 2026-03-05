@@ -92,6 +92,14 @@ async fn forward_messages(
 
     match fetch_provider_target(&state).await {
         Ok(target) => {
+            maybe_log_request_payload(
+                "/v1/messages",
+                &state.gateway_id,
+                &request_id,
+                &payload,
+                &target.request_debug,
+            );
+
             let strict_unsupported_extensions = strict_unsupported_extension_keys(&ir);
             if target.compatibility_mode == CompatibilityMode::Strict
                 && !strict_unsupported_extensions.is_empty()
@@ -394,6 +402,14 @@ async fn count_tokens_handler(
 
     match fetch_provider_target(&state).await {
         Ok(target) => {
+            maybe_log_request_payload(
+                "/v1/messages/count_tokens",
+                &state.gateway_id,
+                &request_id,
+                &payload,
+                &target.request_debug,
+            );
+
             if let Some(requested_model) = ir.model.as_deref() {
                 let resolved_model = target.model_mapping.resolve(requested_model);
                 if resolved_model != requested_model {
@@ -748,6 +764,7 @@ struct ProviderRoutingTarget {
     api_key: String,
     compatibility_mode: CompatibilityMode,
     model_mapping: ModelMappingConfig,
+    request_debug: RequestDebugConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -843,6 +860,44 @@ impl ModelMappingConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+struct RequestDebugConfig {
+    log_request_payload: bool,
+    max_payload_chars: usize,
+}
+
+impl Default for RequestDebugConfig {
+    fn default() -> Self {
+        Self {
+            log_request_payload: false,
+            max_payload_chars: 4_000,
+        }
+    }
+}
+
+impl RequestDebugConfig {
+    fn from_protocol_config(config: &Value) -> Self {
+        let mut parsed = Self::default();
+        let Some(debug) = config.get("debug").and_then(Value::as_object) else {
+            return parsed;
+        };
+
+        if let Some(enabled) = debug.get("log_request_payload").and_then(Value::as_bool) {
+            parsed.log_request_payload = enabled;
+        }
+        if let Some(max_chars) = debug.get("max_payload_chars").and_then(Value::as_u64) {
+            // Clamp range to avoid huge line output or accidentally empty logs.
+            parsed.max_payload_chars = max_chars.clamp(64, 200_000) as usize;
+        }
+
+        parsed
+    }
+
+    fn enabled(&self) -> bool {
+        self.log_request_payload || env_debug_logging_enabled()
+    }
+}
+
 fn strict_unsupported_extension_keys(ir: &IrRequest) -> Vec<String> {
     ir.extensions
         .keys()
@@ -896,6 +951,7 @@ async fn fetch_provider_target(
         api_key: row.get("api_key"),
         compatibility_mode: CompatibilityMode::from_protocol_config(&protocol_config_json),
         model_mapping: ModelMappingConfig::from_protocol_config(&protocol_config_json),
+        request_debug: RequestDebugConfig::from_protocol_config(&protocol_config_json),
     })
 }
 
@@ -917,6 +973,58 @@ fn rewrite_payload_model(payload: &mut Value, model: &str) {
         return;
     };
     object.insert("model".to_string(), Value::String(model.to_string()));
+}
+
+fn env_debug_logging_enabled() -> bool {
+    match std::env::var("FLUXDECK_DEBUG_ANTHROPIC_REQUEST_PAYLOAD") {
+        Ok(raw) => matches!(raw.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"),
+        Err(_) => false,
+    }
+}
+
+fn maybe_log_request_payload(
+    route: &str,
+    gateway_id: &str,
+    request_id: &str,
+    payload: &Value,
+    debug: &RequestDebugConfig,
+) {
+    if !debug.enabled() {
+        return;
+    }
+
+    let model = payload.get("model").and_then(Value::as_str).unwrap_or("unknown");
+    let stream = payload
+        .get("stream")
+        .and_then(Value::as_bool)
+        .map(|item| item.to_string())
+        .unwrap_or_else(|| "false".to_string());
+    let max_tokens = payload
+        .get("max_tokens")
+        .or_else(|| payload.get("max_output_tokens"))
+        .map(stringify_value)
+        .unwrap_or_else(|| "null".to_string());
+    let messages_len = payload
+        .get("messages")
+        .and_then(Value::as_array)
+        .map(|items| items.len())
+        .unwrap_or(0);
+
+    let serialized = serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string());
+    let payload_preview = truncate_chars(&serialized, debug.max_payload_chars);
+
+    println!(
+        "[fluxd][anthropic-debug] gateway_id={gateway_id} request_id={request_id} route={route} model={model} stream={stream} max_tokens={max_tokens} messages={messages_len} payload={payload_preview}"
+    );
+}
+
+fn truncate_chars(raw: &str, max_chars: usize) -> String {
+    if raw.chars().count() <= max_chars {
+        return raw.to_string();
+    }
+    let mut truncated = raw.chars().take(max_chars).collect::<String>();
+    truncated.push_str("...");
+    truncated
 }
 
 fn model_pattern_matches(pattern: &str, model: &str) -> bool {
@@ -1169,4 +1277,36 @@ fn next_request_id() -> String {
         .map(|item| item.as_nanos())
         .unwrap_or(0);
     format!("req_{nanos}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{truncate_chars, RequestDebugConfig};
+    use serde_json::json;
+
+    #[test]
+    fn request_debug_config_defaults_to_disabled() {
+        let config = RequestDebugConfig::from_protocol_config(&json!({}));
+        assert!(!config.log_request_payload);
+        assert_eq!(config.max_payload_chars, 4_000);
+    }
+
+    #[test]
+    fn request_debug_config_reads_protocol_config() {
+        let config = RequestDebugConfig::from_protocol_config(&json!({
+            "debug": {
+                "log_request_payload": true,
+                "max_payload_chars": 120
+            }
+        }));
+        assert!(config.log_request_payload);
+        assert_eq!(config.max_payload_chars, 120);
+    }
+
+    #[test]
+    fn truncate_chars_preserves_utf8() {
+        let input = "你好，世界";
+        assert_eq!(truncate_chars(input, 2), "你好...");
+        assert_eq!(truncate_chars(input, 16), input);
+    }
 }
