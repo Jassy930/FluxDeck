@@ -136,6 +136,32 @@ async fn returns_bad_request_for_local_openai_encoding_failure() {
     );
 }
 
+#[tokio::test]
+async fn surfaces_upstream_error_message_for_nonstandard_error_shape() {
+    let upstream = spawn_upstream_nonstandard_error_mock().await;
+    let gateway = setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages", gateway.addr))
+        .json(&json!({
+            "model": "qwen3-coder-plus",
+            "max_tokens": 128,
+            "messages": [{"role": "user", "content": "hello"}]
+        }))
+        .send()
+        .await
+        .expect("call gateway");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    let body: Value = resp.json().await.expect("decode gateway response");
+    assert_eq!(body["error"]["type"], "api_error");
+    assert_eq!(
+        body["error"]["message"],
+        "invalid payload: unsupported content block"
+    );
+}
+
 struct SpawnedServer {
     addr: SocketAddr,
 }
@@ -154,6 +180,14 @@ async fn spawn_upstream_tool_call_array_args_mock() -> SpawnedServer {
     let app = Router::new().route(
         "/v1/chat/completions",
         post(upstream_chat_completions_with_tool_calls_array_arguments),
+    );
+    spawn_gateway(app).await
+}
+
+async fn spawn_upstream_nonstandard_error_mock() -> SpawnedServer {
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(upstream_chat_completions_nonstandard_error),
     );
     spawn_gateway(app).await
 }
@@ -303,4 +337,14 @@ async fn upstream_chat_completions_with_tool_calls_array_arguments(
             "total_tokens": 33
         }
     }))
+}
+
+async fn upstream_chat_completions_nonstandard_error(_: Json<Value>) -> impl IntoResponse {
+    (
+        reqwest::StatusCode::BAD_REQUEST,
+        Json(json!({
+            "msg": "invalid payload: unsupported content block",
+            "code": "BadRequest"
+        })),
+    )
 }

@@ -280,11 +280,9 @@ async fn forward_messages(
                         }
 
                         let message = value
-                            .get("error")
-                            .and_then(|item| item.get("message"))
-                            .and_then(Value::as_str)
-                            .unwrap_or("upstream returned an error")
-                            .to_string();
+                            .as_object()
+                            .and_then(extract_error_message_from_json_map)
+                            .unwrap_or_else(|| summarize_json_for_error(&value));
 
                         (
                             status_code,
@@ -660,24 +658,7 @@ fn extract_upstream_error_message_from_text(body: &str) -> String {
 
 fn extract_json_error_message_from_text(body: &str) -> Option<String> {
     let value = serde_json::from_str::<Value>(body).ok()?;
-
-    value
-        .get("error")
-        .and_then(|item| item.get("message"))
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-        .or_else(|| {
-            value
-                .get("message")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-        .or_else(|| {
-            value
-                .get("error")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-        })
+    value.as_object().and_then(extract_error_message_from_json_map)
 }
 
 fn extract_upstream_input_tokens(body: Option<&Value>) -> Option<u64> {
@@ -686,6 +667,12 @@ fn extract_upstream_input_tokens(body: Option<&Value>) -> Option<u64> {
 }
 
 fn extract_error_message_from_json(body: &Value) -> Option<String> {
+    body.as_object().and_then(extract_error_message_from_json_map)
+}
+
+fn extract_error_message_from_json_map(
+    body: &serde_json::Map<String, Value>,
+) -> Option<String> {
     body.get("error")
         .and_then(|item| item.get("message"))
         .and_then(Value::as_str)
@@ -696,10 +683,38 @@ fn extract_error_message_from_json(body: &Value) -> Option<String> {
                 .map(ToOwned::to_owned)
         })
         .or_else(|| {
+            body.get("msg")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| {
+            body.get("detail")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| {
+            body.get("error_description")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| {
             body.get("error")
                 .and_then(Value::as_str)
                 .map(ToOwned::to_owned)
         })
+}
+
+fn summarize_json_for_error(value: &Value) -> String {
+    let raw = serde_json::to_string(value).unwrap_or_else(|_| String::new());
+    if raw.is_empty() {
+        return "upstream returned an error".to_string();
+    }
+
+    const LIMIT: usize = 240;
+    if raw.len() <= LIMIT {
+        return raw;
+    }
+    format!("{}...", &raw[..LIMIT])
 }
 
 fn is_count_tokens_unsupported(status: StatusCode) -> bool {
