@@ -14,7 +14,10 @@ export type Gateway = {
   listen_host: string;
   listen_port: number;
   inbound_protocol: string;
+  upstream_protocol: string;
+  protocol_config_json: Record<string, unknown>;
   default_provider_id: string;
+  default_model?: string | null;
   enabled: boolean;
   runtime_status?: 'running' | 'stopped' | 'error' | string;
   last_error?: string | null;
@@ -47,6 +50,8 @@ export type CreateGatewayInput = {
   listen_host: string;
   listen_port: number;
   inbound_protocol: string;
+  upstream_protocol: string;
+  protocol_config_json: Record<string, unknown>;
   default_provider_id: string;
   default_model: string;
   enabled: boolean;

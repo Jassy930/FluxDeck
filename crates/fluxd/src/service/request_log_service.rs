@@ -1,4 +1,5 @@
 use anyhow::Result;
+use serde_json::Value;
 use sqlx::SqlitePool;
 
 #[derive(Debug, Clone)]
@@ -20,6 +21,26 @@ pub struct RequestLogService {
 impl RequestLogService {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
+    }
+
+    pub async fn append_and_trim_with_dimensions(
+        &self,
+        mut entry: RequestLogEntry,
+        keep: i64,
+        dimensions: &Value,
+    ) -> Result<()> {
+        let should_attach_dimensions =
+            dimensions.as_object().is_some_and(|item| !item.is_empty())
+                && (entry.status_code >= 400 || entry.error.is_some());
+        if should_attach_dimensions {
+            let dimensions_text = format!("dimensions={dimensions}");
+            entry.error = Some(match entry.error.take() {
+                Some(error) => format!("{error} | {dimensions_text}"),
+                None => dimensions_text,
+            });
+        }
+
+        self.append_and_trim(entry, keep).await
     }
 
     pub async fn append_and_trim(&self, entry: RequestLogEntry, keep: i64) -> Result<()> {

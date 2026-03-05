@@ -88,6 +88,8 @@ async fn create_gateway(
                 listen_host: String::new(),
                 listen_port: 0,
                 inbound_protocol: String::new(),
+                upstream_protocol: "provider_default".to_string(),
+                protocol_config_json: json!({}),
                 default_provider_id: String::new(),
                 default_model: None,
                 enabled: false,

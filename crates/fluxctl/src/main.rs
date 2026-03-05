@@ -45,16 +45,22 @@ async fn main() -> Result<()> {
                 listen_host,
                 listen_port,
                 inbound_protocol,
+                upstream_protocol,
+                protocol_config_json,
                 default_provider_id,
                 default_model,
                 enabled,
             } => {
+                let protocol_config_json: serde_json::Value =
+                    serde_json::from_str(&protocol_config_json)?;
                 let payload = json!({
                     "id": id,
                     "name": name,
                     "listen_host": listen_host,
                     "listen_port": listen_port,
                     "inbound_protocol": inbound_protocol,
+                    "upstream_protocol": upstream_protocol,
+                    "protocol_config_json": protocol_config_json,
                     "default_provider_id": default_provider_id,
                     "default_model": default_model,
                     "enabled": enabled

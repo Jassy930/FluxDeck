@@ -6,6 +6,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{oneshot, RwLock};
 use tokio::task::JoinHandle;
 
+use crate::http::anthropic_routes::{build_anthropic_router, AnthropicRouteState};
 use crate::http::openai_routes::{build_openai_router, OpenAiRouteState};
 use crate::repo::gateway_repo::GatewayRepo;
 
@@ -77,8 +78,24 @@ impl GatewayManager {
         let bind_addr = format!("{}:{}", gateway.listen_host, gateway.listen_port);
         let listener = TcpListener::bind(bind_addr).await?;
 
+        let gateway_id = gateway.id.clone();
+        let app = match gateway.inbound_protocol.as_str() {
+            "openai" => build_openai_router(OpenAiRouteState::new(
+                self.pool.clone(),
+                gateway_id.clone(),
+            )),
+            "anthropic" => build_anthropic_router(AnthropicRouteState::new(
+                self.pool.clone(),
+                gateway_id.clone(),
+            )),
+            unsupported => {
+                return Err(anyhow!(
+                    "unsupported inbound protocol `{unsupported}` for gateway `{gateway_id}`"
+                ))
+            }
+        };
+
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let app = build_openai_router(OpenAiRouteState::new(self.pool.clone(), gateway.id));
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, app)
                 .with_graceful_shutdown(async move {

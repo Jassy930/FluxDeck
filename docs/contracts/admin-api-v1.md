@@ -37,6 +37,8 @@
 - `listen_host: string`
 - `listen_port: number`
 - `inbound_protocol: string`
+- `upstream_protocol: string`
+- `protocol_config_json: object`
 - `default_provider_id: string`
 - `default_model: string | null`
 - `enabled: boolean`
@@ -44,6 +46,14 @@
 ### `POST /admin/gateways`
 
 请求体与响应体字段同上；创建成功返回 `201`.
+
+`protocol_config_json` 约定（当前已使用字段）：
+
+- `compatibility_mode?: "strict" | "compatible" | "permissive"`
+  - 默认：`"compatible"`
+  - `strict`：禁用降级与扩展能力
+  - `compatible`：优先兼容（必要时降级）
+  - `permissive`：允许扩展字段透传
 
 ### `POST /admin/gateways/{id}/start`
 ### `POST /admin/gateways/{id}/stop`
@@ -66,6 +76,11 @@
 - `latency_ms: number`
 - `error: string | null`
 - `created_at: string`
+
+说明：
+
+- `error` 字段在兼容模式相关路径下可能附带维度标签，格式示例：
+  - `dimensions={"compatibility_mode":"compatible","event":"degraded_to_estimate"}`
 
 ## 版本策略
 

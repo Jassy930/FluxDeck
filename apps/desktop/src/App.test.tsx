@@ -70,13 +70,15 @@ describe('provider section', () => {
         };
       },
       createGateway: async (input) => {
-        calls.push(`createGateway:${input.id}`);
+        calls.push(`createGateway:${input.id}:${input.upstream_protocol}`);
         return {
           id: input.id,
           name: input.name,
           listen_host: input.listen_host,
           listen_port: input.listen_port,
           inbound_protocol: input.inbound_protocol,
+          upstream_protocol: input.upstream_protocol,
+          protocol_config_json: input.protocol_config_json,
           default_provider_id: input.default_provider_id,
           enabled: input.enabled,
         };
@@ -143,6 +145,8 @@ describe('gateway section', () => {
             listen_host: '127.0.0.1',
             listen_port: 18080,
             inbound_protocol: 'openai',
+            upstream_protocol: 'provider_default',
+            protocol_config_json: {},
             default_provider_id: 'provider_main',
             enabled: true,
             runtime_status: 'error',
@@ -175,13 +179,15 @@ describe('gateway section', () => {
         throw new Error('not used');
       },
       createGateway: async (input) => {
-        calls.push(`createGateway:${input.id}`);
+        calls.push(`createGateway:${input.id}:${input.upstream_protocol}`);
         return {
           id: input.id,
           name: input.name,
           listen_host: input.listen_host,
           listen_port: input.listen_port,
           inbound_protocol: input.inbound_protocol,
+          upstream_protocol: input.upstream_protocol,
+          protocol_config_json: input.protocol_config_json,
           default_provider_id: input.default_provider_id,
           enabled: input.enabled,
         };
@@ -193,14 +199,16 @@ describe('gateway section', () => {
       name: 'UI Gateway',
       listen_host: '127.0.0.1',
       listen_port: 18080,
-      inbound_protocol: 'openai',
+      inbound_protocol: 'anthropic',
+      upstream_protocol: 'openai',
+      protocol_config_json: { compatibility_mode: 'compatible' },
       default_provider_id: 'provider_ui_1',
-      default_model: 'gpt-4o-mini',
+      default_model: 'claude-3-7-sonnet',
       enabled: true,
     });
 
     expect(calls).toEqual([
-      'createGateway:gateway_ui_1',
+      'createGateway:gateway_ui_1:openai',
       'listProviders',
       'listGateways',
       'listLogs',

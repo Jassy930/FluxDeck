@@ -22,6 +22,7 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length) if length > 0 else b"{}"
         data = json.loads(raw.decode("utf-8"))
         model = data.get("model", "unknown")
+        content = "passthrough-ok" if data.get("x_passthrough") is not None else "pong"
 
         self._json_response(
             200,
@@ -32,7 +33,7 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
                 "choices": [
                     {
                         "index": 0,
-                        "message": {"role": "assistant", "content": "pong"},
+                        "message": {"role": "assistant", "content": content},
                         "finish_reason": "stop",
                     }
                 ],

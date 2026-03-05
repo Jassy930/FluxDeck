@@ -14,9 +14,13 @@ export function GatewayForm({ onSubmit }: GatewayFormProps) {
           name: 'Demo Gateway',
           listen_host: '127.0.0.1',
           listen_port: 18080,
-          inbound_protocol: 'openai',
+          inbound_protocol: 'anthropic',
+          upstream_protocol: 'openai',
+          protocol_config_json: {
+            compatibility_mode: 'compatible',
+          },
           default_provider_id: 'provider_demo',
-          default_model: 'gpt-4o-mini',
+          default_model: 'claude-3-7-sonnet',
           enabled: true,
         })
       }

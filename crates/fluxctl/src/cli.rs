@@ -60,6 +60,10 @@ pub enum GatewayCmd {
         listen_port: i64,
         #[arg(long = "inbound-protocol", default_value = "openai")]
         inbound_protocol: String,
+        #[arg(long = "upstream-protocol", default_value = "provider_default")]
+        upstream_protocol: String,
+        #[arg(long = "protocol-config-json", default_value = "{}")]
+        protocol_config_json: String,
         #[arg(long = "default-provider-id")]
         default_provider_id: String,
         #[arg(long = "default-model")]
