@@ -15,13 +15,13 @@ pub fn encode_openai_chat_request(ir: &IrRequest) -> Result<Value, FluxError> {
     for part in &ir.system_parts {
         messages.push(json!({
             "role": "system",
-            "content": sanitize_for_openai(part)
+            "content": normalize_content_for_openai(part)
         }));
     }
     for message in &ir.messages {
         messages.push(json!({
             "role": &message.role,
-            "content": sanitize_for_openai(&message.content)
+            "content": normalize_content_for_openai(&message.content)
         }));
     }
 
@@ -79,6 +79,49 @@ fn sanitize_for_openai(value: &Value) -> Value {
         Value::Array(items) => Value::Array(items.iter().map(sanitize_for_openai).collect()),
         _ => value.clone(),
     }
+}
+
+fn normalize_content_for_openai(value: &Value) -> Value {
+    if let Some(text) = extract_text_block_text(value) {
+        return Value::String(text.to_string());
+    }
+
+    if let Some(joined) = join_text_blocks(value) {
+        return Value::String(joined);
+    }
+
+    sanitize_for_openai(value)
+}
+
+fn extract_text_block_text(value: &Value) -> Option<&str> {
+    let object = value.as_object()?;
+    let block_type = object.get("type")?.as_str()?;
+    if block_type != "text" {
+        return None;
+    }
+    object.get("text")?.as_str()
+}
+
+fn join_text_blocks(value: &Value) -> Option<String> {
+    let items = value.as_array()?;
+    if items.is_empty() {
+        return Some(String::new());
+    }
+
+    let mut chunks = Vec::with_capacity(items.len());
+    for item in items {
+        if let Some(text) = item.as_str() {
+            chunks.push(text.to_string());
+            continue;
+        }
+        if let Some(text) = extract_text_block_text(item) {
+            chunks.push(text.to_string());
+            continue;
+        }
+        return None;
+    }
+
+    Some(chunks.join("\n"))
 }
 
 fn normalize_tools(tools: &[Value]) -> Result<Vec<Value>, FluxError> {

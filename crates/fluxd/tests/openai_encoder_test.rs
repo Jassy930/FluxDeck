@@ -52,10 +52,7 @@ fn maps_system_parts_to_openai_system_messages() {
     assert_eq!(payload["messages"][0]["role"], "system");
     assert_eq!(payload["messages"][0]["content"], json!("you are helpful"));
     assert_eq!(payload["messages"][1]["role"], "system");
-    assert_eq!(
-        payload["messages"][1]["content"],
-        json!({"type": "text", "text": "be concise"})
-    );
+    assert_eq!(payload["messages"][1]["content"], json!("be concise"));
     assert_eq!(payload["messages"][2]["role"], "user");
 }
 
@@ -279,10 +276,29 @@ fn strips_cache_control_from_anthropic_content_blocks() {
 
     let payload = encode_openai_chat_request(&ir).expect("encode and sanitize content");
 
-    assert_eq!(payload["messages"][0]["content"]["cache_control"], Value::Null);
-    assert_eq!(
-        payload["messages"][1]["content"][0]["cache_control"],
-        Value::Null
-    );
-    assert_eq!(payload["messages"][1]["content"][0]["text"], "hello");
+    assert_eq!(payload["messages"][0]["content"], json!("sys"));
+    assert_eq!(payload["messages"][1]["content"], json!("hello"));
+}
+
+#[test]
+fn normalizes_text_block_array_to_string_content() {
+    let ir = IrRequest {
+        source_protocol: "anthropic".to_string(),
+        target_protocol: "openai".to_string(),
+        model: Some("qwen3-coder-plus".to_string()),
+        system_parts: Vec::new(),
+        messages: vec![ProtocolIrMessage {
+            role: "user".to_string(),
+            content: json!([
+                {"type":"text","text":"line1"},
+                {"type":"text","text":"line2"}
+            ]),
+        }],
+        tools: Vec::new(),
+        extensions: BTreeMap::new(),
+        metadata: BTreeMap::new(),
+    };
+
+    let payload = encode_openai_chat_request(&ir).expect("encode text block array");
+    assert_eq!(payload["messages"][0]["content"], json!("line1\nline2"));
 }
