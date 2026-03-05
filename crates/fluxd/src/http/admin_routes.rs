@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use serde::Serialize;
@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
 
 use crate::domain::gateway::{CreateGatewayInput, Gateway};
-use crate::domain::provider::{CreateProviderInput, Provider};
+use crate::domain::provider::{CreateProviderInput, Provider, UpdateProviderInput};
 use crate::http::dto::BasicOk;
 use crate::repo::gateway_repo::GatewayRepo;
 use crate::runtime::gateway_manager::GatewayManager;
@@ -39,6 +39,7 @@ impl AdminApiState {
 pub fn build_admin_router(state: AdminApiState) -> Router {
     Router::new()
         .route("/admin/providers", post(create_provider).get(list_providers))
+        .route("/admin/providers/{id}", put(update_provider))
         .route("/admin/gateways", post(create_gateway).get(list_gateways))
         .route("/admin/gateways/{id}/start", post(start_gateway))
         .route("/admin/gateways/{id}/stop", post(stop_gateway))
@@ -71,6 +72,29 @@ async fn list_providers(State(state): State<AdminApiState>) -> (StatusCode, Json
     match state.provider_service.list_providers().await {
         Ok(items) => (StatusCode::OK, Json(items)),
         Err(_) => (StatusCode::OK, Json(vec![])),
+    }
+}
+
+async fn update_provider(
+    State(state): State<AdminApiState>,
+    Path(provider_id): Path<String>,
+    Json(input): Json<UpdateProviderInput>,
+) -> (StatusCode, Json<Value>) {
+    match state.provider_service.update_provider(&provider_id, input).await {
+        Ok(Some(provider)) => (StatusCode::OK, Json(json!(provider))),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": "provider not found",
+                "id": provider_id
+            })),
+        ),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": err.to_string()
+            })),
+        ),
     }
 }
 

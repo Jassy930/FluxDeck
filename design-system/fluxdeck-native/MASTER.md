@@ -7,7 +7,7 @@
 ---
 
 **Project:** FluxDeck Native
-**Generated:** 2026-03-03 17:01:01
+**Generated:** 2026-03-05 19:21:53
 **Category:** Analytics Dashboard
 
 ---
@@ -163,11 +163,11 @@
 
 ### Page Pattern
 
-**Pattern Name:** Enterprise Gateway
+**Pattern Name:** Lead Magnet + Form
 
-- **Conversion Strategy:**  logo carousel,  tab switching for industries, Path selection (I am a...). Mega menu navigation. Trust signals prominent.
-- **CTA Placement:** Contact Sales (Primary) + Login (Secondary)
-- **Section Order:** 1. Hero (Video/Mission), 2. Solutions by Industry, 3. Solutions by Role, 4. Client Logos, 5. Contact Sales
+- **Conversion Strategy:** Form fields ≤ 3 for best conversion. Offer valuable lead magnet preview. Show form submission progress.
+- **CTA Placement:** Form CTA: Submit button
+- **Section Order:** 1. Hero (benefit headline), 2. Lead magnet preview (ebook cover, checklist, etc), 3. Form (minimal fields), 4. CTA submit
 
 ---
 

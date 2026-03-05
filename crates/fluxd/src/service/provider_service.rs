@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sqlx::SqlitePool;
 
-use crate::domain::provider::{CreateProviderInput, Provider};
+use crate::domain::provider::{CreateProviderInput, Provider, UpdateProviderInput};
 use crate::repo::provider_repo::ProviderRepo;
 
 #[derive(Clone)]
@@ -26,5 +26,13 @@ impl ProviderService {
 
     pub async fn list_providers(&self) -> Result<Vec<Provider>> {
         self.repo.list().await
+    }
+
+    pub async fn update_provider(
+        &self,
+        provider_id: &str,
+        input: UpdateProviderInput,
+    ) -> Result<Option<Provider>> {
+        self.repo.update(provider_id, input).await
     }
 }

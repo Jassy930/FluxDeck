@@ -1,5 +1,7 @@
 import Foundation
 
+let defaultAdminBaseURL = "http://127.0.0.1:7777"
+
 enum GatewayRuntimeCategory: String {
     case running
     case stopped
@@ -25,6 +27,24 @@ struct CreateProviderInput: Encodable {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case name
+        case kind
+        case baseURL = "base_url"
+        case apiKey = "api_key"
+        case models
+        case enabled
+    }
+}
+
+struct UpdateProviderInput: Encodable {
+    let name: String
+    let kind: String
+    let baseURL: String
+    let apiKey: String
+    let models: [String]
+    let enabled: Bool
+
+    enum CodingKeys: String, CodingKey {
         case name
         case kind
         case baseURL = "base_url"
@@ -65,6 +85,8 @@ struct AdminProvider: Decodable, Identifiable {
     let name: String
     let kind: String
     let baseURL: String
+    let apiKey: String
+    let models: [String]
     let enabled: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -72,6 +94,8 @@ struct AdminProvider: Decodable, Identifiable {
         case name
         case kind
         case baseURL = "base_url"
+        case apiKey = "api_key"
+        case models
         case enabled
     }
 }
@@ -128,7 +152,7 @@ struct AdminApiClient {
     let baseURL: URL
     var session: URLSession = .shared
 
-    init(baseURL: URL = URL(string: "http://127.0.0.1:7777")!, session: URLSession = .shared) {
+    init(baseURL: URL = URL(string: defaultAdminBaseURL)!, session: URLSession = .shared) {
         self.baseURL = baseURL
         self.session = session
     }
@@ -150,6 +174,11 @@ struct AdminApiClient {
 
     func createProvider(_ input: CreateProviderInput) async throws -> AdminProvider {
         let data = try await post(path: "/admin/providers", body: input)
+        return try JSONDecoder().decode(AdminProvider.self, from: data)
+    }
+
+    func updateProvider(id: String, input: UpdateProviderInput) async throws -> AdminProvider {
+        let data = try await put(path: "/admin/providers/\(id)", body: input)
         return try JSONDecoder().decode(AdminProvider.self, from: data)
     }
 
@@ -212,6 +241,20 @@ struct AdminApiClient {
         }
         return data
     }
+
+    private func put(path: String, body: some Encodable) async throws -> Data {
+        let url = baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return data
+    }
 }
 
 private struct EmptyRequest: Encodable {}
@@ -260,3 +303,60 @@ func filterLogs(
         return gatewayMatched && providerMatched && statusMatched && errorMatched
     }
 }
+
+func normalizedAdminBaseURL(_ rawValue: String) -> URL? {
+    let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+        return nil
+    }
+
+    let candidate = trimmed.contains("://") ? trimmed : "http://\(trimmed)"
+    guard let url = URL(string: candidate),
+          let scheme = url.scheme?.lowercased(),
+          ["http", "https"].contains(scheme),
+          url.host != nil
+    else {
+        return nil
+    }
+
+    return url
+}
+
+func recentLogs(_ logs: [AdminLog], limit: Int = 10) -> [AdminLog] {
+    guard limit > 0 else {
+        return []
+    }
+
+    let sorted = logs.sorted { lhs, rhs in
+        let lhsDate = parseAdminLogDate(lhs.createdAt)
+        let rhsDate = parseAdminLogDate(rhs.createdAt)
+
+        switch (lhsDate, rhsDate) {
+        case let (left?, right?):
+            return left > right
+        default:
+            return lhs.createdAt > rhs.createdAt
+        }
+    }
+
+    return Array(sorted.prefix(limit))
+}
+
+private func parseAdminLogDate(_ value: String) -> Date? {
+    if let date = adminLogDateWithFractional.date(from: value) {
+        return date
+    }
+    return adminLogDateWithoutFractional.date(from: value)
+}
+
+private let adminLogDateWithFractional: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+}()
+
+private let adminLogDateWithoutFractional: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter
+}()

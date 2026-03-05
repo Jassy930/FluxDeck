@@ -74,6 +74,44 @@ async fn admin_api_manages_resources() {
 
     let logs: serde_json::Value = logs_resp.json().await.expect("decode logs");
     assert!(logs.is_array());
+
+    let update_provider_resp = client
+        .put(format!("{base}/admin/providers/provider_admin_1"))
+        .json(&json!({
+            "name": "Admin Provider Updated",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-admin-updated",
+            "models": ["gpt-4.1-mini"],
+            "enabled": false
+        }))
+        .send()
+        .await
+        .expect("update provider request");
+    assert_eq!(update_provider_resp.status(), reqwest::StatusCode::OK);
+
+    let updated_provider: serde_json::Value = update_provider_resp
+        .json()
+        .await
+        .expect("decode updated provider");
+    assert_eq!(updated_provider.get("id"), Some(&json!("provider_admin_1")));
+    assert_eq!(updated_provider.get("name"), Some(&json!("Admin Provider Updated")));
+    assert_eq!(updated_provider.get("enabled"), Some(&json!(false)));
+
+    let not_found_update_resp = client
+        .put(format!("{base}/admin/providers/provider_not_found"))
+        .json(&json!({
+            "name": "Unknown Provider",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-unknown",
+            "models": ["gpt-4.1-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("update missing provider request");
+    assert_eq!(not_found_update_resp.status(), reqwest::StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

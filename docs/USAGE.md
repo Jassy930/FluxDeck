@@ -78,6 +78,21 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider create \
 cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider list
 ```
 
+更新 Provider 配置（Admin API）：
+
+```bash
+curl -X PUT http://127.0.0.1:7777/admin/providers/provider_main \
+  -H 'content-type: application/json' \
+  -d '{
+    "name": "Main Provider Updated",
+    "kind": "openai",
+    "base_url": "https://api.openai.com/v1",
+    "api_key": "sk-xxx-updated",
+    "models": ["gpt-4.1-mini"],
+    "enabled": true
+  }'
+```
+
 ## 4. 配置并启动 Gateway
 
 创建 Gateway：

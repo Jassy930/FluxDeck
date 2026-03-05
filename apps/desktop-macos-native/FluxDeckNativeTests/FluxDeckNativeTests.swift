@@ -10,6 +10,8 @@ final class FluxDeckNativeTests: XCTestCase {
             "name": "Main Provider",
             "kind": "openai",
             "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-main",
+            "models": ["gpt-4o-mini"],
             "enabled": true
           }
         ]
@@ -34,6 +36,7 @@ final class FluxDeckNativeTests: XCTestCase {
 
         XCTAssertEqual(providers.count, 1)
         XCTAssertEqual(providers.first?.id, "provider_main")
+        XCTAssertEqual(providers.first?.apiKey, "sk-main")
         XCTAssertEqual(gateways.count, 1)
         XCTAssertEqual(gateways.first?.defaultProviderId, "provider_main")
     }
@@ -45,6 +48,8 @@ final class FluxDeckNativeTests: XCTestCase {
                 name: "Main Provider",
                 kind: "openai",
                 baseURL: "https://api.openai.com/v1",
+                apiKey: "sk-test-main",
+                models: ["gpt-4o-mini"],
                 enabled: true
             )
         ]
@@ -104,15 +109,27 @@ final class FluxDeckNativeTests: XCTestCase {
             defaultModel: "gpt-4o-mini",
             enabled: true
         )
+        let updateProviderInput = UpdateProviderInput(
+            name: "UI Provider Updated",
+            kind: "openai",
+            baseURL: "https://api.openai.com/v1",
+            apiKey: "sk-test-updated",
+            models: ["gpt-4.1-mini"],
+            enabled: false
+        )
 
         let providerData = try JSONEncoder().encode(providerInput)
         let gatewayData = try JSONEncoder().encode(gatewayInput)
+        let updateProviderData = try JSONEncoder().encode(updateProviderInput)
 
         let providerJSON = try XCTUnwrap(
             JSONSerialization.jsonObject(with: providerData) as? [String: Any]
         )
         let gatewayJSON = try XCTUnwrap(
             JSONSerialization.jsonObject(with: gatewayData) as? [String: Any]
+        )
+        let updateProviderJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: updateProviderData) as? [String: Any]
         )
 
         XCTAssertEqual(providerJSON["base_url"] as? String, "https://api.openai.com/v1")
@@ -123,6 +140,11 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(gatewayJSON["listen_port"] as? Int, 18080)
         XCTAssertEqual(gatewayJSON["default_provider_id"] as? String, "provider_ui")
         XCTAssertEqual(gatewayJSON["default_model"] as? String, "gpt-4o-mini")
+
+        XCTAssertEqual(updateProviderJSON["base_url"] as? String, "https://api.openai.com/v1")
+        XCTAssertEqual(updateProviderJSON["api_key"] as? String, "sk-test-updated")
+        XCTAssertEqual((updateProviderJSON["models"] as? [String])?.first, "gpt-4.1-mini")
+        XCTAssertEqual(updateProviderJSON["enabled"] as? Bool, false)
     }
 
     func testDecodesLogsPayload() throws {
@@ -186,5 +208,39 @@ final class FluxDeckNativeTests: XCTestCase {
         let errorsOnly = filterLogs(logs, gatewayID: nil, providerID: nil, statusCode: nil, errorsOnly: true)
         XCTAssertEqual(errorsOnly.count, 1)
         XCTAssertEqual(errorsOnly.first?.requestID, "req_err")
+    }
+
+    func testRecentLogsReturnsLatestTenEntriesInDescendingOrder() {
+        let logs = (1...12).map { index in
+            AdminLog(
+                requestID: String(format: "req_%03d", index),
+                gatewayID: "gw",
+                providerID: "pv",
+                model: nil,
+                statusCode: 200,
+                latencyMs: 100,
+                error: nil,
+                createdAt: String(format: "2026-03-03T10:%02d:00Z", index)
+            )
+        }
+
+        let recent = recentLogs(logs, limit: 10)
+
+        XCTAssertEqual(recent.count, 10)
+        XCTAssertEqual(recent.first?.requestID, "req_012")
+        XCTAssertEqual(recent.last?.requestID, "req_003")
+    }
+
+    func testNormalizedAdminBaseURL() {
+        XCTAssertEqual(
+            normalizedAdminBaseURL("127.0.0.1:7777")?.absoluteString,
+            "http://127.0.0.1:7777"
+        )
+        XCTAssertEqual(
+            normalizedAdminBaseURL("https://example.com/admin")?.absoluteString,
+            "https://example.com/admin"
+        )
+        XCTAssertNil(normalizedAdminBaseURL("ftp://example.com"))
+        XCTAssertNil(normalizedAdminBaseURL("not a url"))
     }
 }

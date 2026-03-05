@@ -37,6 +37,28 @@ async fn create_and_get_provider() {
     let listed = service.list_providers().await.expect("list providers");
     assert_eq!(listed.len(), 1);
     assert_provider(&listed[0]);
+
+    let updated = service
+        .update_provider(
+            "provider_1",
+            fluxd::domain::provider::UpdateProviderInput {
+                name: "OpenAI Backup".to_string(),
+                kind: "openai".to_string(),
+                base_url: "https://api.openai.com/v1".to_string(),
+                api_key: "sk-test-2".to_string(),
+                models: vec!["gpt-4.1-mini".to_string()],
+                enabled: false,
+            },
+        )
+        .await
+        .expect("update provider")
+        .expect("provider should exist");
+
+    assert_eq!(updated.id, "provider_1");
+    assert_eq!(updated.name, "OpenAI Backup");
+    assert_eq!(updated.api_key, "sk-test-2");
+    assert_eq!(updated.models, vec!["gpt-4.1-mini".to_string()]);
+    assert!(!updated.enabled);
 }
 
 fn assert_provider(p: &Provider) {

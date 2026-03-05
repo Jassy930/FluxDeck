@@ -6,6 +6,8 @@ struct ProviderListView: View {
     let isSubmitting: Bool
     let error: String?
     let onCreate: () -> Void
+    let onConfigure: (AdminProvider) -> Void
+    let onToggleEnabled: (AdminProvider) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -44,24 +46,50 @@ struct ProviderListView: View {
                 )
             } else {
                 List(providers) { provider in
-                    HStack(alignment: .center, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(provider.name)
-                                .fontWeight(.medium)
-                            Text(provider.baseURL)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .center, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(provider.name)
+                                    .fontWeight(.medium)
+                                Text(provider.id)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(provider.kind.uppercased())
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(.ultraThinMaterial)
+                                .clipShape(Capsule())
+                            Text(provider.enabled ? "Enabled" : "Disabled")
+                                .font(.caption2)
+                                .foregroundStyle(provider.enabled ? .green : .secondary)
                         }
-                        Spacer()
-                        Text(provider.kind.uppercased())
+
+                        Text(provider.baseURL)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Text("Models: \(provider.models.joined(separator: ", "))")
                             .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(.ultraThinMaterial)
-                            .clipShape(Capsule())
-                        Text(provider.enabled ? "Enabled" : "Disabled")
-                            .font(.caption2)
-                            .foregroundStyle(provider.enabled ? .green : .secondary)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        HStack(spacing: 10) {
+                            Button("Configure") {
+                                onConfigure(provider)
+                            }
+                            .buttonStyle(.link)
+                            .disabled(isSubmitting)
+
+                            Button(provider.enabled ? "Disable" : "Enable") {
+                                onToggleEnabled(provider)
+                            }
+                            .buttonStyle(.link)
+                            .disabled(isSubmitting)
+                        }
                     }
                 }
                 .listStyle(.inset)

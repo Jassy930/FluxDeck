@@ -24,6 +24,7 @@ enum SidebarSection: String, CaseIterable, Hashable {
 }
 
 struct ContentView: View {
+    @AppStorage("fluxdeck.native.admin_base_url") private var persistedAdminBaseURL = defaultAdminBaseURL
     @State private var providers: [AdminProvider] = []
     @State private var gateways: [AdminGateway] = []
     @State private var logs: [AdminLog] = []
@@ -33,12 +34,19 @@ struct ContentView: View {
     @State private var loadError: String?
     @State private var lastRefreshedAt: Date?
     @State private var isProviderSheetPresented = false
+    @State private var editingProvider: AdminProvider?
     @State private var isGatewaySheetPresented = false
     @State private var selectedLogGateway = Self.logFilterAll
     @State private var selectedLogProvider = Self.logFilterAll
     @State private var selectedLogStatus = Self.logFilterAll
     @State private var logErrorsOnly = false
-    private let client = AdminApiClient()
+    @State private var adminBaseURLInput = defaultAdminBaseURL
+    @State private var settingsError: String?
+
+    private var client: AdminApiClient {
+        let url = normalizedAdminBaseURL(persistedAdminBaseURL) ?? URL(string: defaultAdminBaseURL)!
+        return AdminApiClient(baseURL: url)
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -52,7 +60,10 @@ struct ContentView: View {
                 headerBar
                 Divider()
                 detailView(for: selectedSection ?? .overview)
+                    .frame(maxWidth: 1280, maxHeight: .infinity, alignment: .topLeading)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
             }
             .frame(minWidth: 920, minHeight: 560)
         }
@@ -61,11 +72,31 @@ struct ContentView: View {
         }
         .onAppear {
             selectedSection = selectedSection ?? .overview
+            adminBaseURLInput = persistedAdminBaseURL
         }
         .sheet(isPresented: $isProviderSheetPresented) {
-            ProviderCreateSheet(isSubmitting: isSubmitting) { input in
-                await createProvider(input)
-            }
+            ProviderFormSheet(
+                mode: .create,
+                isSubmitting: isSubmitting,
+                onCreate: { input in
+                    await createProvider(input)
+                },
+                onUpdate: { providerID, input in
+                    await updateProvider(id: providerID, input: input)
+                }
+            )
+        }
+        .sheet(item: $editingProvider) { provider in
+            ProviderFormSheet(
+                mode: .edit(provider),
+                isSubmitting: isSubmitting,
+                onCreate: { input in
+                    await createProvider(input)
+                },
+                onUpdate: { providerID, input in
+                    await updateProvider(id: providerID, input: input)
+                }
+            )
         }
         .sheet(isPresented: $isGatewaySheetPresented) {
             GatewayCreateSheet(
@@ -81,14 +112,45 @@ struct ContentView: View {
     private func detailView(for section: SidebarSection) -> some View {
         switch section {
         case .overview:
-            OverviewView(metrics: buildDashboardMetrics(providers: providers, gateways: gateways), isLoading: isLoading)
+            OverviewView(
+                metrics: buildDashboardMetrics(providers: providers, gateways: gateways),
+                isLoading: isLoading,
+                logs: recentLogs(logs),
+                onOpenAllLogs: {
+                    selectedSection = .logs
+                    clearLogFilters()
+                },
+                onDrillDownLog: { log in
+                    selectedSection = .logs
+                    selectedLogGateway = log.gatewayID
+                    selectedLogProvider = log.providerID
+                    selectedLogStatus = Self.logFilterAll
+                    logErrorsOnly = false
+                }
+            )
         case .providers:
             ProviderListView(
                 providers: providers,
                 isLoading: isLoading,
                 isSubmitting: isSubmitting,
                 error: loadError,
-                onCreate: { isProviderSheetPresented = true }
+                onCreate: { isProviderSheetPresented = true },
+                onConfigure: { provider in
+                    editingProvider = provider
+                },
+                onToggleEnabled: { provider in
+                    Task {
+                        let input = UpdateProviderInput(
+                            name: provider.name,
+                            kind: provider.kind,
+                            baseURL: provider.baseURL,
+                            apiKey: provider.apiKey,
+                            models: provider.models,
+                            enabled: !provider.enabled
+                        )
+                        await updateProvider(id: provider.id, input: input)
+                    }
+                }
             )
         case .gateways:
             GatewayListView(
@@ -119,7 +181,19 @@ struct ContentView: View {
                 onClearFilters: clearLogFilters
             )
         case .settings:
-            SettingsView(adminURL: client.displayBaseURL)
+            SettingsView(
+                adminURLInput: $adminBaseURLInput,
+                resolvedAdminURL: client.displayBaseURL,
+                isBusy: isLoading || isSubmitting,
+                errorMessage: settingsError,
+                onApply: {
+                    await applyAdminBaseURL()
+                },
+                onReset: {
+                    adminBaseURLInput = defaultAdminBaseURL
+                    settingsError = nil
+                }
+            )
         }
     }
 
@@ -175,6 +249,8 @@ struct ContentView: View {
                     }
                     .buttonStyle(.link)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Refresh error: \(loadError)")
             }
         }
         .padding(.horizontal, 16)
@@ -214,6 +290,22 @@ struct ContentView: View {
         do {
             _ = try await client.createProvider(input)
             isProviderSheetPresented = false
+            loadError = nil
+            await refreshAll()
+        } catch {
+            loadError = error.localizedDescription
+        }
+
+        isSubmitting = false
+    }
+
+    @MainActor
+    private func updateProvider(id: String, input: UpdateProviderInput) async {
+        isSubmitting = true
+
+        do {
+            _ = try await client.updateProvider(id: id, input: input)
+            editingProvider = nil
             loadError = nil
             await refreshAll()
         } catch {
@@ -307,11 +399,28 @@ struct ContentView: View {
         selectedLogStatus = Self.logFilterAll
         logErrorsOnly = false
     }
+
+    @MainActor
+    private func applyAdminBaseURL() async {
+        guard let normalizedURL = normalizedAdminBaseURL(adminBaseURLInput) else {
+            settingsError = "Admin URL 仅支持 http/https，例如 http://127.0.0.1:7777。"
+            return
+        }
+
+        let normalizedValue = normalizedURL.absoluteString
+        persistedAdminBaseURL = normalizedValue
+        adminBaseURLInput = normalizedValue
+        settingsError = nil
+        await refreshAll()
+    }
 }
 
 private struct OverviewView: View {
     let metrics: DashboardMetrics
     let isLoading: Bool
+    let logs: [AdminLog]
+    let onOpenAllLogs: () -> Void
+    let onDrillDownLog: (AdminLog) -> Void
 
     var body: some View {
         ScrollView {
@@ -339,9 +448,81 @@ private struct OverviewView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Recent Logs")
+                            .font(.headline)
+                        Spacer()
+                        Button("Open Logs") {
+                            onOpenAllLogs()
+                        }
+                        .buttonStyle(.link)
+                    }
+
+                    if logs.isEmpty {
+                        Text("No recent logs.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(logs) { log in
+                            Button {
+                                onDrillDownLog(log)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Text(log.requestID)
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .frame(width: 180, alignment: .leading)
+
+                                    Text("\(log.gatewayID) -> \(log.providerID)")
+                                        .font(.caption)
+                                        .lineLimit(1)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                                    Text("\(log.statusCode)")
+                                        .font(.caption.bold())
+                                        .foregroundStyle(color(for: log.statusCode))
+                                        .frame(width: 40, alignment: .trailing)
+
+                                    Text("\(log.latencyMs) ms")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 68, alignment: .trailing)
+
+                                    Text(log.createdAt)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .frame(width: 170, alignment: .trailing)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Open log \(log.requestID)")
+                        }
+                    }
+                }
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func color(for statusCode: Int) -> Color {
+        switch statusCode {
+        case 200..<300:
+            return .green
+        case 400..<500:
+            return .orange
+        case 500..<600:
+            return .red
+        default:
+            return .secondary
         }
     }
 }
@@ -509,12 +690,91 @@ private struct LogsPanelView: View {
 }
 
 private struct SettingsView: View {
-    let adminURL: String
+    @Binding var adminURLInput: String
+    let resolvedAdminURL: String
+    let isBusy: Bool
+    let errorMessage: String?
+    let onApply: () async -> Void
+    let onReset: () -> Void
+
+    @FocusState private var isAddressFocused: Bool
 
     var body: some View {
         Form {
             Section("Connection") {
-                LabeledContent("Admin API", value: adminURL)
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Admin API Endpoint", systemImage: "network")
+                        .font(.headline)
+
+                    Text("Configure the fluxd Admin API address used by this native shell.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    TextField("http://127.0.0.1:7777", text: $adminURLInput)
+                        .font(.system(.body, design: .monospaced))
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isAddressFocused)
+                        .onSubmit {
+                            Task {
+                                await onApply()
+                            }
+                        }
+
+                    if let errorMessage {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .accessibilityLabel("Settings error: \(errorMessage)")
+                    }
+                }
+            }
+
+            Section("Applied") {
+                LabeledContent("Current Endpoint") {
+                    Text(resolvedAdminURL)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                }
+
+                HStack(spacing: 10) {
+                    if isBusy {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Refreshing...")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Spacer()
+
+                    Button("Reset Default") {
+                        onReset()
+                        isAddressFocused = true
+                    }
+                    .disabled(isBusy)
+
+                    Button("Apply & Refresh") {
+                        Task {
+                            await onApply()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isBusy)
+                    .keyboardShortcut(.return, modifiers: [.command])
+                }
+            }
+
+            Section("Notes") {
+                Label("Default local endpoint: http://127.0.0.1:7777", systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Label("Only http/https URLs are accepted.", systemImage: "shield")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text("This native shell only consumes fluxd Admin API and does not duplicate backend business logic.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -570,42 +830,185 @@ private struct ConnectionBadge: View {
     }
 }
 
-private struct ProviderCreateSheet: View {
+private struct ProviderFormSheet: View {
+    enum Mode {
+        case create
+        case edit(AdminProvider)
+    }
+
+    let mode: Mode
     let isSubmitting: Bool
-    let onSubmit: (CreateProviderInput) async -> Void
+    let onCreate: (CreateProviderInput) async -> Void
+    let onUpdate: (String, UpdateProviderInput) async -> Void
 
     @Environment(\.dismiss) private var dismiss
 
-    @State private var id = ""
-    @State private var name = ""
-    @State private var kind = "openai"
-    @State private var baseURL = "https://api.openai.com/v1"
-    @State private var apiKey = ""
-    @State private var models = "gpt-4o-mini"
-    @State private var enabled = true
+    @State private var id: String
+    @State private var name: String
+    @State private var kind: String
+    @State private var baseURL: String
+    @State private var apiKey: String
+    @State private var models: String
+    @State private var enabled: Bool
+    @State private var showApiKey = false
     @State private var validationError: String?
+
+    init(
+        mode: Mode,
+        isSubmitting: Bool,
+        onCreate: @escaping (CreateProviderInput) async -> Void,
+        onUpdate: @escaping (String, UpdateProviderInput) async -> Void
+    ) {
+        self.mode = mode
+        self.isSubmitting = isSubmitting
+        self.onCreate = onCreate
+        self.onUpdate = onUpdate
+
+        switch mode {
+        case .create:
+            _id = State(initialValue: "")
+            _name = State(initialValue: "")
+            _kind = State(initialValue: "openai")
+            _baseURL = State(initialValue: "https://api.openai.com/v1")
+            _apiKey = State(initialValue: "")
+            _models = State(initialValue: "gpt-4o-mini")
+            _enabled = State(initialValue: true)
+        case let .edit(provider):
+            _id = State(initialValue: provider.id)
+            _name = State(initialValue: provider.name)
+            _kind = State(initialValue: provider.kind)
+            _baseURL = State(initialValue: provider.baseURL)
+            _apiKey = State(initialValue: provider.apiKey)
+            _models = State(initialValue: provider.models.joined(separator: ", "))
+            _enabled = State(initialValue: provider.enabled)
+        }
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Provider") {
-                    TextField("ID", text: $id)
-                    TextField("Name", text: $name)
-                    TextField("Kind", text: $kind)
-                    TextField("Base URL", text: $baseURL)
-                    TextField("API Key", text: $apiKey)
-                    TextField("Models (comma separated)", text: $models)
+                Section {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: isCreateMode ? "plus.circle.fill" : "slider.horizontal.3")
+                            .font(.title3)
+                            .foregroundStyle(isCreateMode ? .green : .blue)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(isCreateMode ? "Create Provider" : "Configure Provider")
+                                .font(.headline)
+                            Text("Manage upstream endpoint, API key and model routing in one place.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section("Identity") {
+                    if isCreateMode {
+                        LabeledContent("ID") {
+                            TextField("provider_main", text: $id)
+                                .multilineTextAlignment(.trailing)
+                                .font(.system(.body, design: .monospaced))
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 260)
+                        }
+                    } else {
+                        LabeledContent("ID") {
+                            Text(id)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    LabeledContent("Name") {
+                        TextField("Main Provider", text: $name)
+                            .multilineTextAlignment(.trailing)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 260)
+                    }
+
+                    LabeledContent("Kind") {
+                        TextField("openai", text: $kind)
+                            .multilineTextAlignment(.trailing)
+                            .font(.system(.body, design: .monospaced))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 260)
+                    }
+                }
+
+                Section("Connection") {
+                    LabeledContent("Base URL") {
+                        TextField("https://api.openai.com/v1", text: $baseURL)
+                            .multilineTextAlignment(.trailing)
+                            .font(.system(.body, design: .monospaced))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 300)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("API Key")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Toggle("Show", isOn: $showApiKey)
+                                .toggleStyle(.switch)
+                                .labelsHidden()
+                        }
+
+                        if showApiKey {
+                            TextField("sk-...", text: $apiKey)
+                                .font(.system(.body, design: .monospaced))
+                                .textFieldStyle(.roundedBorder)
+                        } else {
+                            SecureField("sk-...", text: $apiKey)
+                                .font(.system(.body, design: .monospaced))
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+                }
+
+                Section("Models") {
+                    TextEditor(text: $models)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minHeight: 96, maxHeight: 128)
+                        .padding(6)
+                        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                    Text("Use comma or line break to separate models.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Runtime") {
                     Toggle("Enabled", isOn: $enabled)
+                        .toggleStyle(.switch)
+
+                    HStack(spacing: 8) {
+                        Label(parsedModelsPreview, systemImage: "list.bullet.rectangle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Label(enabled ? "Active" : "Disabled", systemImage: enabled ? "checkmark.circle.fill" : "pause.circle")
+                            .font(.caption)
+                            .foregroundStyle(enabled ? .green : .secondary)
+                    }
                 }
 
                 if let validationError {
                     Section {
                         Label(validationError, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.red)
+                        Text("Please fix the highlighted input and submit again.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
-            .navigationTitle("New Provider")
+            .navigationTitle(isCreateMode ? "New Provider" : "Configure Provider")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -614,28 +1017,45 @@ private struct ProviderCreateSheet: View {
                     .disabled(isSubmitting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
+                    Button(isCreateMode ? "Create" : "Save") {
                         submit()
                     }
                     .disabled(isSubmitting)
                 }
             }
-            .frame(width: 520, height: 420)
+            .frame(width: 640, height: 580)
         }
+    }
+
+    private var isCreateMode: Bool {
+        if case .create = mode {
+            return true
+        }
+        return false
     }
 
     private func submit() {
         let normalizedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedKind = kind.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedApiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let parsedModels = models
-            .split(separator: ",")
+            .split(whereSeparator: { $0 == "," || $0 == "\n" })
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        guard !normalizedID.isEmpty, !normalizedName.isEmpty, !normalizedBaseURL.isEmpty, !normalizedApiKey.isEmpty else {
-            validationError = "ID, Name, Base URL and API Key are required."
+        if isCreateMode && normalizedID.isEmpty {
+            validationError = "ID is required."
+            return
+        }
+
+        guard !normalizedName.isEmpty, !normalizedKind.isEmpty, !normalizedBaseURL.isEmpty, !normalizedApiKey.isEmpty else {
+            validationError = "Name, Kind, Base URL and API Key are required."
+            return
+        }
+        guard URL(string: normalizedBaseURL) != nil else {
+            validationError = "Base URL must be a valid URL."
             return
         }
         guard !parsedModels.isEmpty else {
@@ -645,19 +1065,44 @@ private struct ProviderCreateSheet: View {
 
         validationError = nil
 
-        let input = CreateProviderInput(
-            id: normalizedID,
-            name: normalizedName,
-            kind: kind.trimmingCharacters(in: .whitespacesAndNewlines),
-            baseURL: normalizedBaseURL,
-            apiKey: normalizedApiKey,
-            models: parsedModels,
-            enabled: enabled
-        )
+        switch mode {
+        case .create:
+            let input = CreateProviderInput(
+                id: normalizedID,
+                name: normalizedName,
+                kind: normalizedKind,
+                baseURL: normalizedBaseURL,
+                apiKey: normalizedApiKey,
+                models: parsedModels,
+                enabled: enabled
+            )
 
-        Task {
-            await onSubmit(input)
+            Task {
+                await onCreate(input)
+            }
+        case .edit:
+            let input = UpdateProviderInput(
+                name: normalizedName,
+                kind: normalizedKind,
+                baseURL: normalizedBaseURL,
+                apiKey: normalizedApiKey,
+                models: parsedModels,
+                enabled: enabled
+            )
+
+            Task {
+                await onUpdate(normalizedID, input)
+            }
         }
+    }
+
+    private var parsedModelsPreview: String {
+        let count = models
+            .split(whereSeparator: { $0 == "," || $0 == "\n" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .count
+        return count == 1 ? "1 model configured" : "\(count) models configured"
     }
 }
 

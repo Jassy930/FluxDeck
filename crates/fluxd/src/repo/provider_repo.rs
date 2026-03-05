@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sqlx::{Row, SqlitePool};
 
-use crate::domain::provider::{CreateProviderInput, Provider};
+use crate::domain::provider::{CreateProviderInput, Provider, UpdateProviderInput};
 
 #[derive(Clone)]
 pub struct ProviderRepo {
@@ -85,6 +85,66 @@ impl ProviderRepo {
             api_key: row.get("api_key"),
             models,
             enabled: row.get::<i64, _>("enabled") != 0,
+        }))
+    }
+
+    pub async fn update(
+        &self,
+        provider_id: &str,
+        input: UpdateProviderInput,
+    ) -> Result<Option<Provider>> {
+        let mut tx = self.pool.begin().await?;
+
+        let result = sqlx::query(
+            r#"
+            UPDATE providers
+            SET name = ?1, kind = ?2, base_url = ?3, api_key = ?4, enabled = ?5
+            WHERE id = ?6
+            "#,
+        )
+        .bind(&input.name)
+        .bind(&input.kind)
+        .bind(&input.base_url)
+        .bind(&input.api_key)
+        .bind(if input.enabled { 1_i64 } else { 0_i64 })
+        .bind(provider_id)
+        .execute(&mut *tx)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+
+        sqlx::query("DELETE FROM provider_models WHERE provider_id = ?1")
+            .bind(provider_id)
+            .execute(&mut *tx)
+            .await?;
+
+        for model in &input.models {
+            let model_id = format!("{}_{}", provider_id, model.replace('/', "_"));
+            sqlx::query(
+                r#"
+                INSERT INTO provider_models (id, provider_id, model_name)
+                VALUES (?1, ?2, ?3)
+                "#,
+            )
+            .bind(model_id)
+            .bind(provider_id)
+            .bind(model)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+
+        Ok(Some(Provider {
+            id: provider_id.to_string(),
+            name: input.name,
+            kind: input.kind,
+            base_url: input.base_url,
+            api_key: input.api_key,
+            models: input.models,
+            enabled: input.enabled,
         }))
     }
 

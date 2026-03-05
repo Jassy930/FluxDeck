@@ -26,6 +26,24 @@
 
 请求体与响应体字段同上；创建成功返回 `201`.
 
+### `PUT /admin/providers/{id}`
+
+更新指定 Provider（`id` 由路径指定，不可变更）。
+
+请求体字段：
+
+- `name: string`
+- `kind: string`
+- `base_url: string`
+- `api_key: string`
+- `models: string[]`
+- `enabled: boolean`
+
+响应：
+
+- 成功：`200`，返回更新后的 Provider（字段同 `GET /admin/providers`）
+- 不存在：`404`
+
 ## 2) Gateway
 
 ### `GET /admin/gateways`
