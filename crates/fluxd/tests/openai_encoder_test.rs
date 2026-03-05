@@ -220,3 +220,69 @@ fn returns_error_when_tool_is_not_object() {
         })
     );
 }
+
+#[test]
+fn maps_common_anthropic_extensions_to_openai_fields() {
+    let mut extensions = BTreeMap::new();
+    extensions.insert("max_tokens".to_string(), json!(512));
+    extensions.insert("temperature".to_string(), json!(0.2));
+    extensions.insert("top_p".to_string(), json!(0.9));
+    extensions.insert("stop_sequences".to_string(), json!(["\n\nHuman:"]));
+
+    let ir = IrRequest {
+        source_protocol: "anthropic".to_string(),
+        target_protocol: "openai".to_string(),
+        model: Some("qwen3-coder-plus".to_string()),
+        system_parts: Vec::new(),
+        messages: vec![ProtocolIrMessage {
+            role: "user".to_string(),
+            content: Value::String("hello".to_string()),
+        }],
+        tools: Vec::new(),
+        extensions,
+        metadata: BTreeMap::new(),
+    };
+
+    let payload = encode_openai_chat_request(&ir).expect("encode with anthropic extensions");
+
+    assert_eq!(payload["max_tokens"], json!(512));
+    assert_eq!(payload["temperature"], json!(0.2));
+    assert_eq!(payload["top_p"], json!(0.9));
+    assert_eq!(payload["stop"], json!(["\n\nHuman:"]));
+}
+
+#[test]
+fn strips_cache_control_from_anthropic_content_blocks() {
+    let ir = IrRequest {
+        source_protocol: "anthropic".to_string(),
+        target_protocol: "openai".to_string(),
+        model: Some("qwen3-coder-plus".to_string()),
+        system_parts: vec![json!({
+            "type": "text",
+            "text": "sys",
+            "cache_control": {"type": "ephemeral"}
+        })],
+        messages: vec![ProtocolIrMessage {
+            role: "user".to_string(),
+            content: json!([
+                {
+                    "type": "text",
+                    "text": "hello",
+                    "cache_control": {"type": "ephemeral"}
+                }
+            ]),
+        }],
+        tools: Vec::new(),
+        extensions: BTreeMap::new(),
+        metadata: BTreeMap::new(),
+    };
+
+    let payload = encode_openai_chat_request(&ir).expect("encode and sanitize content");
+
+    assert_eq!(payload["messages"][0]["content"]["cache_control"], Value::Null);
+    assert_eq!(
+        payload["messages"][1]["content"][0]["cache_control"],
+        Value::Null
+    );
+    assert_eq!(payload["messages"][1]["content"][0]["text"], "hello");
+}

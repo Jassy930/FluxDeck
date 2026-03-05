@@ -15,23 +15,70 @@ pub fn encode_openai_chat_request(ir: &IrRequest) -> Result<Value, FluxError> {
     for part in &ir.system_parts {
         messages.push(json!({
             "role": "system",
-            "content": part
+            "content": sanitize_for_openai(part)
         }));
     }
     for message in &ir.messages {
         messages.push(json!({
             "role": &message.role,
-            "content": &message.content
+            "content": sanitize_for_openai(&message.content)
         }));
     }
 
     let tools = normalize_tools(&ir.tools)?;
 
-    Ok(json!({
+    let mut payload = json!({
         "model": model,
         "messages": messages,
         "tools": tools
-    }))
+    });
+    apply_common_anthropic_extensions(ir, &mut payload);
+
+    Ok(payload)
+}
+
+fn apply_common_anthropic_extensions(ir: &IrRequest, payload: &mut Value) {
+    let Some(object) = payload.as_object_mut() else {
+        return;
+    };
+
+    copy_extension_if_present(ir, object, "max_tokens", "max_tokens");
+    copy_extension_if_present(ir, object, "temperature", "temperature");
+    copy_extension_if_present(ir, object, "top_p", "top_p");
+    copy_extension_if_present(ir, object, "tool_choice", "tool_choice");
+    copy_extension_if_present(ir, object, "metadata", "metadata");
+
+    if let Some(value) = ir.extensions.get("stop_sequences") {
+        object.insert("stop".to_string(), value.clone());
+    }
+}
+
+fn copy_extension_if_present(
+    ir: &IrRequest,
+    payload: &mut serde_json::Map<String, Value>,
+    source_key: &str,
+    target_key: &str,
+) {
+    if let Some(value) = ir.extensions.get(source_key) {
+        payload.insert(target_key.to_string(), value.clone());
+    }
+}
+
+fn sanitize_for_openai(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut next = serde_json::Map::new();
+            for (key, item) in map {
+                if key == "cache_control" {
+                    continue;
+                }
+                next.insert(key.clone(), sanitize_for_openai(item));
+            }
+            Value::Object(next)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(sanitize_for_openai).collect()),
+        _ => value.clone(),
+    }
 }
 
 fn normalize_tools(tools: &[Value]) -> Result<Vec<Value>, FluxError> {
