@@ -79,9 +79,11 @@ struct OverviewDashboardView: View {
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                     }
                                     .buttonStyle(.plain)
+                                    .focusable(false)
                                 }
 
                                 Button("Open All Logs", action: onOpenAllLogs)
+                                    .focusable(false)
                                     .font(.caption.weight(.medium))
                                     .foregroundStyle(DesignTokens.textPrimary)
                             }

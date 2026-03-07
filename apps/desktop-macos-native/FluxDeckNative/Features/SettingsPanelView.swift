@@ -43,11 +43,13 @@ struct SettingsPanelView: View {
                                     Task { await onApply() }
                                 }
                                 .buttonStyle(.plain)
+                                .focusable(false)
                                 .foregroundStyle(DesignTokens.textPrimary)
                                 .disabled(isBusy)
 
                                 Button("Reset", action: onReset)
                                     .buttonStyle(.plain)
+                                .focusable(false)
                                     .foregroundStyle(DesignTokens.textSecondary)
                                     .disabled(isBusy)
                             }

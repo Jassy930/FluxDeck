@@ -20,6 +20,7 @@ struct GatewayListView: View {
                 } label: {
                     Label("New Gateway", systemImage: "plus")
                 }
+                .focusable(false)
                 .disabled(isSubmitting)
             }
 
@@ -86,6 +87,7 @@ struct GatewayListView: View {
                                         .frame(maxWidth: .infinity)
                                     }
                                     .buttonStyle(.plain)
+                                    .focusable(false)
                                     .padding(.vertical, 10)
                                     .background(DesignTokens.surfacePrimary)
                                     .overlay(

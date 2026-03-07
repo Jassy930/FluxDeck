@@ -511,3 +511,4 @@ git commit -m "chore(native): record redesign acceptance results"
 - 继续收口窗口边缘表现：移除 `AppShellView` 内层容器的圆角裁切、阴影和外边距，避免形成一圈额外黑边，直接让工作区贴合窗口内容区域。
 - 针对 Overview 页的留白再收一轮：缩窄侧栏、压缩顶部模式条与信息条高度，并将第二排改为不等宽布局，避免 `Traffic Summary` 因与 `Recent Requests` 等高而出现大块无效空白。
 - 同步收紧卡片内边距与标题间距，提升监控工作台的信息密度。
+- 重做 `ProviderFormSheet`：弃用系统 `Form + Section + LabeledContent` 结构，改为与主工作台统一的暗色卡片式配置面板；将身份、运行态、连接、模型编辑拆成独立区块，并统一输入框、底部操作栏和错误提示的视觉语言。

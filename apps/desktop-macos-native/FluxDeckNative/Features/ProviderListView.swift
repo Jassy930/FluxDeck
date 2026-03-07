@@ -21,6 +21,7 @@ struct ProviderListView: View {
                 } label: {
                     Label("New Provider", systemImage: "plus")
                 }
+                .focusable(false)
                 .disabled(isSubmitting)
             }
 
@@ -85,6 +86,7 @@ struct ProviderListView: View {
                                             onConfigure(provider)
                                         }
                                         .buttonStyle(.plain)
+                                        .focusable(false)
                                         .foregroundStyle(DesignTokens.textPrimary)
                                         .disabled(isSubmitting)
 
@@ -92,6 +94,7 @@ struct ProviderListView: View {
                                             onToggleEnabled(provider)
                                         }
                                         .buttonStyle(.plain)
+                                        .focusable(false)
                                         .foregroundStyle(DesignTokens.textSecondary)
                                         .disabled(isSubmitting)
                                     }

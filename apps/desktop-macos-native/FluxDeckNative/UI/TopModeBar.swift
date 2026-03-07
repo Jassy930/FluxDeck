@@ -34,6 +34,7 @@ struct TopModeBar: View {
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .focusable(false)
                 }
             }
             .padding(4)

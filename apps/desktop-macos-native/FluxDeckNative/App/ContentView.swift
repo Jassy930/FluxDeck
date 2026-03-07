@@ -243,13 +243,33 @@ struct ContentView: View {
                         await refreshAll()
                     }
                 } label: {
-                    if isLoading || isSubmitting {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                    HStack(spacing: 6) {
+                        if isLoading || isSubmitting {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.caption.weight(.semibold))
+                        }
+
+                        Text("Refresh")
+                            .font(.caption.weight(.semibold))
                     }
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(DesignTokens.surfaceSecondary.opacity(0.9))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(DesignTokens.borderSubtle.opacity(0.45), lineWidth: 1)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
+                .buttonStyle(.plain)
+                .focusable(false)
                 .disabled(isLoading || isSubmitting)
                 .keyboardShortcut("r", modifiers: .command)
             }
@@ -268,6 +288,7 @@ struct ContentView: View {
                         }
                     }
                     .buttonStyle(.link)
+                    .focusable(false)
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Refresh error: \(loadError)")
@@ -478,6 +499,7 @@ private struct OverviewView: View {
                             onOpenAllLogs()
                         }
                         .buttonStyle(.link)
+                        .focusable(false)
                     }
 
                     if logs.isEmpty {
@@ -523,6 +545,7 @@ private struct OverviewView: View {
                                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                             }
                             .buttonStyle(.plain)
+                            .focusable(false)
                             .accessibilityLabel("Open log \(log.requestID)")
                         }
                     }
@@ -619,6 +642,7 @@ private struct LogsPanelView: View {
                     onClearFilters()
                 }
                 .buttonStyle(.link)
+                .focusable(false)
 
                 Text("Showing \(logs.count) / \(totalCount)")
                     .font(.caption)
@@ -775,6 +799,7 @@ private struct SettingsView: View {
                         onReset()
                         isAddressFocused = true
                     }
+                    .focusable(false)
                     .disabled(isBusy)
 
                     Button("Apply & Refresh") {
@@ -783,6 +808,7 @@ private struct SettingsView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
+                    .focusable(false)
                     .disabled(isBusy)
                     .keyboardShortcut(.return, modifiers: [.command])
                 }
@@ -905,146 +931,305 @@ private struct ProviderFormSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: isCreateMode ? "plus.circle.fill" : "slider.horizontal.3")
-                            .font(.title3)
-                            .foregroundStyle(isCreateMode ? .green : .blue)
+        VStack(spacing: 0) {
+            providerHeader
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(isCreateMode ? "Create Provider" : "Configure Provider")
-                                .font(.headline)
-                            Text("Manage upstream endpoint, API key and model routing in one place.")
+            Divider()
+                .overlay(DesignTokens.borderSubtle)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    providerSummaryCard
+
+                    HStack(alignment: .top, spacing: 14) {
+                        SurfaceCard(title: "Identity") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                if isCreateMode {
+                                    providerField(title: "Provider ID", caption: "Stable routing key used across gateways.") {
+                                        textInput(placeholder: "provider_main", text: $id, monospaced: true)
+                                    }
+                                } else {
+                                    providerField(title: "Provider ID", caption: "Locked after creation to keep downstream routes stable.") {
+                                        readOnlyValue(id, monospaced: true)
+                                    }
+                                }
+
+                                providerField(title: "Display Name") {
+                                    textInput(placeholder: "Main Provider", text: $name)
+                                }
+
+                                providerField(title: "Kind") {
+                                    textInput(placeholder: "openai", text: $kind, monospaced: true)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        SurfaceCard(title: "Runtime") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Text(enabled ? "Routing enabled" : "Routing disabled")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(DesignTokens.textPrimary)
+                                    Spacer()
+                                    Toggle("Enabled", isOn: $enabled)
+                                        .toggleStyle(.switch)
+                                        .labelsHidden()
+                                }
+
+                                Text("Quick state snapshot for this upstream profile.")
+                                    .font(.caption)
+                                    .foregroundStyle(DesignTokens.textSecondary)
+
+                                dividerLine
+
+                                VStack(alignment: .leading, spacing: 10) {
+                                    providerMetaRow(label: "Status", value: enabled ? "Active" : "Disabled")
+                                    providerMetaRow(label: "Models", value: "\(parsedModelCount)")
+                                    providerMetaRow(label: "Auth", value: apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Missing" : "Configured")
+                                }
+                            }
+                        }
+                        .frame(width: 220)
+                    }
+
+                    SurfaceCard(title: "Connection") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            providerField(title: "Base URL", caption: "Use a full upstream endpoint, including the version path when needed.") {
+                                textInput(placeholder: "https://api.openai.com/v1", text: $baseURL, monospaced: true)
+                            }
+
+                            dividerLine
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text("API Key")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(DesignTokens.textPrimary)
+                                        Text("Stored locally and used for upstream authentication.")
+                                            .font(.caption)
+                                            .foregroundStyle(DesignTokens.textSecondary)
+                                    }
+                                    Spacer()
+                                    Button(showApiKey ? "Hide" : "Reveal") {
+                                        showApiKey.toggle()
+                                    }
+                                    .buttonStyle(.plain)
+                                    .focusable(false)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(showApiKey ? DesignTokens.textPrimary : DesignTokens.textSecondary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        Capsule()
+                                            .fill(DesignTokens.surfacePrimary.opacity(0.9))
+                                    )
+                                    .overlay(
+                                        Capsule()
+                                            .stroke(DesignTokens.borderSubtle.opacity(0.9), lineWidth: 1)
+                                    )
+                                }
+
+                                if showApiKey {
+                                    textInput(placeholder: "sk-...", text: $apiKey, monospaced: true)
+                                } else {
+                                    secureInput(placeholder: "sk-...", text: $apiKey)
+                                }
+                            }
+                        }
+                    }
+
+                    SurfaceCard(title: "Models") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("List one or multiple models. Separate by comma or line break.")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                        Spacer()
-                    }
-                    .padding(.vertical, 4)
-                }
+                                .foregroundStyle(DesignTokens.textSecondary)
 
-                Section("Identity") {
-                    if isCreateMode {
-                        LabeledContent("ID") {
-                            TextField("provider_main", text: $id)
-                                .multilineTextAlignment(.trailing)
+                            TextEditor(text: $models)
+                                .scrollContentBackground(.hidden)
                                 .font(.system(.body, design: .monospaced))
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 260)
+                                .foregroundStyle(DesignTokens.textPrimary)
+                                .frame(minHeight: 136, maxHeight: 168)
+                                .padding(12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .fill(DesignTokens.surfacePrimary.opacity(0.92))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .stroke(DesignTokens.borderSubtle.opacity(0.9), lineWidth: 1)
+                                )
+
+                            HStack {
+                                Label(parsedModelsPreview, systemImage: "shippingbox")
+                                    .font(.caption)
+                                    .foregroundStyle(DesignTokens.textSecondary)
+                                Spacer()
+                                Label(enabled ? "Ready for routing" : "Disabled from routing", systemImage: enabled ? "checkmark.circle.fill" : "pause.circle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(enabled ? DesignTokens.statusColors.running.fill : DesignTokens.textSecondary)
+                            }
                         }
-                    } else {
-                        LabeledContent("ID") {
-                            Text(id)
-                                .font(.system(.body, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                        }
                     }
 
-                    LabeledContent("Name") {
-                        TextField("Main Provider", text: $name)
-                            .multilineTextAlignment(.trailing)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 260)
-                    }
-
-                    LabeledContent("Kind") {
-                        TextField("openai", text: $kind)
-                            .multilineTextAlignment(.trailing)
-                            .font(.system(.body, design: .monospaced))
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 260)
-                    }
-                }
-
-                Section("Connection") {
-                    LabeledContent("Base URL") {
-                        TextField("https://api.openai.com/v1", text: $baseURL)
-                            .multilineTextAlignment(.trailing)
-                            .font(.system(.body, design: .monospaced))
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 300)
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("API Key")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Toggle("Show", isOn: $showApiKey)
-                                .toggleStyle(.switch)
-                                .labelsHidden()
-                        }
-
-                        if showApiKey {
-                            TextField("sk-...", text: $apiKey)
-                                .font(.system(.body, design: .monospaced))
-                                .textFieldStyle(.roundedBorder)
-                        } else {
-                            SecureField("sk-...", text: $apiKey)
-                                .font(.system(.body, design: .monospaced))
-                                .textFieldStyle(.roundedBorder)
+                    if let validationError {
+                        SurfaceCard {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(DesignTokens.statusColors.error.fill)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(validationError)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(DesignTokens.textPrimary)
+                                    Text("Please review the highlighted configuration before saving.")
+                                        .font(.caption)
+                                        .foregroundStyle(DesignTokens.textSecondary)
+                                }
+                            }
                         }
                     }
                 }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
+            }
 
-                Section("Models") {
-                    TextEditor(text: $models)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(minHeight: 96, maxHeight: 128)
-                        .padding(6)
-                        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            Divider()
+                .overlay(DesignTokens.borderSubtle)
 
-                    Text("Use comma or line break to separate models.")
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(isCreateMode ? "Create a reusable upstream profile" : "Update provider routing configuration")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(DesignTokens.textPrimary)
+                    Text(parsedModelsPreview)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(DesignTokens.textSecondary)
                 }
 
-                Section("Runtime") {
-                    Toggle("Enabled", isOn: $enabled)
-                        .toggleStyle(.switch)
+                Spacer()
 
+                Button("Cancel") {
+                    dismiss()
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .foregroundStyle(DesignTokens.textSecondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(DesignTokens.surfacePrimary.opacity(0.92))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(DesignTokens.borderSubtle.opacity(0.85), lineWidth: 1)
+                )
+                .disabled(isSubmitting)
+
+                Button {
+                    submit()
+                } label: {
                     HStack(spacing: 8) {
-                        Label(parsedModelsPreview, systemImage: "list.bullet.rectangle")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Label(enabled ? "Active" : "Disabled", systemImage: enabled ? "checkmark.circle.fill" : "pause.circle")
-                            .font(.caption)
-                            .foregroundStyle(enabled ? .green : .secondary)
+                        if isSubmitting {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(isCreateMode ? "Create Provider" : "Save Changes")
+                            .font(.subheadline.weight(.semibold))
                     }
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(red: 0.13, green: 0.52, blue: 0.92))
+                    )
                 }
-
-                if let validationError {
-                    Section {
-                        Label(validationError, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                        Text("Please fix the highlighted input and submit again.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .disabled(isSubmitting)
             }
-            .navigationTitle(isCreateMode ? "New Provider" : "Configure Provider")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                    .disabled(isSubmitting)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(isCreateMode ? "Create" : "Save") {
-                        submit()
-                    }
-                    .disabled(isSubmitting)
-                }
-            }
-            .frame(width: 640, height: 580)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(DesignTokens.surfacePrimary.opacity(0.9))
         }
+        .frame(width: 760, height: 670)
+        .background(
+            LinearGradient(
+                colors: [
+                    DesignTokens.surfacePrimary.opacity(0.98),
+                    DesignTokens.surfaceSecondary.opacity(0.94)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+    }
+
+    private var providerHeader: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: isCreateMode ? "shippingbox.circle.fill" : "slider.horizontal.3")
+                .font(.headline)
+                .foregroundStyle(isCreateMode ? DesignTokens.statusColors.running.fill : DesignTokens.statusColors.warning.fill)
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(isCreateMode ? "Create Provider" : "Configure Provider")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                Text("Manage upstream endpoint, API key and model routing in one compact control surface.")
+                    .font(.caption)
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            StatusPill(
+                text: enabled ? "Enabled" : "Disabled",
+                semanticColor: enabled ? DesignTokens.statusColors.running : DesignTokens.statusColors.inactive
+            )
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .background(DesignTokens.surfacePrimary.opacity(0.86))
+    }
+
+    private var providerSummaryCard: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(isCreateMode ? "Provider Profile" : "Provider Snapshot")
+                    .font(.caption2.weight(.semibold))
+                    .textCase(.uppercase)
+                    .foregroundStyle(DesignTokens.textSecondary)
+                Text(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled Provider" : name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                Text(baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No endpoint configured" : baseURL)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 16)
+
+            HStack(spacing: 8) {
+                compactMetric(title: "Kind", value: kind.isEmpty ? "-" : kind)
+                compactMetric(title: "Models", value: "\(parsedModelCount)")
+                compactMetric(title: "Auth", value: apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Off" : "On")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(DesignTokens.surfaceSecondary.opacity(0.82))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(DesignTokens.borderSubtle.opacity(0.75), lineWidth: 1)
+        )
     }
 
     private var isCreateMode: Bool {
@@ -1052,6 +1237,119 @@ private struct ProviderFormSheet: View {
             return true
         }
         return false
+    }
+
+    private var parsedModelCount: Int {
+        models
+            .split(whereSeparator: { $0 == "," || $0 == "\n" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .count
+    }
+
+    private var dividerLine: some View {
+        Rectangle()
+            .fill(DesignTokens.borderSubtle.opacity(0.75))
+            .frame(height: 1)
+    }
+
+    private func compactMetric(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .textCase(.uppercase)
+                .foregroundStyle(DesignTokens.textSecondary)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+        }
+        .frame(minWidth: 64, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(DesignTokens.surfacePrimary.opacity(0.88))
+        )
+    }
+
+    private func providerMetaRow(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(DesignTokens.textSecondary)
+            Spacer()
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+        }
+    }
+
+    private func providerField<Content: View>(title: String, caption: String? = nil, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                if let caption {
+                    Text(caption)
+                        .font(.caption)
+                        .foregroundStyle(DesignTokens.textSecondary)
+                        .lineLimit(2)
+                }
+            }
+            content()
+        }
+    }
+
+    private func textInput(placeholder: String, text: Binding<String>, monospaced: Bool = false) -> some View {
+        TextField(placeholder, text: text)
+            .textFieldStyle(.plain)
+            .font(monospaced ? .system(.body, design: .monospaced) : .body)
+            .foregroundStyle(DesignTokens.textPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(DesignTokens.surfacePrimary.opacity(0.92))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(DesignTokens.borderSubtle.opacity(0.9), lineWidth: 1)
+            )
+    }
+
+    private func secureInput(placeholder: String, text: Binding<String>) -> some View {
+        SecureField(placeholder, text: text)
+            .textFieldStyle(.plain)
+            .font(.system(.body, design: .monospaced))
+            .foregroundStyle(DesignTokens.textPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(DesignTokens.surfacePrimary.opacity(0.92))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(DesignTokens.borderSubtle.opacity(0.9), lineWidth: 1)
+            )
+    }
+
+    private func readOnlyValue(_ value: String, monospaced: Bool = false) -> some View {
+        Text(value)
+            .font(monospaced ? .system(.body, design: .monospaced) : .body)
+            .foregroundStyle(DesignTokens.textPrimary.opacity(0.85))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(DesignTokens.surfacePrimary.opacity(0.72))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(DesignTokens.borderSubtle.opacity(0.75), lineWidth: 1)
+            )
     }
 
     private func submit() {
@@ -1117,11 +1415,7 @@ private struct ProviderFormSheet: View {
     }
 
     private var parsedModelsPreview: String {
-        let count = models
-            .split(whereSeparator: { $0 == "," || $0 == "\n" })
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .count
+        let count = parsedModelCount
         return count == 1 ? "1 model configured" : "\(count) models configured"
     }
 }
@@ -1195,12 +1489,14 @@ private struct GatewayCreateSheet: View {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .focusable(false)
                     .disabled(isSubmitting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create") {
                         submit()
                     }
+                    .focusable(false)
                     .disabled(isSubmitting)
                 }
             }

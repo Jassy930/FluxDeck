@@ -50,6 +50,7 @@ struct SidebarView: View {
                                         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                     }
                                     .buttonStyle(.plain)
+                                    .focusable(false)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }

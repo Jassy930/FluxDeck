@@ -59,6 +59,7 @@ struct LogsWorkbenchView: View {
                             Spacer()
                             Button("Clear Filters", action: onClearFilters)
                                 .buttonStyle(.plain)
+                                .focusable(false)
                                 .foregroundStyle(DesignTokens.textPrimary)
                         }
                     }
@@ -103,6 +104,7 @@ struct LogsWorkbenchView: View {
                                         }
                                     }
                                     .buttonStyle(.plain)
+                                    .focusable(false)
                                 }
                             }
                         }
