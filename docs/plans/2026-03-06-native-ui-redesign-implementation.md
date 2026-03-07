@@ -509,3 +509,5 @@ git commit -m "chore(native): record redesign acceptance results"
 - `ContentView` 头部移除重复的大标题，仅保留 Admin、刷新时间与状态信息。
 - `FluxDeckNativeApp` 切换为隐藏原生标题栏样式，进一步贴近参考图的沉浸式控制台观感。
 - 继续收口窗口边缘表现：移除 `AppShellView` 内层容器的圆角裁切、阴影和外边距，避免形成一圈额外黑边，直接让工作区贴合窗口内容区域。
+- 针对 Overview 页的留白再收一轮：缩窄侧栏、压缩顶部模式条与信息条高度，并将第二排改为不等宽布局，避免 `Traffic Summary` 因与 `Recent Requests` 等高而出现大块无效空白。
+- 同步收紧卡片内边距与标题间距，提升监控工作台的信息密度。

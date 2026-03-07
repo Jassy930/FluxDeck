@@ -6,8 +6,8 @@ struct TopModeBar: View {
     let statusSummary: ShellStatusSummary
 
     var body: some View {
-        HStack(spacing: 18) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("Workspace")
                     .font(.caption2.weight(.semibold))
                     .textCase(.uppercase)
@@ -29,7 +29,7 @@ struct TopModeBar: View {
                             .font(.caption.weight(.medium))
                             .foregroundStyle(selectedMode == mode ? DesignTokens.textPrimary : DesignTokens.textSecondary)
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
+                            .padding(.vertical, 7)
                             .background(modeBackground(for: mode))
                             .clipShape(Capsule())
                     }
@@ -50,8 +50,8 @@ struct TopModeBar: View {
                 StatusPill(text: statusSummary.errorLabel, semanticColor: statusSummary.errorColor)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
         .background(DesignTokens.surfacePrimary.opacity(0.82))
     }
 

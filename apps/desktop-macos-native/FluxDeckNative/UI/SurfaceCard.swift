@@ -10,16 +10,16 @@ struct SurfaceCard<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             if let title {
                 Text(title)
-                    .font(.headline)
+                    .font(.headline.weight(.semibold))
                     .foregroundStyle(DesignTokens.textPrimary)
             }
 
             content
         }
-        .padding(18)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DesignTokens.surfaceSecondary.opacity(0.96))
         .overlay(

@@ -49,8 +49,8 @@ struct ContentView: View {
                 detailView(for: selectedSection ?? .overview)
                     .frame(maxWidth: 1280, maxHeight: .infinity, alignment: .topLeading)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 12)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
             }
             .frame(minWidth: 920, minHeight: 560)
         }
@@ -273,8 +273,8 @@ struct ContentView: View {
                 .accessibilityLabel("Refresh error: \(loadError)")
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
     @MainActor

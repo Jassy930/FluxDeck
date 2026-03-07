@@ -5,7 +5,7 @@ struct SidebarView: View {
     @Binding var selectedSection: SidebarSection?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("FluxDeck")
                     .font(.headline.weight(.semibold))
@@ -19,7 +19,7 @@ struct SidebarView: View {
             .padding(.top, 8)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 16) {
                     ForEach(groups, id: \.title) { group in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(group.title)
@@ -42,7 +42,7 @@ struct SidebarView: View {
                                         .foregroundStyle(isSelected(section) ? DesignTokens.textPrimary : DesignTokens.textSecondary)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         .padding(.horizontal, 12)
-                                        .padding(.vertical, 10)
+                                        .padding(.vertical, 9)
                                         .background(background(for: section))
                                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                     }
@@ -54,8 +54,8 @@ struct SidebarView: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 18)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 16)
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(
             LinearGradient(

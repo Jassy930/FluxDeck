@@ -82,7 +82,7 @@ struct AppShellView<Content: View>: View {
                     groups: groups,
                     selectedSection: $selectedSection
                 )
-                .frame(width: 244)
+                .frame(width: 226)
 
                 Rectangle()
                     .fill(
