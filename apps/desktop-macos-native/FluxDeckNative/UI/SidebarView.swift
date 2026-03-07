@@ -17,6 +17,7 @@ struct SidebarView: View {
                     .textCase(.uppercase)
             }
             .padding(.top, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -38,25 +39,32 @@ struct SidebarView: View {
                                                 .frame(width: 16)
                                             Text(section.rawValue)
                                                 .font(.subheadline.weight(isSelected(section) ? .semibold : .regular))
+                                            Spacer(minLength: 0)
                                         }
                                         .foregroundStyle(isSelected(section) ? DesignTokens.textPrimary : DesignTokens.textSecondary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 9)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                         .background(background(for: section))
                                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                     }
                                     .buttonStyle(.plain)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 16)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             LinearGradient(
                 colors: [
