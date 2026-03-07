@@ -10,7 +10,7 @@ struct ProviderListView: View {
     let onToggleEnabled: (AdminProvider) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("Providers")
                     .font(.title2)
@@ -25,19 +25,23 @@ struct ProviderListView: View {
             }
 
             if let error {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                SurfaceCard {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(DesignTokens.statusColors.error.fill)
+                }
             }
 
             if isLoading && providers.isEmpty {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Loading providers...")
-                        .foregroundStyle(.secondary)
+                SurfaceCard {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Loading providers...")
+                            .foregroundStyle(DesignTokens.textSecondary)
+                    }
+                    .font(.caption)
                 }
-                .font(.caption)
             } else if providers.isEmpty {
                 EmptyStateView(
                     title: "No providers",
@@ -45,68 +49,87 @@ struct ProviderListView: View {
                     message: "Create a provider to route gateway traffic."
                 )
             } else {
-                List(providers) { provider in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .center, spacing: 8) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(provider.name)
-                                    .fontWeight(.medium)
-                                Text(provider.id)
-                                    .font(.caption2.monospaced())
-                                    .foregroundStyle(.secondary)
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+                        ForEach(providers) { provider in
+                            let card = ProviderWorkspaceCard.make(provider: provider)
+
+                            SurfaceCard {
+                                VStack(alignment: .leading, spacing: 14) {
+                                    HStack(alignment: .top, spacing: 10) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(card.title)
+                                                .font(.headline)
+                                                .foregroundStyle(DesignTokens.textPrimary)
+                                            Text(card.id)
+                                                .font(.caption.monospaced())
+                                                .foregroundStyle(DesignTokens.textSecondary)
+                                        }
+                                        Spacer()
+                                        StatusPill(
+                                            text: card.kindBadge,
+                                            semanticColor: DesignTokens.statusColors.warning
+                                        )
+                                    }
+
+                                    resourceRow(label: "Endpoint", value: card.endpointText)
+                                    resourceRow(label: "Models", value: card.modelCountText)
+
+                                    StatusPill(
+                                        text: card.statusText,
+                                        semanticColor: provider.enabled ? DesignTokens.statusColors.running : DesignTokens.statusColors.inactive
+                                    )
+
+                                    HStack(spacing: 12) {
+                                        Button("Configure") {
+                                            onConfigure(provider)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .foregroundStyle(DesignTokens.textPrimary)
+                                        .disabled(isSubmitting)
+
+                                        Button(provider.enabled ? "Disable" : "Enable") {
+                                            onToggleEnabled(provider)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .foregroundStyle(DesignTokens.textSecondary)
+                                        .disabled(isSubmitting)
+                                    }
+                                }
                             }
-                            Spacer()
-                            Text(provider.kind.uppercased())
-                                .font(.caption2)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(.ultraThinMaterial)
-                                .clipShape(Capsule())
-                            Text(provider.enabled ? "Enabled" : "Disabled")
-                                .font(.caption2)
-                                .foregroundStyle(provider.enabled ? .green : .secondary)
-                        }
-
-                        Text(provider.baseURL)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-
-                        Text("Models: \(provider.models.joined(separator: ", "))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-
-                        HStack(spacing: 10) {
-                            Button("Configure") {
-                                onConfigure(provider)
-                            }
-                            .buttonStyle(.link)
-                            .disabled(isSubmitting)
-
-                            Button(provider.enabled ? "Disable" : "Enable") {
-                                onToggleEnabled(provider)
-                            }
-                            .buttonStyle(.link)
-                            .disabled(isSubmitting)
                         }
                     }
+                    .padding(.vertical, 4)
                 }
-                .listStyle(.inset)
             }
 
             if isSubmitting {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Submitting provider...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                SurfaceCard {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Submitting provider...")
+                            .font(.caption)
+                            .foregroundStyle(DesignTokens.textSecondary)
+                    }
                 }
             }
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func resourceRow(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(DesignTokens.textSecondary)
+            Spacer()
+            Text(value)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(DesignTokens.textPrimary)
+                .lineLimit(1)
+        }
     }
 }
 
@@ -116,19 +139,22 @@ struct EmptyStateView: View {
     let message: String
 
     var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.system(size: 28))
-                .foregroundStyle(.secondary)
-            Text(title)
-                .font(.headline)
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
+        SurfaceCard {
+            VStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 28))
+                    .foregroundStyle(DesignTokens.textSecondary)
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(DesignTokens.textPrimary)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 380)
+            }
+            .frame(maxWidth: .infinity, minHeight: 180)
+            .padding(12)
         }
-        .frame(maxWidth: .infinity, minHeight: 180)
-        .padding(12)
     }
 }

@@ -1,28 +1,5 @@
 import SwiftUI
 
-enum SidebarSection: String, CaseIterable, Hashable {
-    case overview = "Overview"
-    case providers = "Providers"
-    case gateways = "Gateways"
-    case logs = "Logs"
-    case settings = "Settings"
-
-    var icon: String {
-        switch self {
-        case .overview:
-            return "square.grid.2x2"
-        case .providers:
-            return "shippingbox"
-        case .gateways:
-            return "point.3.connected.trianglepath.dotted"
-        case .logs:
-            return "list.bullet.rectangle.portrait"
-        case .settings:
-            return "gearshape"
-        }
-    }
-}
-
 struct ContentView: View {
     @AppStorage("fluxdeck.native.admin_base_url") private var persistedAdminBaseURL = defaultAdminBaseURL
     @State private var providers: [AdminProvider] = []
@@ -42,6 +19,15 @@ struct ContentView: View {
     @State private var logErrorsOnly = false
     @State private var adminBaseURLInput = defaultAdminBaseURL
     @State private var settingsError: String?
+    @State private var selectedMode: AppMode = .rule
+
+    private var shellStatusSummary: ShellStatusSummary {
+        ShellStatusSummary.make(
+            isLoading: isLoading,
+            loadError: loadError,
+            gateways: gateways
+        )
+    }
 
     private var client: AdminApiClient {
         let url = normalizedAdminBaseURL(persistedAdminBaseURL) ?? URL(string: defaultAdminBaseURL)!
@@ -49,16 +35,17 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            List(SidebarSection.allCases, id: \.self, selection: $selectedSection) { section in
-                Label(section.rawValue, systemImage: section.icon)
-                    .tag(section as SidebarSection?)
-            }
-            .navigationTitle("FluxDeck")
-        } detail: {
+        AppShellView(
+            title: selectedSection?.rawValue ?? SidebarSection.overview.rawValue,
+            groups: SidebarGroup.defaultGroups,
+            selectedSection: $selectedSection,
+            selectedMode: $selectedMode,
+            statusSummary: shellStatusSummary
+        ) {
             VStack(spacing: 0) {
                 headerBar
                 Divider()
+                    .overlay(DesignTokens.borderSubtle)
                 detailView(for: selectedSection ?? .overview)
                     .frame(maxWidth: 1280, maxHeight: .infinity, alignment: .topLeading)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -112,8 +99,12 @@ struct ContentView: View {
     private func detailView(for section: SidebarSection) -> some View {
         switch section {
         case .overview:
-            OverviewView(
-                metrics: buildDashboardMetrics(providers: providers, gateways: gateways),
+            OverviewDashboardView(
+                model: OverviewDashboardModel.make(
+                    providers: providers,
+                    gateways: gateways,
+                    logs: logs
+                ),
                 isLoading: isLoading,
                 logs: recentLogs(logs),
                 onOpenAllLogs: {
@@ -166,7 +157,7 @@ struct ContentView: View {
                 }
             )
         case .logs:
-            LogsPanelView(
+            LogsWorkbenchView(
                 logs: filteredLogs,
                 totalCount: logs.count,
                 isLoading: isLoading,
@@ -180,15 +171,40 @@ struct ContentView: View {
                 errorsOnly: $logErrorsOnly,
                 onClearFilters: clearLogFilters
             )
+        case .traffic:
+            TrafficAnalyticsView(
+                model: TrafficAnalyticsModel.make(logs: logs)
+            )
+        case .connections:
+            ConnectionsView(
+                model: ConnectionsModel.make(logs: logs)
+            )
+        case .topology:
+            TopologyCanvasView(
+                graph: TopologyGraph.make(
+                    gateways: gateways,
+                    providers: providers,
+                    logs: logs
+                )
+            )
+        case .routeMap:
+            PlaceholderDetailView(
+                title: "Route Map",
+                systemImage: SidebarSection.routeMap.icon,
+                message: "Route map visualization will be added in the redesigned native workbench."
+            )
         case .settings:
-            SettingsView(
+            SettingsPanelView(
                 adminURLInput: $adminBaseURLInput,
                 resolvedAdminURL: client.displayBaseURL,
                 isBusy: isLoading || isSubmitting,
                 errorMessage: settingsError,
-                onApply: {
-                    await applyAdminBaseURL()
-                },
+                model: SettingsPanelModel.make(
+                    adminBaseURL: client.displayBaseURL,
+                    isLoading: isLoading || isSubmitting,
+                    hasError: settingsError != nil
+                ),
+                onApply: { await applyAdminBaseURL() },
                 onReset: {
                     adminBaseURLInput = defaultAdminBaseURL
                     settingsError = nil
@@ -200,15 +216,25 @@ struct ContentView: View {
     private var headerBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                Text("FluxDeck Native")
-                    .font(.title3)
-                    .fontWeight(.semibold)
+                HStack(spacing: 8) {
+                    Text("Admin")
+                        .font(.caption2.weight(.semibold))
+                        .textCase(.uppercase)
+                        .foregroundStyle(DesignTokens.textSecondary)
+
+                    Text(client.displayBaseURL)
+                        .font(.caption)
+                        .foregroundStyle(DesignTokens.textPrimary.opacity(0.92))
+                        .lineLimit(1)
+                }
 
                 Spacer()
 
-                Text("Admin: \(client.displayBaseURL)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let lastRefreshedAt {
+                    Text("Last refresh: \(Self.refreshFormatter.string(from: lastRefreshedAt))")
+                        .font(.caption2)
+                        .foregroundStyle(DesignTokens.textSecondary)
+                }
 
                 ConnectionBadge(isLoading: isLoading, hasError: loadError != nil, hasSuccessfulSync: lastRefreshedAt != nil)
 
@@ -226,12 +252,6 @@ struct ContentView: View {
                 }
                 .disabled(isLoading || isSubmitting)
                 .keyboardShortcut("r", modifiers: .command)
-            }
-
-            if let lastRefreshedAt {
-                Text("Last refresh: \(Self.refreshFormatter.string(from: lastRefreshedAt))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
 
             if let loadError {
@@ -253,8 +273,8 @@ struct ContentView: View {
                 .accessibilityLabel("Refresh error: \(loadError)")
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
     }
 
     @MainActor
@@ -1106,6 +1126,22 @@ private struct ProviderFormSheet: View {
     }
 }
 
+private struct PlaceholderDetailView: View {
+    let title: String
+    let systemImage: String
+    let message: String
+
+    var body: some View {
+        EmptyStateView(
+            title: title,
+            systemImage: systemImage,
+            message: message
+        )
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
 private struct GatewayCreateSheet: View {
     let providers: [AdminProvider]
     let isSubmitting: Bool
@@ -1207,8 +1243,4 @@ private struct GatewayCreateSheet: View {
             await onSubmit(input)
         }
     }
-}
-
-#Preview {
-    ContentView()
 }

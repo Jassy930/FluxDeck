@@ -6,5 +6,6 @@ struct FluxDeckNativeApp: App {
         WindowGroup {
             ContentView()
         }
+        .windowStyle(HiddenTitleBarWindowStyle())
     }
 }

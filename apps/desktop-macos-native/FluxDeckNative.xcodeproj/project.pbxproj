@@ -9,6 +9,24 @@
 /* Begin PBXBuildFile section */
 		AA0000000000000000000020 /* FluxDeckNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000010 /* FluxDeckNativeApp.swift */; };
 		AA0000000000000000000021 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* ContentView.swift */; };
+		AA0000000000000000000026 /* AppNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000018 /* AppNavigation.swift */; };
+		AA0000000000000000000027 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000019 /* DesignTokens.swift */; };
+		AA0000000000000000000028 /* SurfaceCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001A /* SurfaceCard.swift */; };
+		AA0000000000000000000029 /* StatusPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001B /* StatusPill.swift */; };
+		AA000000000000000000002A /* AppShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001C /* AppShellView.swift */; };
+		AA000000000000000000002B /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001D /* SidebarView.swift */; };
+		AA000000000000000000002C /* TopModeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001E /* TopModeBar.swift */; };
+		AA000000000000000000002D /* OverviewDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001F /* OverviewDashboardView.swift */; };
+		AA000000000000000000002E /* OverviewModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000002F /* OverviewModels.swift */; };
+		AA0000000000000000000039 /* TrafficAnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003A /* TrafficAnalyticsView.swift */; };
+		AA000000000000000000003B /* ConnectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003C /* ConnectionsView.swift */; };
+		AA000000000000000000003D /* TrafficConnectionsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003E /* TrafficConnectionsModels.swift */; };
+		AA0000000000000000000070 /* ResourceWorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000071 /* ResourceWorkspaceModels.swift */; };
+		AA0000000000000000000072 /* LogsWorkbenchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000073 /* LogsWorkbenchView.swift */; };
+		AA0000000000000000000074 /* SettingsPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000075 /* SettingsPanelView.swift */; };
+		AA0000000000000000000076 /* SettingsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000077 /* SettingsModels.swift */; };
+		AA0000000000000000000035 /* TopologyCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000036 /* TopologyCanvasView.swift */; };
+		AA0000000000000000000037 /* TopologyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000038 /* TopologyModels.swift */; };
 		AA0000000000000000000022 /* FluxDeckNativeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000012 /* FluxDeckNativeTests.swift */; };
 		AA0000000000000000000023 /* AdminApiClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000015 /* AdminApiClient.swift */; };
 		AA0000000000000000000024 /* ProviderListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000016 /* ProviderListView.swift */; };
@@ -34,6 +52,24 @@
 		AA0000000000000000000015 /* AdminApiClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminApiClient.swift; sourceTree = "<group>"; };
 		AA0000000000000000000016 /* ProviderListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderListView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000017 /* GatewayListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayListView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000018 /* AppNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppNavigation.swift; sourceTree = "<group>"; };
+		AA0000000000000000000019 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
+		AA000000000000000000001A /* SurfaceCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceCard.swift; sourceTree = "<group>"; };
+		AA000000000000000000001B /* StatusPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusPill.swift; sourceTree = "<group>"; };
+		AA000000000000000000001C /* AppShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellView.swift; sourceTree = "<group>"; };
+		AA000000000000000000001D /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		AA000000000000000000001E /* TopModeBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopModeBar.swift; sourceTree = "<group>"; };
+		AA000000000000000000001F /* OverviewDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewDashboardView.swift; sourceTree = "<group>"; };
+		AA000000000000000000002F /* OverviewModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewModels.swift; sourceTree = "<group>"; };
+		AA000000000000000000003A /* TrafficAnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrafficAnalyticsView.swift; sourceTree = "<group>"; };
+		AA000000000000000000003C /* ConnectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionsView.swift; sourceTree = "<group>"; };
+		AA000000000000000000003E /* TrafficConnectionsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrafficConnectionsModels.swift; sourceTree = "<group>"; };
+		AA0000000000000000000071 /* ResourceWorkspaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceWorkspaceModels.swift; sourceTree = "<group>"; };
+		AA0000000000000000000073 /* LogsWorkbenchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogsWorkbenchView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000075 /* SettingsPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPanelView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000077 /* SettingsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsModels.swift; sourceTree = "<group>"; };
+		AA0000000000000000000036 /* TopologyCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopologyCanvasView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000038 /* TopologyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopologyModels.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -59,6 +95,7 @@
 			children = (
 				AA0000000000000000000004 /* App */,
 				AA0000000000000000000006 /* Features */,
+				AA0000000000000000000008 /* UI */,
 				AA0000000000000000000007 /* Networking */,
 				AA0000000000000000000005 /* FluxDeckNativeTests */,
 				AA0000000000000000000003 /* Products */,
@@ -79,6 +116,7 @@
 			children = (
 				AA0000000000000000000010 /* FluxDeckNativeApp.swift */,
 				AA0000000000000000000011 /* ContentView.swift */,
+				AA0000000000000000000018 /* AppNavigation.swift */,
 			);
 			path = FluxDeckNative/App;
 			sourceTree = SOURCE_ROOT;
@@ -94,6 +132,17 @@
 		AA0000000000000000000006 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				AA000000000000000000003A /* TrafficAnalyticsView.swift */,
+				AA000000000000000000003C /* ConnectionsView.swift */,
+				AA000000000000000000003E /* TrafficConnectionsModels.swift */,
+				AA0000000000000000000071 /* ResourceWorkspaceModels.swift */,
+				AA0000000000000000000073 /* LogsWorkbenchView.swift */,
+				AA0000000000000000000075 /* SettingsPanelView.swift */,
+				AA0000000000000000000077 /* SettingsModels.swift */,
+				AA000000000000000000001F /* OverviewDashboardView.swift */,
+				AA000000000000000000002F /* OverviewModels.swift */,
+				AA0000000000000000000036 /* TopologyCanvasView.swift */,
+				AA0000000000000000000038 /* TopologyModels.swift */,
 				AA0000000000000000000016 /* ProviderListView.swift */,
 				AA0000000000000000000017 /* GatewayListView.swift */,
 			);
@@ -106,6 +155,19 @@
 				AA0000000000000000000015 /* AdminApiClient.swift */,
 			);
 			path = FluxDeckNative/Networking;
+			sourceTree = SOURCE_ROOT;
+		};
+		AA0000000000000000000008 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000019 /* DesignTokens.swift */,
+				AA000000000000000000001A /* SurfaceCard.swift */,
+				AA000000000000000000001B /* StatusPill.swift */,
+				AA000000000000000000001C /* AppShellView.swift */,
+				AA000000000000000000001D /* SidebarView.swift */,
+				AA000000000000000000001E /* TopModeBar.swift */,
+			);
+			path = FluxDeckNative/UI;
 			sourceTree = SOURCE_ROOT;
 		};
 /* End PBXGroup section */
@@ -200,6 +262,24 @@
 			files = (
 				AA0000000000000000000020 /* FluxDeckNativeApp.swift in Sources */,
 				AA0000000000000000000021 /* ContentView.swift in Sources */,
+				AA0000000000000000000026 /* AppNavigation.swift in Sources */,
+				AA0000000000000000000027 /* DesignTokens.swift in Sources */,
+				AA0000000000000000000028 /* SurfaceCard.swift in Sources */,
+				AA0000000000000000000029 /* StatusPill.swift in Sources */,
+				AA000000000000000000002A /* AppShellView.swift in Sources */,
+				AA000000000000000000002B /* SidebarView.swift in Sources */,
+				AA000000000000000000002C /* TopModeBar.swift in Sources */,
+				AA000000000000000000002D /* OverviewDashboardView.swift in Sources */,
+				AA000000000000000000002E /* OverviewModels.swift in Sources */,
+				AA0000000000000000000039 /* TrafficAnalyticsView.swift in Sources */,
+				AA000000000000000000003B /* ConnectionsView.swift in Sources */,
+				AA000000000000000000003D /* TrafficConnectionsModels.swift in Sources */,
+				AA0000000000000000000070 /* ResourceWorkspaceModels.swift in Sources */,
+				AA0000000000000000000072 /* LogsWorkbenchView.swift in Sources */,
+				AA0000000000000000000074 /* SettingsPanelView.swift in Sources */,
+				AA0000000000000000000076 /* SettingsModels.swift in Sources */,
+				AA0000000000000000000035 /* TopologyCanvasView.swift in Sources */,
+				AA0000000000000000000037 /* TopologyModels.swift in Sources */,
 				AA0000000000000000000023 /* AdminApiClient.swift in Sources */,
 				AA0000000000000000000024 /* ProviderListView.swift in Sources */,
 				AA0000000000000000000025 /* GatewayListView.swift in Sources */,

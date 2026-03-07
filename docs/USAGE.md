@@ -58,6 +58,18 @@ bun run dev
 - 已配置 Vite 代理：`/admin -> http://127.0.0.1:7777`
 - 因此前端会通过同源路径 `/admin/*` 访问 Admin API，避免浏览器跨域拦截
 
+### 2.2 桌面端工作区结构
+
+当前桌面端正在演进为更偏 macOS 原生风格的多页面工作区，主要包含：
+
+- `Monitor`：默认首页，展示实时运行状态、趋势、告警与运行摘要
+- `Topology`：独立路由拓扑页面，用于查看 Gateway / Provider / Model 链路
+- `Providers`：查看与创建 Provider 配置
+- `Gateways`：查看与创建 Gateway 配置与运行状态
+- `Logs`：查看最近请求状态、延迟与错误
+
+左侧导航用于切换工作区页面，顶部提供统一刷新入口。
+
 ## 3. 配置 Provider
 
 当前 MVP 先支持标准 OpenAI Provider。
@@ -312,3 +324,18 @@ cargo clean
 - [docs/contracts/admin-api-v1.md](./contracts/admin-api-v1.md)
 
 如需调整 `provider / gateway / logs` 返回字段，请先更新契约文档并补齐对应测试。
+# FluxDeck 使用说明
+
+## macOS Native 工作台
+
+`apps/desktop-macos-native` 当前提供统一深色原生工作台界面，已覆盖：
+
+- `Overview`：运行摘要、网络状态、流量摘要、最近请求
+- `Traffic`：请求量、错误量、平均延迟、Top Gateway / Provider
+- `Connections`：活跃 Gateway / Provider / Model 摘要
+- `Topology`：`Entrypoints -> Gateways -> Providers` 三列拓扑骨架
+- `Providers / Gateways`：卡片化资源工作台
+- `Logs`：筛选 + 请求列表 + 详情面板
+- `Settings`：`Admin API / Refresh & Sync / Diagnostics` 三段式设置面板
+
+原生端仍通过 `fluxd` Admin API 拉取与提交数据，不复制后端业务逻辑。
