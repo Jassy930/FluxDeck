@@ -1,9 +1,19 @@
 :root {
-  --bg: #f3f5f7;
-  --panel: #ffffff;
-  --text: #1f2937;
-  --muted: #6b7280;
-  --border: #d1d5db;
-  --accent: #0f766e;
-  --radius: 12px;
+  --bg: #070b12;
+  --bg-elevated: #0b111b;
+  --panel: rgba(13, 18, 28, 0.78);
+  --panel-strong: rgba(17, 24, 39, 0.94);
+  --text: #eff6ff;
+  --muted: #8fa1bb;
+  --border: rgba(148, 163, 184, 0.18);
+  --border-strong: rgba(148, 163, 184, 0.36);
+  --accent: #38bdf8;
+  --accent-soft: rgba(56, 189, 248, 0.14);
+  --accent-strong: #0ea5e9;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #f87171;
+  --shadow: 0 28px 90px rgba(2, 6, 23, 0.46);
+  --radius: 22px;
+  --radius-sm: 16px;
 }

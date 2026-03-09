@@ -5,3 +5,5 @@ target/
 *.xcuserstate
 **/xcuserdata/
 .codex/
+
+apps/desktop/dist/
