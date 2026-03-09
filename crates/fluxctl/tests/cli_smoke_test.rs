@@ -62,6 +62,8 @@ fn parses_gateway_create_with_protocol_graph_fields() {
         "provider_1",
         "--default-model",
         "claude-3-7-sonnet",
+        "--auto-start",
+        "true",
     ]);
 
     match cli.command {
@@ -70,13 +72,68 @@ fn parses_gateway_create_with_protocol_graph_fields() {
                 inbound_protocol,
                 upstream_protocol,
                 protocol_config_json,
+                auto_start,
                 ..
             } => {
                 assert_eq!(inbound_protocol, "anthropic");
                 assert_eq!(upstream_protocol, "openai");
                 assert_eq!(protocol_config_json, "{\"compatibility_mode\":\"compatible\"}");
+                assert!(auto_start);
             }
             _ => panic!("expected gateway create command"),
+        },
+        _ => panic!("expected gateway command"),
+    }
+}
+
+#[test]
+fn parses_gateway_update_command() {
+    let cli = Cli::parse_from([
+        "fluxctl",
+        "--admin-url",
+        "http://127.0.0.1:7777",
+        "gateway",
+        "update",
+        "gateway_1",
+        "--name",
+        "Gateway Updated",
+        "--listen-host",
+        "127.0.0.1",
+        "--listen-port",
+        "19090",
+        "--inbound-protocol",
+        "openai",
+        "--upstream-protocol",
+        "provider_default",
+        "--protocol-config-json",
+        "{\"compatibility_mode\":\"strict\"}",
+        "--default-provider-id",
+        "provider_1",
+        "--default-model",
+        "gpt-4.1-mini",
+        "--enabled",
+        "false",
+        "--auto-start",
+        "true",
+    ]);
+
+    match cli.command {
+        Commands::Gateway { command } => match command {
+            GatewayCmd::Update {
+                id,
+                listen_port,
+                protocol_config_json,
+                enabled,
+                auto_start,
+                ..
+            } => {
+                assert_eq!(id, "gateway_1");
+                assert_eq!(listen_port, 19090);
+                assert_eq!(protocol_config_json, "{\"compatibility_mode\":\"strict\"}");
+                assert!(!enabled);
+                assert!(auto_start);
+            }
+            _ => panic!("expected gateway update command"),
         },
         _ => panic!("expected gateway command"),
     }

@@ -44,6 +44,14 @@ async fn migration_adds_gateway_protocol_config_columns_with_defaults() {
     .expect("query gateways columns");
     assert_eq!(config_col.as_deref(), Some("protocol_config_json"));
 
+    let auto_start_col = sqlx::query_scalar::<_, String>(
+        "SELECT name FROM pragma_table_info('gateways') WHERE name = 'auto_start'",
+    )
+    .fetch_optional(&pool)
+    .await
+    .expect("query gateways columns");
+    assert_eq!(auto_start_col.as_deref(), Some("auto_start"));
+
     sqlx::query(
         r#"
         INSERT INTO providers (id, name, kind, base_url, api_key, enabled)
@@ -81,8 +89,8 @@ async fn migration_adds_gateway_protocol_config_columns_with_defaults() {
     .await
     .expect("insert gateway");
 
-    let row = sqlx::query_as::<_, (String, String)>(
-        "SELECT upstream_protocol, protocol_config_json FROM gateways WHERE id = ?1",
+    let row = sqlx::query_as::<_, (String, String, i64)>(
+        "SELECT upstream_protocol, protocol_config_json, auto_start FROM gateways WHERE id = ?1",
     )
     .bind("gateway_for_migration")
     .fetch_one(&pool)
@@ -91,4 +99,5 @@ async fn migration_adds_gateway_protocol_config_columns_with_defaults() {
 
     assert_eq!(row.0, "provider_default");
     assert_eq!(row.1, "{}");
+    assert_eq!(row.2, 0);
 }

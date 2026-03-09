@@ -6,6 +6,7 @@ struct GatewayListView: View {
     let isSubmitting: Bool
     let error: String?
     let onCreate: () -> Void
+    let onConfigure: (AdminGateway) -> Void
     let onToggleRuntime: (AdminGateway) -> Void
 
     var body: some View {
@@ -72,31 +73,29 @@ struct GatewayListView: View {
 
                                     resourceRow(label: "Endpoint", value: card.endpointText)
                                     resourceRow(label: "Provider", value: card.providerText)
+                                    resourceRow(label: "Auto Start", value: card.autoStartText)
 
                                     if let lastError = card.lastErrorText, !lastError.isEmpty {
                                         resourceRow(label: "Last Error", value: lastError)
                                     }
 
-                                    Button {
-                                        onToggleRuntime(gateway)
-                                    } label: {
-                                        Label(
-                                            actionText(for: category),
-                                            systemImage: category == .running ? "stop.circle" : "play.circle"
-                                        )
-                                        .frame(maxWidth: .infinity)
+                                    HStack(spacing: 12) {
+                                        Button("Edit") {
+                                            onConfigure(gateway)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .focusable(false)
+                                        .foregroundStyle(DesignTokens.textPrimary)
+                                        .disabled(isSubmitting)
+
+                                        Button(actionText(for: category)) {
+                                            onToggleRuntime(gateway)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .focusable(false)
+                                        .foregroundStyle(DesignTokens.textSecondary)
+                                        .disabled(isSubmitting)
                                     }
-                                    .buttonStyle(.plain)
-                                    .focusable(false)
-                                    .padding(.vertical, 10)
-                                    .background(DesignTokens.surfacePrimary)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .stroke(DesignTokens.borderSubtle, lineWidth: 1)
-                                    )
-                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                    .foregroundStyle(DesignTokens.textPrimary)
-                                    .disabled(isSubmitting)
                                 }
                             }
                         }

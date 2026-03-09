@@ -2,7 +2,7 @@ use std::net::TcpListener as StdTcpListener;
 
 use fluxd::domain::gateway::CreateGatewayInput;
 use fluxd::repo::gateway_repo::GatewayRepo;
-use fluxd::runtime::gateway_manager::{GatewayManager, GatewayRuntimeStatus};
+use fluxd::runtime::gateway_manager::{GatewayAutoStartSummary, GatewayManager, GatewayRuntimeStatus};
 use fluxd::storage::migrate::run_migrations;
 use serde_json::json;
 
@@ -38,6 +38,7 @@ async fn starts_multiple_gateways_on_different_ports() {
             default_provider_id: "provider_default".to_string(),
             default_model: Some("gpt-4o-mini".to_string()),
             enabled: true,
+            auto_start: false,
         })
         .await
         .expect("create gateway 1");
@@ -54,6 +55,7 @@ async fn starts_multiple_gateways_on_different_ports() {
             default_provider_id: "provider_default".to_string(),
             default_model: Some("gpt-4.1".to_string()),
             enabled: true,
+            auto_start: false,
         })
         .await
         .expect("create gateway 2");
@@ -105,6 +107,7 @@ async fn routes_gateway_runtime_by_inbound_protocol() {
             default_provider_id: "provider_default".to_string(),
             default_model: Some("gpt-4o-mini".to_string()),
             enabled: true,
+            auto_start: false,
         })
         .await
         .expect("create openai gateway");
@@ -121,6 +124,7 @@ async fn routes_gateway_runtime_by_inbound_protocol() {
             default_provider_id: "provider_default".to_string(),
             default_model: Some("claude-3-7-sonnet".to_string()),
             enabled: true,
+            auto_start: false,
         })
         .await
         .expect("create anthropic gateway");
@@ -167,6 +171,129 @@ async fn routes_gateway_runtime_by_inbound_protocol() {
         .stop_gateway(&anthropic_gateway.id)
         .await
         .expect("stop anthropic gateway");
+}
+
+#[tokio::test]
+async fn auto_start_only_starts_enabled_gateways_and_records_failures() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    sqlx::query(
+        "INSERT INTO providers (id, name, kind, base_url, api_key, enabled) VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+    )
+    .bind("provider_default")
+    .bind("Default")
+    .bind("openai")
+    .bind("https://api.openai.com/v1")
+    .bind("sk-test")
+    .execute(&pool)
+    .await
+    .expect("insert default provider");
+
+    let repo = GatewayRepo::new(pool.clone());
+    let running_gateway = repo
+        .create(CreateGatewayInput {
+            id: "gw_auto_running".to_string(),
+            name: "Gateway Auto Running".to_string(),
+            listen_host: "127.0.0.1".to_string(),
+            listen_port: next_free_port(),
+            inbound_protocol: "openai".to_string(),
+            upstream_protocol: "provider_default".to_string(),
+            protocol_config_json: serde_json::json!({}),
+            default_provider_id: "provider_default".to_string(),
+            default_model: Some("gpt-4o-mini".to_string()),
+            enabled: true,
+            auto_start: true,
+        })
+        .await
+        .expect("create running gateway");
+
+    let manual_gateway = repo
+        .create(CreateGatewayInput {
+            id: "gw_manual".to_string(),
+            name: "Gateway Manual".to_string(),
+            listen_host: "127.0.0.1".to_string(),
+            listen_port: next_free_port(),
+            inbound_protocol: "openai".to_string(),
+            upstream_protocol: "provider_default".to_string(),
+            protocol_config_json: serde_json::json!({}),
+            default_provider_id: "provider_default".to_string(),
+            default_model: Some("gpt-4o-mini".to_string()),
+            enabled: true,
+            auto_start: false,
+        })
+        .await
+        .expect("create manual gateway");
+
+    let disabled_gateway = repo
+        .create(CreateGatewayInput {
+            id: "gw_disabled".to_string(),
+            name: "Gateway Disabled".to_string(),
+            listen_host: "127.0.0.1".to_string(),
+            listen_port: next_free_port(),
+            inbound_protocol: "openai".to_string(),
+            upstream_protocol: "provider_default".to_string(),
+            protocol_config_json: serde_json::json!({}),
+            default_provider_id: "provider_default".to_string(),
+            default_model: Some("gpt-4o-mini".to_string()),
+            enabled: false,
+            auto_start: true,
+        })
+        .await
+        .expect("create disabled gateway");
+
+    let occupied_listener = StdTcpListener::bind("127.0.0.1:0").expect("bind occupied port");
+    let occupied_port = occupied_listener
+        .local_addr()
+        .expect("read occupied local addr")
+        .port() as i64;
+
+    let conflict_gateway = repo
+        .create(CreateGatewayInput {
+            id: "gw_conflict".to_string(),
+            name: "Gateway Conflict".to_string(),
+            listen_host: "127.0.0.1".to_string(),
+            listen_port: occupied_port,
+            inbound_protocol: "openai".to_string(),
+            upstream_protocol: "provider_default".to_string(),
+            protocol_config_json: serde_json::json!({}),
+            default_provider_id: "provider_default".to_string(),
+            default_model: Some("gpt-4o-mini".to_string()),
+            enabled: true,
+            auto_start: true,
+        })
+        .await
+        .expect("create conflict gateway");
+
+    let manager = GatewayManager::new(pool);
+    let summary = manager
+        .start_auto_start_gateways()
+        .await
+        .expect("start auto-start gateways");
+
+    assert_eq!(
+        summary,
+        GatewayAutoStartSummary {
+            eligible: 2,
+            started: 1,
+            failed: 1,
+        }
+    );
+    assert_eq!(manager.status(&running_gateway.id).await, GatewayRuntimeStatus::Running);
+    assert_eq!(manager.status(&manual_gateway.id).await, GatewayRuntimeStatus::Stopped);
+    assert_eq!(manager.status(&disabled_gateway.id).await, GatewayRuntimeStatus::Stopped);
+    assert_eq!(manager.status(&conflict_gateway.id).await, GatewayRuntimeStatus::Stopped);
+    assert_eq!(manager.last_error(&running_gateway.id).await, None);
+    assert!(manager.last_error(&conflict_gateway.id).await.is_some());
+
+    drop(occupied_listener);
+
+    manager
+        .stop_gateway(&running_gateway.id)
+        .await
+        .expect("stop running gateway");
 }
 
 fn next_free_port() -> i64 {

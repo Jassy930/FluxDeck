@@ -29,6 +29,7 @@ struct GatewayWorkspaceCard {
     let endpointText: String
     let runtimeBadge: String
     let providerText: String
+    let autoStartText: String
     let lastErrorText: String?
 
     static func make(gateway: AdminGateway) -> GatewayWorkspaceCard {
@@ -40,6 +41,7 @@ struct GatewayWorkspaceCard {
             endpointText: "\(gateway.listenHost):\(gateway.listenPort)",
             runtimeBadge: category.rawValue.uppercased(),
             providerText: gateway.defaultProviderId,
+            autoStartText: gateway.autoStart ? "ON" : "OFF",
             lastErrorText: gateway.lastError
         )
     }

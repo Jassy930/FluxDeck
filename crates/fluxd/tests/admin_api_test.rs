@@ -44,12 +44,15 @@ async fn admin_api_manages_resources() {
             "inbound_protocol": "openai",
             "default_provider_id": "provider_admin_1",
             "default_model": "gpt-4o-mini",
-            "enabled": true
+            "enabled": true,
+            "auto_start": true
         }))
         .send()
         .await
         .expect("create gateway request");
     assert_eq!(gateway_resp.status(), reqwest::StatusCode::CREATED);
+    let created_gateway: serde_json::Value = gateway_resp.json().await.expect("decode created gateway");
+    assert_eq!(created_gateway.get("auto_start"), Some(&json!(true)));
 
     let start_resp = client
         .post(format!("{base}/admin/gateways/gateway_admin_1/start"))
@@ -64,6 +67,34 @@ async fn admin_api_manages_resources() {
         .await
         .expect("stop gateway request");
     assert_eq!(stop_resp.status(), reqwest::StatusCode::OK);
+
+    let update_gateway_resp = client
+        .put(format!("{base}/admin/gateways/gateway_admin_1"))
+        .json(&json!({
+            "name": "Admin Gateway Updated",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "upstream_protocol": "provider_default",
+            "protocol_config_json": {"compatibility_mode":"compatible"},
+            "default_provider_id": "provider_admin_1",
+            "default_model": "gpt-4.1-mini",
+            "enabled": false,
+            "auto_start": false
+        }))
+        .send()
+        .await
+        .expect("update gateway request");
+    assert_eq!(update_gateway_resp.status(), reqwest::StatusCode::OK);
+
+    let updated_gateway: serde_json::Value = update_gateway_resp
+        .json()
+        .await
+        .expect("decode updated gateway");
+    assert_eq!(updated_gateway.get("id"), Some(&json!("gateway_admin_1")));
+    assert_eq!(updated_gateway.get("name"), Some(&json!("Admin Gateway Updated")));
+    assert_eq!(updated_gateway.get("enabled"), Some(&json!(false)));
+    assert_eq!(updated_gateway.get("auto_start"), Some(&json!(false)));
 
     let logs_resp = client
         .get(format!("{base}/admin/logs"))
@@ -113,6 +144,28 @@ async fn admin_api_manages_resources() {
         .await
         .expect("update missing provider request");
     assert_eq!(not_found_update_resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    let not_found_gateway_update_resp = client
+        .put(format!("{base}/admin/gateways/gateway_not_found"))
+        .json(&json!({
+            "name": "Unknown Gateway",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "upstream_protocol": "provider_default",
+            "protocol_config_json": {},
+            "default_provider_id": "provider_admin_1",
+            "default_model": "gpt-4.1-mini",
+            "enabled": true,
+            "auto_start": true
+        }))
+        .send()
+        .await
+        .expect("update missing gateway request");
+    assert_eq!(
+        not_found_gateway_update_resp.status(),
+        reqwest::StatusCode::NOT_FOUND
+    );
 }
 
 #[tokio::test]
@@ -152,7 +205,8 @@ async fn admin_api_response_shape_is_stable() {
             "inbound_protocol": "openai",
             "default_provider_id": "provider_contract_1",
             "default_model": "gpt-4o-mini",
-            "enabled": true
+            "enabled": true,
+            "auto_start": true
         }))
         .send()
         .await
@@ -226,6 +280,9 @@ async fn admin_api_response_shape_is_stable() {
     assert_eq!(gateway.get("protocol_config_json"), Some(&json!({})));
     assert!(gateway.get("default_provider_id").is_some());
     assert!(gateway.get("enabled").is_some());
+    assert_eq!(gateway.get("auto_start"), Some(&json!(true)));
+    assert!(gateway.get("runtime_status").is_some());
+    assert!(gateway.get("last_error").is_some());
 
     let logs: serde_json::Value = client
         .get(format!("{base}/admin/logs"))
@@ -348,6 +405,55 @@ async fn admin_api_returns_gateway_runtime_status() {
         .and_then(|items| items.first())
         .expect("gateway exists after stop");
     assert_eq!(gateway_after_stop.get("runtime_status"), Some(&json!("stopped")));
+}
+
+#[tokio::test]
+async fn admin_api_defaults_gateway_auto_start_to_false_when_omitted() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_auto_default",
+            "name": "Provider Auto Default",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-auto-default",
+            "models": ["gpt-4o-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider request");
+
+    let gateway: serde_json::Value = client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_auto_default",
+            "name": "Gateway Auto Default",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "default_provider_id": "provider_auto_default",
+            "default_model": "gpt-4o-mini",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create gateway request")
+        .json()
+        .await
+        .expect("decode gateway");
+
+    assert_eq!(gateway.get("auto_start"), Some(&json!(false)));
 }
 
 #[tokio::test]

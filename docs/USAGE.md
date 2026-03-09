@@ -119,8 +119,60 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
   --upstream-protocol provider_default \
   --protocol-config-json '{"compatibility_mode":"compatible"}' \
   --default-provider-id provider_main \
-  --default-model gpt-4o-mini
+  --default-model gpt-4o-mini \
+  --auto-start true
 ```
+
+说明：
+
+- `fluxctl gateway create` 已支持 `--auto-start true|false`
+- 原生前端也已支持创建/编辑 Gateway 配置，并可直接切换 `Auto Start`
+- 若你更偏好直接调 Admin API，也可以这样创建：
+
+```bash
+curl -X POST http://127.0.0.1:7777/admin/gateways \
+  -H 'content-type: application/json' \
+  -d '{
+    "id": "gateway_main",
+    "name": "Gateway Main",
+    "listen_host": "127.0.0.1",
+    "listen_port": 18080,
+    "inbound_protocol": "openai",
+    "upstream_protocol": "provider_default",
+    "protocol_config_json": {"compatibility_mode":"compatible"},
+    "default_provider_id": "provider_main",
+    "default_model": "gpt-4o-mini",
+    "enabled": true,
+    "auto_start": true
+  }'
+```
+
+当 `auto_start=true` 时：
+
+- `fluxd` 启动后会自动尝试启动该 Gateway
+- 如果端口冲突或绑定失败，`fluxd` 会继续启动
+- 可通过 `GET /admin/gateways` 或原生工作台查看该 Gateway 的 `last_error`
+
+更新 Gateway 配置：
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway update gateway_main \
+  --name "Gateway Main Updated" \
+  --listen-host 127.0.0.1 \
+  --listen-port 19090 \
+  --inbound-protocol openai \
+  --upstream-protocol provider_default \
+  --protocol-config-json '{"compatibility_mode":"strict"}' \
+  --default-provider-id provider_main \
+  --default-model gpt-4.1-mini \
+  --enabled true \
+  --auto-start false
+```
+
+说明：
+
+- `gateway update` 只保存配置，不会热更新当前运行中的实例
+- 如果该 Gateway 当前已在运行，请手动执行 `gateway stop` 后再 `gateway start`，让新配置生效
 
 启动 Gateway：
 

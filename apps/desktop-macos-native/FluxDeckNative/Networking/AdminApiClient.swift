@@ -2,6 +2,73 @@ import Foundation
 
 let defaultAdminBaseURL = "http://127.0.0.1:7777"
 
+indirect enum JSONValue: Codable, Equatable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([String: JSONValue].self) {
+            self = .object(value)
+        } else if let value = try? container.decode([JSONValue].self) {
+            self = .array(value)
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported JSON value")
+        }
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+
+        switch self {
+        case .string(let value):
+            try container.encode(value)
+        case .number(let value):
+            try container.encode(value)
+        case .bool(let value):
+            try container.encode(value)
+        case .object(let value):
+            try container.encode(value)
+        case .array(let value):
+            try container.encode(value)
+        case .null:
+            try container.encodeNil()
+        }
+    }
+
+    static func parseObject(from raw: String) throws -> [String: JSONValue] {
+        let data = Data(raw.utf8)
+        let decoder = JSONDecoder()
+        return try decoder.decode([String: JSONValue].self, from: data)
+    }
+
+    static func prettyPrinted(_ value: [String: JSONValue]) -> String {
+        guard
+            let data = try? JSONEncoder().encode(value),
+            let object = try? JSONSerialization.jsonObject(with: data),
+            let prettyData = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+            let string = String(data: prettyData, encoding: .utf8)
+        else {
+            return "{}"
+        }
+
+        return string
+    }
+}
+
 enum GatewayRuntimeCategory: String {
     case running
     case stopped
@@ -60,9 +127,12 @@ struct CreateGatewayInput: Encodable {
     let listenHost: String
     let listenPort: Int
     let inboundProtocol: String
+    let upstreamProtocol: String
+    let protocolConfigJSON: [String: JSONValue]
     let defaultProviderId: String
     let defaultModel: String?
     let enabled: Bool
+    let autoStart: Bool
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -70,9 +140,38 @@ struct CreateGatewayInput: Encodable {
         case listenHost = "listen_host"
         case listenPort = "listen_port"
         case inboundProtocol = "inbound_protocol"
+        case upstreamProtocol = "upstream_protocol"
+        case protocolConfigJSON = "protocol_config_json"
         case defaultProviderId = "default_provider_id"
         case defaultModel = "default_model"
         case enabled
+        case autoStart = "auto_start"
+    }
+}
+
+struct UpdateGatewayInput: Encodable {
+    let name: String
+    let listenHost: String
+    let listenPort: Int
+    let inboundProtocol: String
+    let upstreamProtocol: String
+    let protocolConfigJSON: [String: JSONValue]
+    let defaultProviderId: String
+    let defaultModel: String?
+    let enabled: Bool
+    let autoStart: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case listenHost = "listen_host"
+        case listenPort = "listen_port"
+        case inboundProtocol = "inbound_protocol"
+        case upstreamProtocol = "upstream_protocol"
+        case protocolConfigJSON = "protocol_config_json"
+        case defaultProviderId = "default_provider_id"
+        case defaultModel = "default_model"
+        case enabled
+        case autoStart = "auto_start"
     }
 }
 
@@ -106,8 +205,12 @@ struct AdminGateway: Decodable, Identifiable {
     let listenHost: String
     let listenPort: Int
     let inboundProtocol: String
+    let upstreamProtocol: String
+    let protocolConfigJSON: [String: JSONValue]
     let defaultProviderId: String
+    let defaultModel: String?
     let enabled: Bool
+    let autoStart: Bool
     let runtimeStatus: String?
     let lastError: String?
 
@@ -117,10 +220,61 @@ struct AdminGateway: Decodable, Identifiable {
         case listenHost = "listen_host"
         case listenPort = "listen_port"
         case inboundProtocol = "inbound_protocol"
+        case upstreamProtocol = "upstream_protocol"
+        case protocolConfigJSON = "protocol_config_json"
         case defaultProviderId = "default_provider_id"
+        case defaultModel = "default_model"
         case enabled
+        case autoStart = "auto_start"
         case runtimeStatus = "runtime_status"
         case lastError = "last_error"
+    }
+
+    init(
+        id: String,
+        name: String,
+        listenHost: String,
+        listenPort: Int,
+        inboundProtocol: String,
+        upstreamProtocol: String = "provider_default",
+        protocolConfigJSON: [String: JSONValue] = [:],
+        defaultProviderId: String,
+        defaultModel: String? = nil,
+        enabled: Bool,
+        autoStart: Bool,
+        runtimeStatus: String?,
+        lastError: String?
+    ) {
+        self.id = id
+        self.name = name
+        self.listenHost = listenHost
+        self.listenPort = listenPort
+        self.inboundProtocol = inboundProtocol
+        self.upstreamProtocol = upstreamProtocol
+        self.protocolConfigJSON = protocolConfigJSON
+        self.defaultProviderId = defaultProviderId
+        self.defaultModel = defaultModel
+        self.enabled = enabled
+        self.autoStart = autoStart
+        self.runtimeStatus = runtimeStatus
+        self.lastError = lastError
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        listenHost = try container.decode(String.self, forKey: .listenHost)
+        listenPort = try container.decode(Int.self, forKey: .listenPort)
+        inboundProtocol = try container.decode(String.self, forKey: .inboundProtocol)
+        upstreamProtocol = try container.decodeIfPresent(String.self, forKey: .upstreamProtocol) ?? "provider_default"
+        protocolConfigJSON = try container.decodeIfPresent([String: JSONValue].self, forKey: .protocolConfigJSON) ?? [:]
+        defaultProviderId = try container.decode(String.self, forKey: .defaultProviderId)
+        defaultModel = try container.decodeIfPresent(String.self, forKey: .defaultModel)
+        enabled = try container.decode(Bool.self, forKey: .enabled)
+        autoStart = try container.decodeIfPresent(Bool.self, forKey: .autoStart) ?? false
+        runtimeStatus = try container.decodeIfPresent(String.self, forKey: .runtimeStatus)
+        lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
     }
 }
 
@@ -242,6 +396,11 @@ struct AdminApiClient {
 
     func createGateway(_ input: CreateGatewayInput) async throws -> AdminGateway {
         let data = try await post(path: "/admin/gateways", body: input)
+        return try JSONDecoder().decode(AdminGateway.self, from: data)
+    }
+
+    func updateGateway(id: String, input: UpdateGatewayInput) async throws -> AdminGateway {
+        let data = try await put(path: "/admin/gateways/\(id)", body: input)
         return try JSONDecoder().decode(AdminGateway.self, from: data)
     }
 

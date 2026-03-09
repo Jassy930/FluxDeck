@@ -16,6 +16,13 @@ pub enum GatewayRuntimeStatus {
     Stopped,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct GatewayAutoStartSummary {
+    pub eligible: usize,
+    pub started: usize,
+    pub failed: usize,
+}
+
 impl GatewayRuntimeStatus {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -66,6 +73,24 @@ impl GatewayManager {
                 Err(err)
             }
         }
+    }
+
+    pub async fn start_auto_start_gateways(&self) -> Result<GatewayAutoStartSummary> {
+        let gateways = self.repo.list().await?;
+        let mut summary = GatewayAutoStartSummary::default();
+
+        for gateway in gateways
+            .into_iter()
+            .filter(|gateway| gateway.enabled && gateway.auto_start)
+        {
+            summary.eligible += 1;
+            match self.start_gateway(&gateway.id).await {
+                Ok(_) => summary.started += 1,
+                Err(_) => summary.failed += 1,
+            }
+        }
+
+        Ok(summary)
     }
 
     async fn start_gateway_inner(&self, gateway_id: &str) -> Result<()> {

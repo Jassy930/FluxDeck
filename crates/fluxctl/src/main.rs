@@ -51,6 +51,7 @@ async fn main() -> Result<()> {
                 default_provider_id,
                 default_model,
                 enabled,
+                auto_start,
             } => {
                 let protocol_config_json: serde_json::Value =
                     serde_json::from_str(&protocol_config_json)?;
@@ -64,9 +65,41 @@ async fn main() -> Result<()> {
                     "protocol_config_json": protocol_config_json,
                     "default_provider_id": default_provider_id,
                     "default_model": default_model,
-                    "enabled": enabled
+                    "enabled": enabled,
+                    "auto_start": auto_start
                 });
                 let result = client.post_json("/admin/gateways", payload).await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            GatewayCmd::Update {
+                id,
+                name,
+                listen_host,
+                listen_port,
+                inbound_protocol,
+                upstream_protocol,
+                protocol_config_json,
+                default_provider_id,
+                default_model,
+                enabled,
+                auto_start,
+            } => {
+                let protocol_config_json: serde_json::Value =
+                    serde_json::from_str(&protocol_config_json)?;
+                let payload = json!({
+                    "name": name,
+                    "listen_host": listen_host,
+                    "listen_port": listen_port,
+                    "inbound_protocol": inbound_protocol,
+                    "upstream_protocol": upstream_protocol,
+                    "protocol_config_json": protocol_config_json,
+                    "default_provider_id": default_provider_id,
+                    "default_model": default_model,
+                    "enabled": enabled,
+                    "auto_start": auto_start
+                });
+                let path = format!("/admin/gateways/{id}");
+                let result = client.put_json(&path, payload).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             GatewayCmd::List => {

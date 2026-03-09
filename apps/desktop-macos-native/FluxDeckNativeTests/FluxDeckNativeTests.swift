@@ -23,6 +23,7 @@ final class FluxDeckNativeTests: XCTestCase {
                 inboundProtocol: "openai",
                 defaultProviderId: "pv",
                 enabled: true,
+                autoStart: true,
                 runtimeStatus: "running",
                 lastError: nil
             )
@@ -96,6 +97,7 @@ final class FluxDeckNativeTests: XCTestCase {
                 inboundProtocol: "openai",
                 defaultProviderId: "pv",
                 enabled: true,
+                autoStart: true,
                 runtimeStatus: "running",
                 lastError: nil
             )
@@ -104,6 +106,7 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(providerCard.modelCountText, "2 models")
         XCTAssertEqual(gatewayCard.endpointText, "127.0.0.1:18080")
         XCTAssertEqual(gatewayCard.runtimeBadge, "RUNNING")
+        XCTAssertEqual(gatewayCard.autoStartText, "ON")
     }
 
     func testTrafficAndConnectionsModelsAggregateLogs() {
@@ -149,6 +152,7 @@ final class FluxDeckNativeTests: XCTestCase {
                     inboundProtocol: "openai",
                     defaultProviderId: "pv",
                     enabled: true,
+                    autoStart: true,
                     runtimeStatus: "running",
                     lastError: nil
                 )
@@ -215,6 +219,7 @@ final class FluxDeckNativeTests: XCTestCase {
                     inboundProtocol: "openai",
                     defaultProviderId: "pv",
                     enabled: true,
+                    autoStart: true,
                     runtimeStatus: "running",
                     lastError: nil
                 )
@@ -251,6 +256,7 @@ final class FluxDeckNativeTests: XCTestCase {
                     inboundProtocol: "openai",
                     defaultProviderId: "pv",
                     enabled: true,
+                    autoStart: true,
                     runtimeStatus: "running",
                     lastError: nil
                 )
@@ -301,7 +307,8 @@ final class FluxDeckNativeTests: XCTestCase {
             "listen_port": 18080,
             "inbound_protocol": "openai",
             "default_provider_id": "provider_main",
-            "enabled": true
+            "enabled": true,
+            "auto_start": true
           }
         ]
         """.data(using: .utf8)!
@@ -314,6 +321,7 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(providers.first?.apiKey, "sk-main")
         XCTAssertEqual(gateways.count, 1)
         XCTAssertEqual(gateways.first?.defaultProviderId, "provider_main")
+        XCTAssertEqual(gateways.first?.autoStart, true)
     }
 
     func testRuntimeCategoryAndOverviewMetrics() {
@@ -338,6 +346,7 @@ final class FluxDeckNativeTests: XCTestCase {
                 inboundProtocol: "openai",
                 defaultProviderId: "provider_main",
                 enabled: true,
+                autoStart: true,
                 runtimeStatus: "running",
                 lastError: nil
             ),
@@ -349,6 +358,7 @@ final class FluxDeckNativeTests: XCTestCase {
                 inboundProtocol: "openai",
                 defaultProviderId: "provider_main",
                 enabled: true,
+                autoStart: false,
                 runtimeStatus: "stopped",
                 lastError: "upstream timeout"
             )
@@ -380,9 +390,12 @@ final class FluxDeckNativeTests: XCTestCase {
             listenHost: "127.0.0.1",
             listenPort: 18080,
             inboundProtocol: "openai",
+            upstreamProtocol: "provider_default",
+            protocolConfigJSON: ["compatibility_mode": .string("compatible")],
             defaultProviderId: "provider_ui",
             defaultModel: "gpt-4o-mini",
-            enabled: true
+            enabled: true,
+            autoStart: true
         )
         let updateProviderInput = UpdateProviderInput(
             name: "UI Provider Updated",
@@ -413,13 +426,46 @@ final class FluxDeckNativeTests: XCTestCase {
 
         XCTAssertEqual(gatewayJSON["listen_host"] as? String, "127.0.0.1")
         XCTAssertEqual(gatewayJSON["listen_port"] as? Int, 18080)
+        XCTAssertEqual(gatewayJSON["upstream_protocol"] as? String, "provider_default")
         XCTAssertEqual(gatewayJSON["default_provider_id"] as? String, "provider_ui")
         XCTAssertEqual(gatewayJSON["default_model"] as? String, "gpt-4o-mini")
+        XCTAssertEqual(gatewayJSON["auto_start"] as? Bool, true)
+        let createProtocolConfig = gatewayJSON["protocol_config_json"] as? [String: String]
+        XCTAssertEqual(createProtocolConfig?["compatibility_mode"], "compatible")
 
         XCTAssertEqual(updateProviderJSON["base_url"] as? String, "https://api.openai.com/v1")
         XCTAssertEqual(updateProviderJSON["api_key"] as? String, "sk-test-updated")
         XCTAssertEqual((updateProviderJSON["models"] as? [String])?.first, "gpt-4.1-mini")
         XCTAssertEqual(updateProviderJSON["enabled"] as? Bool, false)
+    }
+
+    func testEncodesGatewayUpdatePayloadWithSnakeCaseKeys() throws {
+        let gatewayInput = UpdateGatewayInput(
+            name: "UI Gateway Updated",
+            listenHost: "127.0.0.1",
+            listenPort: 19090,
+            inboundProtocol: "openai",
+            upstreamProtocol: "provider_default",
+            protocolConfigJSON: ["compatibility_mode": .string("strict")],
+            defaultProviderId: "provider_ui",
+            defaultModel: "gpt-4.1-mini",
+            enabled: false,
+            autoStart: true
+        )
+
+        let gatewayData = try JSONEncoder().encode(gatewayInput)
+        let gatewayJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: gatewayData) as? [String: Any]
+        )
+
+        XCTAssertEqual(gatewayJSON["listen_host"] as? String, "127.0.0.1")
+        XCTAssertEqual(gatewayJSON["listen_port"] as? Int, 19090)
+        XCTAssertEqual(gatewayJSON["upstream_protocol"] as? String, "provider_default")
+        XCTAssertEqual(gatewayJSON["default_provider_id"] as? String, "provider_ui")
+        XCTAssertEqual(gatewayJSON["auto_start"] as? Bool, true)
+        XCTAssertEqual(gatewayJSON["enabled"] as? Bool, false)
+        let protocolConfig = gatewayJSON["protocol_config_json"] as? [String: String]
+        XCTAssertEqual(protocolConfig?["compatibility_mode"], "strict")
     }
 
     func testDecodesPaginatedLogsPayload() throws {

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
-use crate::domain::gateway::{CreateGatewayInput, Gateway};
+use crate::domain::gateway::{CreateGatewayInput, Gateway, UpdateGatewayInput};
 use crate::domain::provider::{CreateProviderInput, Provider, UpdateProviderInput};
 use crate::http::dto::BasicOk;
 use crate::repo::gateway_repo::GatewayRepo;
@@ -34,6 +34,10 @@ impl AdminApiState {
             pool,
         }
     }
+
+    pub fn gateway_manager(&self) -> Arc<GatewayManager> {
+        Arc::clone(&self.gateway_manager)
+    }
 }
 
 pub fn build_admin_router(state: AdminApiState) -> Router {
@@ -41,6 +45,7 @@ pub fn build_admin_router(state: AdminApiState) -> Router {
         .route("/admin/providers", post(create_provider).get(list_providers))
         .route("/admin/providers/{id}", put(update_provider))
         .route("/admin/gateways", post(create_gateway).get(list_gateways))
+        .route("/admin/gateways/{id}", put(update_gateway))
         .route("/admin/gateways/{id}/start", post(start_gateway))
         .route("/admin/gateways/{id}/stop", post(stop_gateway))
         .route("/admin/logs", get(list_logs))
@@ -117,7 +122,31 @@ async fn create_gateway(
                 default_provider_id: String::new(),
                 default_model: None,
                 enabled: false,
+                auto_start: false,
             }),
+        ),
+    }
+}
+
+async fn update_gateway(
+    State(state): State<AdminApiState>,
+    Path(gateway_id): Path<String>,
+    Json(input): Json<UpdateGatewayInput>,
+) -> (StatusCode, Json<Value>) {
+    match state.gateway_repo.update(&gateway_id, input).await {
+        Ok(Some(gateway)) => (StatusCode::OK, Json(json!(gateway))),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": "gateway not found",
+                "id": gateway_id
+            })),
+        ),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": err.to_string()
+            })),
         ),
     }
 }

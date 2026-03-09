@@ -41,7 +41,7 @@ pub enum ProviderCmd {
         api_key: String,
         #[arg(long)]
         models: String,
-        #[arg(long, default_value_t = true)]
+        #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
         enabled: bool,
     },
     List,
@@ -68,8 +68,33 @@ pub enum GatewayCmd {
         default_provider_id: String,
         #[arg(long = "default-model")]
         default_model: Option<String>,
-        #[arg(long, default_value_t = true)]
+        #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
         enabled: bool,
+        #[arg(long = "auto-start", action = clap::ArgAction::Set, default_value_t = false)]
+        auto_start: bool,
+    },
+    Update {
+        id: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long = "listen-host", default_value = "127.0.0.1")]
+        listen_host: String,
+        #[arg(long = "listen-port")]
+        listen_port: i64,
+        #[arg(long = "inbound-protocol", default_value = "openai")]
+        inbound_protocol: String,
+        #[arg(long = "upstream-protocol", default_value = "provider_default")]
+        upstream_protocol: String,
+        #[arg(long = "protocol-config-json", default_value = "{}")]
+        protocol_config_json: String,
+        #[arg(long = "default-provider-id")]
+        default_provider_id: String,
+        #[arg(long = "default-model")]
+        default_model: Option<String>,
+        #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
+        enabled: bool,
+        #[arg(long = "auto-start", action = clap::ArgAction::Set, default_value_t = false)]
+        auto_start: bool,
     },
     List,
     Start {

@@ -29,11 +29,32 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
   --listen-host 127.0.0.1 \
   --listen-port 18080 \
   --inbound-protocol openai \
+  --upstream-protocol provider_default \
+  --protocol-config-json '{"compatibility_mode":"compatible"}' \
   --default-provider-id provider_main \
-  --default-model gpt-4o-mini
+  --default-model gpt-4o-mini \
+  --auto-start true
 
 cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway start gateway_main
 ```
+
+更新网关配置：
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway update gateway_main \
+  --name "Gateway Main Updated" \
+  --listen-host 127.0.0.1 \
+  --listen-port 19090 \
+  --inbound-protocol openai \
+  --upstream-protocol provider_default \
+  --protocol-config-json '{"compatibility_mode":"strict"}' \
+  --default-provider-id provider_main \
+  --default-model gpt-4.1-mini \
+  --enabled true \
+  --auto-start false
+```
+
+注意：更新只保存配置，不会热更新当前运行中的 Gateway；如需生效，请手动 stop/start。
 
 ## 调用网关
 

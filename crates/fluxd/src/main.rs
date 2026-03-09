@@ -29,7 +29,21 @@ async fn main() -> Result<()> {
         .await
         .with_context(|| format!("bind admin listener: {admin_addr}"))?;
 
-    let app = build_admin_router(AdminApiState::new(pool));
+    let state = AdminApiState::new(pool);
+    let gateway_manager = state.gateway_manager();
+    match gateway_manager.start_auto_start_gateways().await {
+        Ok(summary) => {
+            println!(
+                "fluxd gateway auto-start eligible={} started={} failed={}",
+                summary.eligible, summary.started, summary.failed
+            );
+        }
+        Err(err) => {
+            eprintln!("fluxd gateway auto-start skipped: {err}");
+        }
+    }
+
+    let app = build_admin_router(state);
     println!("fluxd admin listening on http://{admin_addr}");
 
     axum::serve(listener, app)

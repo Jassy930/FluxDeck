@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var isProviderSheetPresented = false
     @State private var editingProvider: AdminProvider?
     @State private var isGatewaySheetPresented = false
+    @State private var editingGateway: AdminGateway?
     @State private var selectedLogGateway = Self.logFilterAll
     @State private var selectedLogProvider = Self.logFilterAll
     @State private var selectedLogStatus = Self.logFilterAll
@@ -107,12 +108,30 @@ struct ContentView: View {
             )
         }
         .sheet(isPresented: $isGatewaySheetPresented) {
-            GatewayCreateSheet(
+            GatewayFormSheet(
+                mode: .create,
                 providers: providers,
-                isSubmitting: isSubmitting
-            ) { input in
-                await createGateway(input)
-            }
+                isSubmitting: isSubmitting,
+                onCreate: { input in
+                    await createGateway(input)
+                },
+                onUpdate: { gatewayID, input in
+                    await updateGateway(id: gatewayID, input: input)
+                }
+            )
+        }
+        .sheet(item: $editingGateway) { gateway in
+            GatewayFormSheet(
+                mode: .edit(gateway),
+                providers: providers,
+                isSubmitting: isSubmitting,
+                onCreate: { input in
+                    await createGateway(input)
+                },
+                onUpdate: { gatewayID, input in
+                    await updateGateway(id: gatewayID, input: input)
+                }
+            )
         }
     }
 
@@ -171,6 +190,9 @@ struct ContentView: View {
                 isSubmitting: isSubmitting,
                 error: loadError,
                 onCreate: { isGatewaySheetPresented = true },
+                onConfigure: { gateway in
+                    editingGateway = gateway
+                },
                 onToggleRuntime: { gateway in
                     Task {
                         await toggleGatewayRuntime(gateway)
@@ -394,6 +416,22 @@ struct ContentView: View {
         do {
             _ = try await client.createGateway(input)
             isGatewaySheetPresented = false
+            loadError = nil
+            await refreshAll()
+        } catch {
+            loadError = error.localizedDescription
+        }
+
+        isSubmitting = false
+    }
+
+    @MainActor
+    private func updateGateway(id: String, input: UpdateGatewayInput) async {
+        isSubmitting = true
+
+        do {
+            _ = try await client.updateGateway(id: id, input: input)
+            editingGateway = nil
             loadError = nil
             await refreshAll()
         } catch {
@@ -1520,10 +1558,17 @@ private struct PlaceholderDetailView: View {
     }
 }
 
-private struct GatewayCreateSheet: View {
+private enum GatewayFormMode {
+    case create
+    case edit(AdminGateway)
+}
+
+private struct GatewayFormSheet: View {
+    let mode: GatewayFormMode
     let providers: [AdminProvider]
     let isSubmitting: Bool
-    let onSubmit: (CreateGatewayInput) async -> Void
+    let onCreate: (CreateGatewayInput) async -> Void
+    let onUpdate: (String, UpdateGatewayInput) async -> Void
 
     @Environment(\.dismiss) private var dismiss
 
@@ -1532,23 +1577,85 @@ private struct GatewayCreateSheet: View {
     @State private var listenHost = "127.0.0.1"
     @State private var listenPort = "18080"
     @State private var inboundProtocol = "openai"
+    @State private var upstreamProtocol = "provider_default"
+    @State private var protocolConfigJSON = JSONValue.prettyPrinted(["compatibility_mode": .string("compatible")])
     @State private var defaultProviderID = ""
     @State private var defaultModel = "gpt-4o-mini"
     @State private var enabled = true
+    @State private var autoStart = false
     @State private var validationError: String?
+
+    init(
+        mode: GatewayFormMode,
+        providers: [AdminProvider],
+        isSubmitting: Bool,
+        onCreate: @escaping (CreateGatewayInput) async -> Void,
+        onUpdate: @escaping (String, UpdateGatewayInput) async -> Void
+    ) {
+        self.mode = mode
+        self.providers = providers
+        self.isSubmitting = isSubmitting
+        self.onCreate = onCreate
+        self.onUpdate = onUpdate
+
+        switch mode {
+        case .create:
+            _id = State(initialValue: "")
+            _name = State(initialValue: "")
+            _listenHost = State(initialValue: "127.0.0.1")
+            _listenPort = State(initialValue: "18080")
+            _inboundProtocol = State(initialValue: "openai")
+            _upstreamProtocol = State(initialValue: "provider_default")
+            _protocolConfigJSON = State(initialValue: JSONValue.prettyPrinted(["compatibility_mode": .string("compatible")]))
+            _defaultProviderID = State(initialValue: "")
+            _defaultModel = State(initialValue: "gpt-4o-mini")
+            _enabled = State(initialValue: true)
+            _autoStart = State(initialValue: false)
+        case .edit(let gateway):
+            _id = State(initialValue: gateway.id)
+            _name = State(initialValue: gateway.name)
+            _listenHost = State(initialValue: gateway.listenHost)
+            _listenPort = State(initialValue: String(gateway.listenPort))
+            _inboundProtocol = State(initialValue: gateway.inboundProtocol)
+            _upstreamProtocol = State(initialValue: gateway.upstreamProtocol)
+            _protocolConfigJSON = State(initialValue: JSONValue.prettyPrinted(gateway.protocolConfigJSON))
+            _defaultProviderID = State(initialValue: gateway.defaultProviderId)
+            _defaultModel = State(initialValue: gateway.defaultModel ?? "")
+            _enabled = State(initialValue: gateway.enabled)
+            _autoStart = State(initialValue: gateway.autoStart)
+        }
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Gateway") {
-                    TextField("ID", text: $id)
+                Section(isCreateMode ? "Gateway" : "Gateway Snapshot") {
+                    if isCreateMode {
+                        TextField("ID", text: $id)
+                    } else {
+                        LabeledContent("ID") {
+                            Text(id)
+                                .font(.caption.monospaced())
+                        }
+                    }
                     TextField("Name", text: $name)
                     TextField("Listen Host", text: $listenHost)
                     TextField("Listen Port", text: $listenPort)
                     TextField("Inbound Protocol", text: $inboundProtocol)
+                    TextField("Upstream Protocol", text: $upstreamProtocol)
                     TextField("Default Provider ID", text: $defaultProviderID)
                     TextField("Default Model (optional)", text: $defaultModel)
                     Toggle("Enabled", isOn: $enabled)
+                    Toggle("Auto Start", isOn: $autoStart)
+                }
+
+                Section("Routing JSON") {
+                    TextEditor(text: $protocolConfigJSON)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minHeight: 120)
+                    Text("Saved to configuration only. If this gateway is currently running, stop and start it manually to apply runtime changes.")
+                        .font(.caption)
+                        .foregroundStyle(DesignTokens.textSecondary)
                 }
 
                 if !providers.isEmpty {
@@ -1567,7 +1674,7 @@ private struct GatewayCreateSheet: View {
                     }
                 }
             }
-            .navigationTitle("New Gateway")
+            .navigationTitle(isCreateMode ? "New Gateway" : "Edit Gateway")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -1577,7 +1684,7 @@ private struct GatewayCreateSheet: View {
                     .disabled(isSubmitting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
+                    Button(isCreateMode ? "Create" : "Save") {
                         submit()
                     }
                     .focusable(false)
@@ -1593,11 +1700,18 @@ private struct GatewayCreateSheet: View {
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedHost = listenHost.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedProtocol = inboundProtocol.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedUpstreamProtocol = upstreamProtocol.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedProviderID = defaultProviderID.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedModel = defaultModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedProtocolConfig = protocolConfigJSON.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard !normalizedID.isEmpty, !normalizedName.isEmpty, !normalizedHost.isEmpty, !normalizedProtocol.isEmpty, !normalizedProviderID.isEmpty else {
-            validationError = "ID, Name, Host, Protocol and Default Provider ID are required."
+        if isCreateMode && normalizedID.isEmpty {
+            validationError = "ID is required."
+            return
+        }
+
+        guard !normalizedName.isEmpty, !normalizedHost.isEmpty, !normalizedProtocol.isEmpty, !normalizedUpstreamProtocol.isEmpty, !normalizedProviderID.isEmpty else {
+            validationError = "Name, Host, Protocols and Default Provider ID are required."
             return
         }
 
@@ -1606,21 +1720,59 @@ private struct GatewayCreateSheet: View {
             return
         }
 
+        let parsedProtocolConfig: [String: JSONValue]
+        do {
+            parsedProtocolConfig = try JSONValue.parseObject(from: normalizedProtocolConfig.isEmpty ? "{}" : normalizedProtocolConfig)
+        } catch {
+            validationError = "Protocol Config JSON must be a valid JSON object."
+            return
+        }
+
         validationError = nil
 
-        let input = CreateGatewayInput(
-            id: normalizedID,
-            name: normalizedName,
-            listenHost: normalizedHost,
-            listenPort: port,
-            inboundProtocol: normalizedProtocol,
-            defaultProviderId: normalizedProviderID,
-            defaultModel: normalizedModel.isEmpty ? nil : normalizedModel,
-            enabled: enabled
-        )
+        switch mode {
+        case .create:
+            let input = CreateGatewayInput(
+                id: normalizedID,
+                name: normalizedName,
+                listenHost: normalizedHost,
+                listenPort: port,
+                inboundProtocol: normalizedProtocol,
+                upstreamProtocol: normalizedUpstreamProtocol,
+                protocolConfigJSON: parsedProtocolConfig,
+                defaultProviderId: normalizedProviderID,
+                defaultModel: normalizedModel.isEmpty ? nil : normalizedModel,
+                enabled: enabled,
+                autoStart: autoStart
+            )
 
-        Task {
-            await onSubmit(input)
+            Task {
+                await onCreate(input)
+            }
+        case .edit:
+            let input = UpdateGatewayInput(
+                name: normalizedName,
+                listenHost: normalizedHost,
+                listenPort: port,
+                inboundProtocol: normalizedProtocol,
+                upstreamProtocol: normalizedUpstreamProtocol,
+                protocolConfigJSON: parsedProtocolConfig,
+                defaultProviderId: normalizedProviderID,
+                defaultModel: normalizedModel.isEmpty ? nil : normalizedModel,
+                enabled: enabled,
+                autoStart: autoStart
+            )
+
+            Task {
+                await onUpdate(normalizedID, input)
+            }
         }
+    }
+
+    private var isCreateMode: Bool {
+        if case .create = mode {
+            return true
+        }
+        return false
     }
 }
