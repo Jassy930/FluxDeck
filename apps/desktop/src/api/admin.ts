@@ -34,6 +34,27 @@ export type RequestLog = {
   created_at: string;
 };
 
+export type RequestLogCursor = {
+  created_at: string;
+  request_id: string;
+};
+
+export type RequestLogPage = {
+  items: RequestLog[];
+  next_cursor: RequestLogCursor | null;
+  has_more: boolean;
+};
+
+export type ListLogsParams = {
+  limit?: number;
+  cursor_created_at?: string;
+  cursor_request_id?: string;
+  gateway_id?: string;
+  provider_id?: string;
+  status_code?: number;
+  errors_only?: boolean;
+};
+
 export type CreateProviderInput = {
   id: string;
   name: string;
@@ -60,7 +81,7 @@ export type CreateGatewayInput = {
 export type AdminApi = {
   listProviders: () => Promise<Provider[]>;
   listGateways: () => Promise<Gateway[]>;
-  listLogs: () => Promise<RequestLog[]>;
+  listLogs: (params?: ListLogsParams) => Promise<RequestLogPage>;
   createProvider: (input: CreateProviderInput) => Promise<Provider>;
   createGateway: (input: CreateGatewayInput) => Promise<Gateway>;
 };
@@ -74,20 +95,21 @@ export type DashboardLists = {
 export async function listDashboardLists(
   api: Pick<AdminApi, 'listProviders' | 'listGateways' | 'listLogs'>,
 ): Promise<DashboardLists> {
-  const [providers, gateways, logs] = await Promise.all([
+  const [providers, gateways, logsPage] = await Promise.all([
     api.listProviders(),
     api.listGateways(),
-    api.listLogs(),
+    api.listLogs({ limit: 20 }),
   ]);
-  return { providers, gateways, logs };
+  return { providers, gateways, logs: logsPage.items };
 }
 
 export function createAdminApi(baseUrl = ''): AdminApi {
   const normalized = baseUrl.replace(/\/$/, '');
   const buildUrl = (path: string) => (normalized ? `${normalized}${path}` : path);
 
-  async function getJson<T>(path: string): Promise<T> {
-    const response = await fetch(buildUrl(path));
+  async function getJson<T>(path: string, params?: URLSearchParams): Promise<T> {
+    const target = params && Array.from(params.keys()).length > 0 ? `${buildUrl(path)}?${params.toString()}` : buildUrl(path);
+    const response = await fetch(target);
     if (!response.ok) {
       throw new Error(`admin api failed: ${response.status}`);
     }
@@ -110,7 +132,17 @@ export function createAdminApi(baseUrl = ''): AdminApi {
   return {
     listProviders: () => getJson<Provider[]>('/admin/providers'),
     listGateways: () => getJson<Gateway[]>('/admin/gateways'),
-    listLogs: () => getJson<RequestLog[]>('/admin/logs'),
+    listLogs: (params) => {
+      const query = new URLSearchParams();
+      if (params?.limit !== undefined) query.set('limit', String(params.limit));
+      if (params?.cursor_created_at) query.set('cursor_created_at', params.cursor_created_at);
+      if (params?.cursor_request_id) query.set('cursor_request_id', params.cursor_request_id);
+      if (params?.gateway_id) query.set('gateway_id', params.gateway_id);
+      if (params?.provider_id) query.set('provider_id', params.provider_id);
+      if (params?.status_code !== undefined) query.set('status_code', String(params.status_code));
+      if (params?.errors_only) query.set('errors_only', 'true');
+      return getJson<RequestLogPage>('/admin/logs', query);
+    },
     createProvider: (input) => postJson<CreateProviderInput, Provider>('/admin/providers', input),
     createGateway: (input) => postJson<CreateGatewayInput, Gateway>('/admin/gateways', input),
   };

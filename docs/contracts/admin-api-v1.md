@@ -101,7 +101,23 @@
 
 ### `GET /admin/logs`
 
-返回数组（最多 200 条），元素字段（稳定字段）：
+查询参数：
+
+- `limit?: number`：单次返回条数，默认 `50`，最大 `100`
+- `cursor_created_at?: string`：分页游标时间戳
+- `cursor_request_id?: string`：同时间戳下的稳定次级游标
+- `gateway_id?: string`：按 gateway 过滤
+- `provider_id?: string`：按 provider 过滤
+- `status_code?: number`：按精确状态码过滤
+- `errors_only?: boolean`：仅返回 `status_code >= 400` 或 `error != null` 的请求
+
+返回对象：
+
+- `items: LogItem[]`
+- `next_cursor: { created_at: string, request_id: string } | null`
+- `has_more: boolean`
+
+其中 `LogItem` 字段（稳定字段）：
 
 - `request_id: string`
 - `gateway_id: string`
@@ -111,6 +127,13 @@
 - `latency_ms: number`
 - `error: string | null`
 - `created_at: string`
+
+排序与语义：
+
+- 服务端按 `created_at DESC, request_id DESC` 排序
+- `cursor_created_at + cursor_request_id` 共同保证翻页稳定
+- Native 监控页消费“最近样本窗口”
+- Logs 工作台消费“可继续分页的请求明细”
 
 说明：
 

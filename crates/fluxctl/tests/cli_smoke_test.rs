@@ -1,5 +1,6 @@
 use clap::Parser;
 use fluxctl::cli::{Cli, Commands, GatewayCmd, ProviderCmd};
+use fluxctl::build_logs_path;
 
 #[test]
 fn parses_provider_create_command() {
@@ -79,4 +80,10 @@ fn parses_gateway_create_with_protocol_graph_fields() {
         },
         _ => panic!("expected gateway command"),
     }
+}
+
+
+#[test]
+fn builds_logs_path_with_limit_query() {
+    assert_eq!(build_logs_path(20), "/admin/logs?limit=20");
 }

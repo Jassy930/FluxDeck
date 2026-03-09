@@ -4,6 +4,7 @@ use serde_json::json;
 
 use fluxctl::cli::{Cli, Commands, GatewayCmd, ProviderCmd};
 use fluxctl::client::AdminClient;
+use fluxctl::build_logs_path;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -83,8 +84,8 @@ async fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
         },
-        Commands::Logs { .. } => {
-            let result = client.get_json("/admin/logs").await?;
+        Commands::Logs { limit } => {
+            let result = client.get_json(&build_logs_path(limit)).await?;
             println!("{}", serde_json::to_string_pretty(&result)?);
         }
     }

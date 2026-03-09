@@ -422,26 +422,35 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(updateProviderJSON["enabled"] as? Bool, false)
     }
 
-    func testDecodesLogsPayload() throws {
+    func testDecodesPaginatedLogsPayload() throws {
         let logsData = """
-        [
-          {
-            "request_id": "req_001",
-            "gateway_id": "gateway_main",
-            "provider_id": "provider_main",
-            "model": "gpt-4o-mini",
-            "status_code": 200,
-            "latency_ms": 132,
-            "error": null,
-            "created_at": "2026-03-03T10:00:00Z"
-          }
-        ]
+        {
+          "items": [
+            {
+              "request_id": "req_001",
+              "gateway_id": "gateway_main",
+              "provider_id": "provider_main",
+              "model": "gpt-4o-mini",
+              "status_code": 200,
+              "latency_ms": 132,
+              "error": null,
+              "created_at": "2026-03-03T10:00:00Z"
+            }
+          ],
+          "next_cursor": {
+            "created_at": "2026-03-03T09:59:00Z",
+            "request_id": "req_000"
+          },
+          "has_more": true
+        }
         """.data(using: .utf8)!
 
-        let logs = try AdminApiClient.decodeLogs(from: logsData)
-        XCTAssertEqual(logs.count, 1)
-        XCTAssertEqual(logs.first?.requestID, "req_001")
-        XCTAssertEqual(logs.first?.statusCode, 200)
+        let page = try AdminApiClient.decodeLogPage(from: logsData)
+        XCTAssertEqual(page.items.count, 1)
+        XCTAssertEqual(page.items.first?.requestID, "req_001")
+        XCTAssertEqual(page.items.first?.statusCode, 200)
+        XCTAssertEqual(page.hasMore, true)
+        XCTAssertEqual(page.nextCursor?.requestID, "req_000")
     }
 
     func testFiltersLogsByGatewayProviderAndStatus() {
@@ -465,6 +474,16 @@ final class FluxDeckNativeTests: XCTestCase {
                 latencyMs: 2200,
                 error: "bad gateway",
                 createdAt: "2026-03-03T10:01:00Z"
+            ),
+            AdminLog(
+                requestID: "req_soft_err",
+                gatewayID: "gw_c",
+                providerID: "pv_c",
+                model: "gpt-4.1-mini",
+                statusCode: 200,
+                latencyMs: 180,
+                error: "degraded to estimate",
+                createdAt: "2026-03-03T10:02:00Z"
             )
         ]
 
@@ -481,8 +500,8 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(combined.first?.requestID, "req_err")
 
         let errorsOnly = filterLogs(logs, gatewayID: nil, providerID: nil, statusCode: nil, errorsOnly: true)
-        XCTAssertEqual(errorsOnly.count, 1)
-        XCTAssertEqual(errorsOnly.first?.requestID, "req_err")
+        XCTAssertEqual(errorsOnly.count, 2)
+        XCTAssertEqual(errorsOnly.map(\.requestID), ["req_err", "req_soft_err"])
     }
 
     func testRecentLogsReturnsLatestTenEntriesInDescendingOrder() {

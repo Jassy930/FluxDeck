@@ -61,25 +61,25 @@ async function main() {
   }
 
   const api = createAdminApi(adminUrl);
-  const [desktopProviders, desktopGateways, desktopLogs] = await Promise.all([
+  const [desktopProviders, desktopGateways, desktopLogsPage] = await Promise.all([
     api.listProviders(),
     api.listGateways(),
-    api.listLogs(),
+    api.listLogs({ limit: 50 }),
   ]);
 
   const cliProviders = runFluxctl(adminUrl, ['provider', 'list']) as JsonValue[];
   const cliGateways = runFluxctl(adminUrl, ['gateway', 'list']) as JsonValue[];
-  const cliLogs = runFluxctl(adminUrl, ['logs']) as JsonValue[];
+  const cliLogsPage = runFluxctl(adminUrl, ['logs']) as { items?: JsonValue[] };
 
   const normalizedDesktop = {
     providers: sortById(desktopProviders),
     gateways: sortById(desktopGateways),
-    logs: sortLogs(desktopLogs),
+    logs: sortLogs(desktopLogsPage.items),
   };
   const normalizedCli = {
     providers: sortById(cliProviders as { id: string }[]),
     gateways: sortById(cliGateways as { id: string }[]),
-    logs: sortLogs(cliLogs as { request_id: string; created_at?: string }[]),
+    logs: sortLogs((cliLogsPage.items ?? []) as { request_id: string; created_at?: string }[]),
   };
 
   if (toCanonicalJson(normalizedDesktop.providers) !== toCanonicalJson(normalizedCli.providers)) {

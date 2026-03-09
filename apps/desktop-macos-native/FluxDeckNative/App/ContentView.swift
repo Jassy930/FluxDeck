@@ -4,7 +4,11 @@ struct ContentView: View {
     @AppStorage("fluxdeck.native.admin_base_url") private var persistedAdminBaseURL = defaultAdminBaseURL
     @State private var providers: [AdminProvider] = []
     @State private var gateways: [AdminGateway] = []
-    @State private var logs: [AdminLog] = []
+    @State private var dashboardLogs: [AdminLog] = []
+    @State private var logsPageItems: [AdminLog] = []
+    @State private var logsPageCursor: AdminLogCursor?
+    @State private var logsPageHasMore = false
+    @State private var isLogsPageLoading = false
     @State private var selectedSection: SidebarSection? = .overview
     @State private var isLoading = false
     @State private var isSubmitting = false
@@ -34,6 +38,17 @@ struct ContentView: View {
         return AdminApiClient(baseURL: url)
     }
 
+    private var logsTaskKey: String {
+        [
+            selectedSection?.rawValue ?? "none",
+            selectedLogGateway,
+            selectedLogProvider,
+            selectedLogStatus,
+            logErrorsOnly ? "errors" : "all",
+            persistedAdminBaseURL
+        ].joined(separator: "|")
+    }
+
     var body: some View {
         AppShellView(
             title: selectedSection?.rawValue ?? SidebarSection.overview.rawValue,
@@ -56,6 +71,12 @@ struct ContentView: View {
         }
         .task {
             await refreshAll()
+        }
+        .task(id: logsTaskKey) {
+            guard selectedSection == .logs else {
+                return
+            }
+            await loadLogsPage(reset: true)
         }
         .onAppear {
             selectedSection = selectedSection ?? .overview
@@ -103,10 +124,10 @@ struct ContentView: View {
                 model: OverviewDashboardModel.make(
                     providers: providers,
                     gateways: gateways,
-                    logs: logs
+                    logs: dashboardLogs
                 ),
                 isLoading: isLoading,
-                logs: recentLogs(logs),
+                logs: recentLogs(dashboardLogs),
                 onOpenAllLogs: {
                     selectedSection = .logs
                     clearLogFilters()
@@ -158,9 +179,10 @@ struct ContentView: View {
             )
         case .logs:
             LogsWorkbenchView(
-                logs: filteredLogs,
-                totalCount: logs.count,
-                isLoading: isLoading,
+                logs: logsPageItems,
+                hasMore: logsPageHasMore,
+                isLoading: isLogsPageLoading && logsPageItems.isEmpty,
+                isLoadingMore: isLogsPageLoading && !logsPageItems.isEmpty,
                 error: loadError,
                 gatewayOptions: gatewayLogOptions,
                 providerOptions: providerLogOptions,
@@ -169,22 +191,27 @@ struct ContentView: View {
                 selectedProvider: $selectedLogProvider,
                 selectedStatus: $selectedLogStatus,
                 errorsOnly: $logErrorsOnly,
-                onClearFilters: clearLogFilters
+                onClearFilters: clearLogFilters,
+                onLoadMore: {
+                    Task {
+                        await loadLogsPage(reset: false)
+                    }
+                }
             )
         case .traffic:
             TrafficAnalyticsView(
-                model: TrafficAnalyticsModel.make(logs: logs)
+                model: TrafficAnalyticsModel.make(logs: dashboardLogs)
             )
         case .connections:
             ConnectionsView(
-                model: ConnectionsModel.make(logs: logs)
+                model: ConnectionsModel.make(logs: dashboardLogs)
             )
         case .topology:
             TopologyCanvasView(
                 graph: TopologyGraph.make(
                     gateways: gateways,
                     providers: providers,
-                    logs: logs
+                    logs: dashboardLogs
                 )
             )
         case .routeMap:
@@ -305,15 +332,15 @@ struct ContentView: View {
         do {
             async let providerTask = client.fetchProviders()
             async let gatewayTask = client.fetchGateways()
-            async let logsTask = client.fetchLogs()
+            async let dashboardLogsTask = client.fetchDashboardLogs(limit: Self.dashboardLogLimit)
 
             let nextProviders = try await providerTask
             let nextGateways = try await gatewayTask
-            let nextLogs = try await logsTask
+            let nextDashboardLogs = try await dashboardLogsTask
 
             providers = nextProviders
             gateways = nextGateways
-            logs = nextLogs
+            dashboardLogs = nextDashboardLogs
             normalizeLogFilters()
             loadError = nil
             lastRefreshedAt = Date()
@@ -322,6 +349,10 @@ struct ContentView: View {
         }
 
         isLoading = false
+
+        if selectedSection == .logs {
+            await loadLogsPage(reset: true)
+        }
     }
 
     @MainActor
@@ -399,27 +430,32 @@ struct ContentView: View {
     }()
 
     private static let logFilterAll = "All"
+    private static let dashboardLogLimit = 20
+    private static let logsPageLimit = 50
+    private static let statusFilterOptions = [logFilterAll, "200", "400", "401", "403", "404", "429", "500", "502", "503"]
 
     private var gatewayLogOptions: [String] {
-        [Self.logFilterAll] + Array(Set(logs.map { $0.gatewayID })).sorted()
+        [Self.logFilterAll] + providersAndGatewaysIDs(gateways.map(\.id))
     }
 
     private var providerLogOptions: [String] {
-        [Self.logFilterAll] + Array(Set(logs.map { $0.providerID })).sorted()
+        [Self.logFilterAll] + providersAndGatewaysIDs(providers.map(\.id))
     }
 
     private var statusLogOptions: [String] {
-        [Self.logFilterAll] + Array(Set(logs.map { String($0.statusCode) })).sorted()
+        Self.statusFilterOptions
     }
 
-    private var filteredLogs: [AdminLog] {
-        filterLogs(
-            logs,
-            gatewayID: selectedLogGateway == Self.logFilterAll ? nil : selectedLogGateway,
-            providerID: selectedLogProvider == Self.logFilterAll ? nil : selectedLogProvider,
-            statusCode: selectedLogStatus == Self.logFilterAll ? nil : Int(selectedLogStatus),
-            errorsOnly: logErrorsOnly
-        )
+    private var selectedGatewayFilter: String? {
+        selectedLogGateway == Self.logFilterAll ? nil : selectedLogGateway
+    }
+
+    private var selectedProviderFilter: String? {
+        selectedLogProvider == Self.logFilterAll ? nil : selectedLogProvider
+    }
+
+    private var selectedStatusFilter: Int? {
+        selectedLogStatus == Self.logFilterAll ? nil : Int(selectedLogStatus)
     }
 
     private func normalizeLogFilters() {
@@ -442,6 +478,49 @@ struct ContentView: View {
     }
 
     @MainActor
+    private func loadLogsPage(reset: Bool) async {
+        guard selectedSection == .logs else {
+            return
+        }
+        guard !isLogsPageLoading else {
+            return
+        }
+        guard reset || logsPageHasMore || logsPageItems.isEmpty else {
+            return
+        }
+
+        isLogsPageLoading = true
+        defer { isLogsPageLoading = false }
+
+        do {
+            let page = try await client.fetchLogsPage(
+                limit: Self.logsPageLimit,
+                cursor: reset ? nil : logsPageCursor,
+                gatewayID: selectedGatewayFilter,
+                providerID: selectedProviderFilter,
+                statusCode: selectedStatusFilter,
+                errorsOnly: logErrorsOnly
+            )
+
+            if reset {
+                logsPageItems = page.items
+            } else {
+                logsPageItems.append(contentsOf: page.items)
+            }
+            logsPageCursor = page.nextCursor
+            logsPageHasMore = page.hasMore
+            loadError = nil
+        } catch {
+            if reset {
+                logsPageItems = []
+                logsPageCursor = nil
+                logsPageHasMore = false
+            }
+            loadError = error.localizedDescription
+        }
+    }
+
+    @MainActor
     private func applyAdminBaseURL() async {
         guard let normalizedURL = normalizedAdminBaseURL(adminBaseURLInput) else {
             settingsError = "Admin URL 仅支持 http/https，例如 http://127.0.0.1:7777。"
@@ -454,6 +533,11 @@ struct ContentView: View {
         settingsError = nil
         await refreshAll()
     }
+}
+
+
+private func providersAndGatewaysIDs(_ values: [String]) -> [String] {
+    Array(Set(values)).sorted()
 }
 
 private struct OverviewView: View {

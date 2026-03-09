@@ -241,12 +241,15 @@ FLUXDECK_DEBUG_ANTHROPIC_REQUEST_PAYLOAD=1 cargo run -p fluxd
 ## 6. 查看请求日志
 
 ```bash
-cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 logs
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 logs --limit 20
 ```
 
 说明：
 
 - 日志来自 `request_logs` 表
+- `GET /admin/logs` 默认返回分页对象，`items` 为当前页日志，`next_cursor` 用于继续翻页
+- Native 首页只加载最近样本窗口；Logs 页面进入时默认拉第一页，再通过 `Load More` 继续请求下一页
+- `fluxctl logs --limit N` 会把 `limit=N` 传给 Admin API
 - 系统会按条数自动滚动清理（当前保留最近 10,000 条）
 
 ## 7. 多网关示例

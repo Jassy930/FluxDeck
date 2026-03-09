@@ -73,7 +73,8 @@ async fn admin_api_manages_resources() {
     assert_eq!(logs_resp.status(), reqwest::StatusCode::OK);
 
     let logs: serde_json::Value = logs_resp.json().await.expect("decode logs");
-    assert!(logs.is_array());
+    assert!(logs.get("items").and_then(serde_json::Value::as_array).is_some());
+    assert!(logs.get("has_more").is_some());
 
     let update_provider_resp = client
         .put(format!("{base}/admin/providers/provider_admin_1"))
@@ -235,7 +236,8 @@ async fn admin_api_response_shape_is_stable() {
         .await
         .expect("decode logs");
     let log_item = logs
-        .as_array()
+        .get("items")
+        .and_then(serde_json::Value::as_array)
         .and_then(|items| items.first())
         .expect("logs contains one item");
     assert!(log_item.get("request_id").is_some());
@@ -405,6 +407,264 @@ async fn admin_api_accepts_gateway_protocol_config_fields() {
         created_gateway.get("protocol_config_json"),
         Some(&json!({ "compatibility_mode": "compatible" }))
     );
+}
+
+
+#[tokio::test]
+async fn admin_api_lists_logs_as_paginated_object_with_default_limit() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool.clone()));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_page",
+            "name": "Page Provider",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-page",
+            "models": ["gpt-4o-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider request");
+
+    client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_page",
+            "name": "Page Gateway",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "default_provider_id": "provider_page",
+            "default_model": "gpt-4o-mini",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create gateway request");
+
+    for index in 0..60 {
+        let request_id = format!("req_page_{index:03}");
+        let created_at = format!("2026-03-08T10:{:02}:00Z", index % 60);
+        sqlx::query(
+            r#"
+            INSERT INTO request_logs (request_id, gateway_id, provider_id, model, status_code, latency_ms, error, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            "#,
+        )
+        .bind(request_id)
+        .bind("gateway_page")
+        .bind("provider_page")
+        .bind("gpt-4o-mini")
+        .bind(200_i64)
+        .bind(100_i64)
+        .bind(Option::<String>::None)
+        .bind(created_at)
+        .execute(&pool)
+        .await
+        .expect("insert paginated log");
+    }
+
+    let logs: serde_json::Value = client
+        .get(format!("{base}/admin/logs"))
+        .send()
+        .await
+        .expect("list logs request")
+        .json()
+        .await
+        .expect("decode logs response");
+
+    let items = logs
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .expect("logs response has items array");
+    assert_eq!(items.len(), 50);
+    assert_eq!(logs.get("has_more"), Some(&json!(true)));
+    assert!(logs.get("next_cursor").is_some());
+}
+
+
+#[tokio::test]
+async fn admin_api_logs_support_cursor_and_filters() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool.clone()));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_filter_a",
+            "name": "Filter Provider A",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-filter-a",
+            "models": ["gpt-4o-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider a request");
+
+    client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_filter_b",
+            "name": "Filter Provider B",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-filter-b",
+            "models": ["gpt-4.1-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider b request");
+
+    client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_filter_a",
+            "name": "Filter Gateway A",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "default_provider_id": "provider_filter_a",
+            "default_model": "gpt-4o-mini",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create gateway a request");
+
+    client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_filter_b",
+            "name": "Filter Gateway B",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "default_provider_id": "provider_filter_b",
+            "default_model": "gpt-4.1-mini",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create gateway b request");
+
+    insert_request_log(&pool, "req_filter_005", "gateway_filter_a", "provider_filter_a", 200, None, "2026-03-08T10:05:00Z").await;
+    insert_request_log(&pool, "req_filter_004", "gateway_filter_b", "provider_filter_b", 502, None, "2026-03-08T10:04:00Z").await;
+    insert_request_log(&pool, "req_filter_003", "gateway_filter_a", "provider_filter_a", 200, Some("degraded to estimate"), "2026-03-08T10:03:00Z").await;
+    insert_request_log(&pool, "req_filter_002", "gateway_filter_a", "provider_filter_b", 404, None, "2026-03-08T10:02:00Z").await;
+    insert_request_log(&pool, "req_filter_001", "gateway_filter_b", "provider_filter_a", 200, None, "2026-03-08T10:01:00Z").await;
+
+    let first_page: serde_json::Value = client
+        .get(format!("{base}/admin/logs?limit=2"))
+        .send()
+        .await
+        .expect("list logs first page request")
+        .json()
+        .await
+        .expect("decode first page logs");
+    let first_items = first_page
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .expect("first page items");
+    assert_eq!(first_items.len(), 2);
+    assert_eq!(first_items[0].get("request_id"), Some(&json!("req_filter_005")));
+    assert_eq!(first_items[1].get("request_id"), Some(&json!("req_filter_004")));
+    assert_eq!(first_page.get("has_more"), Some(&json!(true)));
+
+    let cursor = first_page
+        .get("next_cursor")
+        .and_then(serde_json::Value::as_object)
+        .expect("first page next cursor");
+    let cursor_created_at = cursor
+        .get("created_at")
+        .and_then(serde_json::Value::as_str)
+        .expect("cursor created_at");
+    let cursor_request_id = cursor
+        .get("request_id")
+        .and_then(serde_json::Value::as_str)
+        .expect("cursor request_id");
+
+    let second_page: serde_json::Value = client
+        .get(format!(
+            "{base}/admin/logs?limit=2&cursor_created_at={cursor_created_at}&cursor_request_id={cursor_request_id}"
+        ))
+        .send()
+        .await
+        .expect("list logs second page request")
+        .json()
+        .await
+        .expect("decode second page logs");
+    let second_items = second_page
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .expect("second page items");
+    assert_eq!(second_items[0].get("request_id"), Some(&json!("req_filter_003")));
+    assert_eq!(second_items[1].get("request_id"), Some(&json!("req_filter_002")));
+
+    let filtered_errors: serde_json::Value = client
+        .get(format!("{base}/admin/logs?gateway_id=gateway_filter_a&errors_only=true"))
+        .send()
+        .await
+        .expect("list filtered logs request")
+        .json()
+        .await
+        .expect("decode filtered logs");
+    let filtered_items = filtered_errors
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .expect("filtered items");
+    assert_eq!(filtered_items.len(), 2);
+    assert_eq!(filtered_items[0].get("request_id"), Some(&json!("req_filter_003")));
+    assert_eq!(filtered_items[1].get("request_id"), Some(&json!("req_filter_002")));
+}
+
+
+async fn insert_request_log(
+    pool: &sqlx::SqlitePool,
+    request_id: &str,
+    gateway_id: &str,
+    provider_id: &str,
+    status_code: i64,
+    error: Option<&str>,
+    created_at: &str,
+) {
+    sqlx::query(
+        r#"
+        INSERT INTO request_logs (request_id, gateway_id, provider_id, model, status_code, latency_ms, error, created_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "#,
+    )
+    .bind(request_id)
+    .bind(gateway_id)
+    .bind(provider_id)
+    .bind("gpt-4o-mini")
+    .bind(status_code)
+    .bind(100_i64)
+    .bind(error)
+    .bind(created_at)
+    .execute(pool)
+    .await
+    .expect("insert request log");
 }
 
 struct SpawnedServer {

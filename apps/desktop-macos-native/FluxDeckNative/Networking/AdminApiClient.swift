@@ -148,6 +148,29 @@ struct AdminLog: Decodable, Identifiable {
     }
 }
 
+
+struct AdminLogCursor: Decodable {
+    let createdAt: String
+    let requestID: String
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
+        case requestID = "request_id"
+    }
+}
+
+struct AdminLogPage: Decodable {
+    let items: [AdminLog]
+    let nextCursor: AdminLogCursor?
+    let hasMore: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case nextCursor = "next_cursor"
+        case hasMore = "has_more"
+    }
+}
+
 struct AdminApiClient {
     let baseURL: URL
     var session: URLSession = .shared
@@ -168,8 +191,43 @@ struct AdminApiClient {
     }
 
     func fetchLogs() async throws -> [AdminLog] {
-        let data = try await get(path: "/admin/logs")
-        return try Self.decodeLogs(from: data)
+        let page = try await fetchLogsPage(limit: 50)
+        return page.items
+    }
+
+    func fetchDashboardLogs(limit: Int = 20) async throws -> [AdminLog] {
+        let page = try await fetchLogsPage(limit: limit)
+        return page.items
+    }
+
+    func fetchLogsPage(
+        limit: Int = 50,
+        cursor: AdminLogCursor? = nil,
+        gatewayID: String? = nil,
+        providerID: String? = nil,
+        statusCode: Int? = nil,
+        errorsOnly: Bool = false
+    ) async throws -> AdminLogPage {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let cursor {
+            queryItems.append(URLQueryItem(name: "cursor_created_at", value: cursor.createdAt))
+            queryItems.append(URLQueryItem(name: "cursor_request_id", value: cursor.requestID))
+        }
+        if let gatewayID, !gatewayID.isEmpty {
+            queryItems.append(URLQueryItem(name: "gateway_id", value: gatewayID))
+        }
+        if let providerID, !providerID.isEmpty {
+            queryItems.append(URLQueryItem(name: "provider_id", value: providerID))
+        }
+        if let statusCode {
+            queryItems.append(URLQueryItem(name: "status_code", value: String(statusCode)))
+        }
+        if errorsOnly {
+            queryItems.append(URLQueryItem(name: "errors_only", value: "true"))
+        }
+
+        let data = try await get(path: "/admin/logs", queryItems: queryItems)
+        return try Self.decodeLogPage(from: data)
     }
 
     func createProvider(_ input: CreateProviderInput) async throws -> AdminProvider {
@@ -216,11 +274,21 @@ struct AdminApiClient {
     }
 
     static func decodeLogs(from data: Data) throws -> [AdminLog] {
-        try JSONDecoder().decode([AdminLog].self, from: data)
+        try decodeLogPage(from: data).items
     }
 
-    private func get(path: String) async throws -> Data {
-        let url = baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+    static func decodeLogPage(from data: Data) throws -> AdminLogPage {
+        try JSONDecoder().decode(AdminLogPage.self, from: data)
+    }
+
+    private func get(path: String, queryItems: [URLQueryItem] = []) async throws -> Data {
+        var components = URLComponents(url: baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))), resolvingAgainstBaseURL: false)
+        if !queryItems.isEmpty {
+            components?.queryItems = queryItems
+        }
+        guard let url = components?.url else {
+            throw URLError(.badURL)
+        }
         let (data, response) = try await session.data(from: url)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
@@ -299,7 +367,7 @@ func filterLogs(
         let gatewayMatched = gatewayID == nil || log.gatewayID == gatewayID
         let providerMatched = providerID == nil || log.providerID == providerID
         let statusMatched = statusCode == nil || log.statusCode == statusCode
-        let errorMatched = !errorsOnly || log.statusCode >= 400
+        let errorMatched = !errorsOnly || log.statusCode >= 400 || log.error != nil
         return gatewayMatched && providerMatched && statusMatched && errorMatched
     }
 }

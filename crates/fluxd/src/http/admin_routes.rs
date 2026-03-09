@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, post, put},
     Json, Router,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sqlx::{Row, SqlitePool};
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 use crate::domain::gateway::{CreateGatewayInput, Gateway};
 use crate::domain::provider::{CreateProviderInput, Provider, UpdateProviderInput};
@@ -151,6 +151,42 @@ struct GatewayWithRuntime {
     last_error: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct LogListQuery {
+    limit: Option<usize>,
+    cursor_created_at: Option<String>,
+    cursor_request_id: Option<String>,
+    gateway_id: Option<String>,
+    provider_id: Option<String>,
+    status_code: Option<i64>,
+    errors_only: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+struct LogListCursor {
+    created_at: String,
+    request_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct LogListItem {
+    request_id: String,
+    gateway_id: String,
+    provider_id: String,
+    model: Option<String>,
+    status_code: i64,
+    latency_ms: i64,
+    error: Option<String>,
+    created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct LogListResponse {
+    items: Vec<LogListItem>,
+    next_cursor: Option<LogListCursor>,
+    has_more: bool,
+}
+
 async fn start_gateway(
     State(state): State<AdminApiState>,
     Path(gateway_id): Path<String>,
@@ -171,37 +207,108 @@ async fn stop_gateway(
     }
 }
 
-async fn list_logs(State(state): State<AdminApiState>) -> (StatusCode, Json<Vec<Value>>) {
-    let rows = sqlx::query(
-        r#"
-        SELECT request_id, gateway_id, provider_id, model, status_code, latency_ms, error, created_at
-        FROM request_logs
-        ORDER BY created_at DESC
-        LIMIT 200
-        "#,
-    )
-    .fetch_all(&state.pool)
-    .await;
+async fn list_logs(
+    State(state): State<AdminApiState>,
+    Query(query): Query<LogListQuery>,
+) -> (StatusCode, Json<LogListResponse>) {
+    let limit = query.limit.unwrap_or(50).clamp(1, 100);
+
+    let mut builder = QueryBuilder::<Sqlite>::new(
+        "SELECT request_id, gateway_id, provider_id, model, status_code, latency_ms, error, created_at FROM request_logs",
+    );
+
+    let mut has_where = false;
+
+    if let (Some(cursor_created_at), Some(cursor_request_id)) = (
+        query.cursor_created_at.as_deref(),
+        query.cursor_request_id.as_deref(),
+    ) {
+        builder.push(if has_where { " AND " } else { " WHERE " });
+        has_where = true;
+        builder
+            .push("(created_at < ")
+            .push_bind(cursor_created_at)
+            .push(" OR (created_at = ")
+            .push_bind(cursor_created_at)
+            .push(" AND request_id < ")
+            .push_bind(cursor_request_id)
+            .push("))");
+    }
+
+    if let Some(gateway_id) = query.gateway_id.as_deref() {
+        builder.push(if has_where { " AND " } else { " WHERE " });
+        has_where = true;
+        builder.push("gateway_id = ").push_bind(gateway_id);
+    }
+
+    if let Some(provider_id) = query.provider_id.as_deref() {
+        builder.push(if has_where { " AND " } else { " WHERE " });
+        has_where = true;
+        builder.push("provider_id = ").push_bind(provider_id);
+    }
+
+    if let Some(status_code) = query.status_code {
+        builder.push(if has_where { " AND " } else { " WHERE " });
+        has_where = true;
+        builder.push("status_code = ").push_bind(status_code);
+    }
+
+    if query.errors_only.unwrap_or(false) {
+        builder.push(if has_where { " AND " } else { " WHERE " });
+        builder.push("(status_code >= ").push_bind(400_i64).push(" OR error IS NOT NULL)");
+    }
+
+    builder
+        .push(" ORDER BY created_at DESC, request_id DESC LIMIT ")
+        .push_bind((limit + 1) as i64);
+
+    let rows = builder.build().fetch_all(&state.pool).await;
 
     let Ok(rows) = rows else {
-        return (StatusCode::OK, Json(vec![]));
+        return (
+            StatusCode::OK,
+            Json(LogListResponse {
+                items: vec![],
+                next_cursor: None,
+                has_more: false,
+            }),
+        );
     };
 
-    let logs = rows
+    let mut items = rows
         .into_iter()
-        .map(|row| {
-            json!({
-                "request_id": row.get::<String, _>("request_id"),
-                "gateway_id": row.get::<String, _>("gateway_id"),
-                "provider_id": row.get::<String, _>("provider_id"),
-                "model": row.get::<Option<String>, _>("model"),
-                "status_code": row.get::<i64, _>("status_code"),
-                "latency_ms": row.get::<i64, _>("latency_ms"),
-                "error": row.get::<Option<String>, _>("error"),
-                "created_at": row.get::<String, _>("created_at")
-            })
+        .map(|row| LogListItem {
+            request_id: row.get::<String, _>("request_id"),
+            gateway_id: row.get::<String, _>("gateway_id"),
+            provider_id: row.get::<String, _>("provider_id"),
+            model: row.get::<Option<String>, _>("model"),
+            status_code: row.get::<i64, _>("status_code"),
+            latency_ms: row.get::<i64, _>("latency_ms"),
+            error: row.get::<Option<String>, _>("error"),
+            created_at: row.get::<String, _>("created_at"),
         })
-        .collect();
+        .collect::<Vec<_>>();
 
-    (StatusCode::OK, Json(logs))
+    let has_more = items.len() > limit;
+    if has_more {
+        items.truncate(limit);
+    }
+
+    let next_cursor = if has_more {
+        items.last().map(|item| LogListCursor {
+            created_at: item.created_at.clone(),
+            request_id: item.request_id.clone(),
+        })
+    } else {
+        None
+    };
+
+    (
+        StatusCode::OK,
+        Json(LogListResponse {
+            items,
+            next_cursor,
+            has_more,
+        }),
+    )
 }

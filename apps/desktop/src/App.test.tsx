@@ -32,14 +32,46 @@ describe('desktop entry', () => {
 });
 
 describe('desktop app shell', () => {
-  it('renders app shell with header sidebar and content sections', () => {
+  it('renders monitor-first navigation shell with resource sections', () => {
     const html = renderToStaticMarkup(<App />);
 
     expect(html).toContain('FluxDeck Admin');
-    expect(html).toContain('Sidebar');
+    expect(html).toContain('Skip to main content');
+    expect(html).toContain('Monitor');
+    expect(html).toContain('Topology');
     expect(html).toContain('Providers');
     expect(html).toContain('Gateways');
     expect(html).toContain('Logs');
+    expect(html).toContain('Refresh data');
+    expect(html).toContain('Monitor overview');
+    expect(html).toContain('window-toolbar');
+    expect(html).toContain('window-sidebar');
+    expect(html).not.toContain('Topology workspace');
+  });
+});
+
+describe('monitor page', () => {
+  it('renders monitor dashboard scaffolding with key health sections', () => {
+    const html = renderToStaticMarkup(<App />);
+
+    expect(html).toContain('Running Gateways');
+    expect(html).toContain('Active Providers');
+    expect(html).toContain('Requests / min');
+    expect(html).toContain('P95 Latency');
+    expect(html).toContain('Recent Alerts');
+    expect(html).toContain('Gateway Runtime Board');
+  });
+});
+
+describe('topology page', () => {
+  it('renders topology workspace when initial page is topology', () => {
+    const html = renderToStaticMarkup(<App initialPage="topology" />);
+
+    expect(html).toContain('Live Flow');
+    expect(html).toContain('Failure Path');
+    expect(html).toContain('Gateways');
+    expect(html).toContain('Providers');
+    expect(html).toContain('Models');
   });
 });
 
@@ -49,15 +81,15 @@ describe('provider section', () => {
     const api: AdminApi = {
       listProviders: async () => {
         calls.push('listProviders');
-        return [];
+        return { items: [], next_cursor: null, has_more: false };
       },
       listGateways: async () => {
         calls.push('listGateways');
-        return [];
+        return { items: [], next_cursor: null, has_more: false };
       },
       listLogs: async () => {
         calls.push('listLogs');
-        return [];
+        return { items: [], next_cursor: null, has_more: false };
       },
       createProvider: async (input) => {
         calls.push(`createProvider:${input.id}`);
@@ -104,13 +136,59 @@ describe('provider section', () => {
   });
 });
 
+describe('dashboard refresh pagination', () => {
+  it('unwraps paginated logs items into dashboard state', async () => {
+    const api: AdminApi = {
+      listProviders: async () => [],
+      listGateways: async () => [],
+      listLogs: async () => ({
+        items: [
+          {
+            request_id: 'req_001',
+            gateway_id: 'gateway_main',
+            provider_id: 'provider_main',
+            model: 'gpt-4o-mini',
+            status_code: 200,
+            latency_ms: 120,
+            error: null,
+            created_at: '2026-03-08T10:00:00Z',
+          },
+        ],
+        next_cursor: null,
+        has_more: false,
+      }),
+      createProvider: async () => {
+        throw new Error('not used');
+      },
+      createGateway: async () => {
+        throw new Error('not used');
+      },
+    };
+
+    const dashboard = await refreshAll(api);
+
+    expect(dashboard.logs).toEqual([
+      {
+        request_id: 'req_001',
+        gateway_id: 'gateway_main',
+        provider_id: 'provider_main',
+        model: 'gpt-4o-mini',
+        status_code: 200,
+        latency_ms: 120,
+        error: null,
+        created_at: '2026-03-08T10:00:00Z',
+      },
+    ]);
+  });
+});
+
 describe('dashboard refresh', () => {
   it('loads providers gateways logs in one refresh action', async () => {
     const calls: string[] = [];
     const api: AdminApi = {
       listProviders: async () => {
         calls.push('listProviders');
-        return [];
+        return { items: [], next_cursor: null, has_more: false };
       },
       listGateways: async () => {
         calls.push('listGateways');
