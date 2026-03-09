@@ -301,8 +301,20 @@ async fn admin_api_response_shape_is_stable() {
     assert!(log_item.get("gateway_id").is_some());
     assert!(log_item.get("provider_id").is_some());
     assert!(log_item.get("model").is_some());
+    assert!(log_item.get("inbound_protocol").is_some());
+    assert!(log_item.get("upstream_protocol").is_some());
+    assert!(log_item.get("model_requested").is_some());
+    assert!(log_item.get("model_effective").is_some());
     assert!(log_item.get("status_code").is_some());
     assert!(log_item.get("latency_ms").is_some());
+    assert!(log_item.get("stream").is_some());
+    assert!(log_item.get("first_byte_ms").is_some());
+    assert!(log_item.get("input_tokens").is_some());
+    assert!(log_item.get("output_tokens").is_some());
+    assert!(log_item.get("total_tokens").is_some());
+    assert!(log_item.get("usage_json").is_some());
+    assert!(log_item.get("error_stage").is_some());
+    assert!(log_item.get("error_type").is_some());
     assert!(log_item.get("error").is_some());
     assert!(log_item.get("created_at").is_some());
 }
@@ -742,6 +754,99 @@ async fn admin_api_logs_support_cursor_and_filters() {
     assert_eq!(filtered_items.len(), 2);
     assert_eq!(filtered_items[0].get("request_id"), Some(&json!("req_filter_003")));
     assert_eq!(filtered_items[1].get("request_id"), Some(&json!("req_filter_002")));
+}
+
+#[tokio::test]
+async fn admin_logs_expose_forwarding_protocol_and_usage_fields() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool.clone()));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_logs_fields",
+            "name": "Logs Fields Provider",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-logs-fields",
+            "models": ["gpt-4o-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider request");
+
+    client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_logs_fields",
+            "name": "Logs Fields Gateway",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "anthropic",
+            "upstream_protocol": "openai",
+            "default_provider_id": "provider_logs_fields",
+            "default_model": "qwen3-coder-plus",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create gateway request");
+
+    sqlx::query(
+        r#"
+        INSERT INTO request_logs (
+            request_id, gateway_id, provider_id, model, status_code, latency_ms, error,
+            inbound_protocol, upstream_protocol, model_requested, model_effective,
+            stream, first_byte_ms, input_tokens, output_tokens, total_tokens, usage_json,
+            error_stage, error_type
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+        "#,
+    )
+    .bind("req_logs_fields_001")
+    .bind("gateway_logs_fields")
+    .bind("provider_logs_fields")
+    .bind("qwen3-coder-plus")
+    .bind(200_i64)
+    .bind(42_i64)
+    .bind(Option::<String>::None)
+    .bind("anthropic")
+    .bind("openai")
+    .bind("claude-3-7-sonnet")
+    .bind("qwen3-coder-plus")
+    .bind(0_i64)
+    .bind(12_i64)
+    .bind(128_i64)
+    .bind(64_i64)
+    .bind(192_i64)
+    .bind(json!({"prompt_tokens": 128, "completion_tokens": 64}).to_string())
+    .bind(Option::<String>::None)
+    .bind(Option::<String>::None)
+    .execute(&pool)
+    .await
+    .expect("insert log with forwarding fields");
+
+    let response: serde_json::Value = client
+        .get(format!("{base}/admin/logs"))
+        .send()
+        .await
+        .expect("fetch logs request")
+        .json()
+        .await
+        .expect("decode logs response");
+    let first = &response["items"][0];
+
+    assert!(first.get("inbound_protocol").is_some());
+    assert!(first.get("upstream_protocol").is_some());
+    assert!(first.get("input_tokens").is_some());
 }
 
 

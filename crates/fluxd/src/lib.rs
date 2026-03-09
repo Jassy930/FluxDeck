@@ -1,4 +1,5 @@
 pub mod domain;
+pub mod forwarding;
 pub mod http;
 pub mod protocol;
 pub mod repo;

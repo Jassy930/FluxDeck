@@ -1,0 +1,12 @@
+ALTER TABLE request_logs ADD COLUMN inbound_protocol TEXT;
+ALTER TABLE request_logs ADD COLUMN upstream_protocol TEXT;
+ALTER TABLE request_logs ADD COLUMN model_requested TEXT;
+ALTER TABLE request_logs ADD COLUMN model_effective TEXT;
+ALTER TABLE request_logs ADD COLUMN stream INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE request_logs ADD COLUMN first_byte_ms INTEGER;
+ALTER TABLE request_logs ADD COLUMN input_tokens INTEGER;
+ALTER TABLE request_logs ADD COLUMN output_tokens INTEGER;
+ALTER TABLE request_logs ADD COLUMN total_tokens INTEGER;
+ALTER TABLE request_logs ADD COLUMN usage_json TEXT;
+ALTER TABLE request_logs ADD COLUMN error_stage TEXT;
+ALTER TABLE request_logs ADD COLUMN error_type TEXT;

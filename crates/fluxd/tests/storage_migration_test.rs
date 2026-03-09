@@ -101,3 +101,37 @@ async fn migration_adds_gateway_protocol_config_columns_with_defaults() {
     assert_eq!(row.1, "{}");
     assert_eq!(row.2, 0);
 }
+
+#[tokio::test]
+async fn migration_adds_request_log_forwarding_columns() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+
+    run_migrations(&pool).await.expect("run migrations");
+
+    for column in [
+        "inbound_protocol",
+        "upstream_protocol",
+        "model_requested",
+        "model_effective",
+        "stream",
+        "first_byte_ms",
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "usage_json",
+        "error_stage",
+        "error_type",
+    ] {
+        let found = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_table_info('request_logs') WHERE name = ?1",
+        )
+        .bind(column)
+        .fetch_optional(&pool)
+        .await
+        .expect("query request_logs columns");
+
+        assert_eq!(found.as_deref(), Some(column));
+    }
+}

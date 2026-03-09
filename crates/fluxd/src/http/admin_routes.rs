@@ -203,8 +203,20 @@ struct LogListItem {
     gateway_id: String,
     provider_id: String,
     model: Option<String>,
+    inbound_protocol: Option<String>,
+    upstream_protocol: Option<String>,
+    model_requested: Option<String>,
+    model_effective: Option<String>,
     status_code: i64,
     latency_ms: i64,
+    stream: bool,
+    first_byte_ms: Option<i64>,
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    total_tokens: Option<i64>,
+    usage_json: Option<String>,
+    error_stage: Option<String>,
+    error_type: Option<String>,
     error: Option<String>,
     created_at: String,
 }
@@ -243,7 +255,7 @@ async fn list_logs(
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
 
     let mut builder = QueryBuilder::<Sqlite>::new(
-        "SELECT request_id, gateway_id, provider_id, model, status_code, latency_ms, error, created_at FROM request_logs",
+        "SELECT request_id, gateway_id, provider_id, model, inbound_protocol, upstream_protocol, model_requested, model_effective, status_code, latency_ms, stream, first_byte_ms, input_tokens, output_tokens, total_tokens, usage_json, error_stage, error_type, error, created_at FROM request_logs",
     );
 
     let mut has_where = false;
@@ -311,8 +323,20 @@ async fn list_logs(
             gateway_id: row.get::<String, _>("gateway_id"),
             provider_id: row.get::<String, _>("provider_id"),
             model: row.get::<Option<String>, _>("model"),
+            inbound_protocol: row.get::<Option<String>, _>("inbound_protocol"),
+            upstream_protocol: row.get::<Option<String>, _>("upstream_protocol"),
+            model_requested: row.get::<Option<String>, _>("model_requested"),
+            model_effective: row.get::<Option<String>, _>("model_effective"),
             status_code: row.get::<i64, _>("status_code"),
             latency_ms: row.get::<i64, _>("latency_ms"),
+            stream: row.get::<i64, _>("stream") != 0,
+            first_byte_ms: row.get::<Option<i64>, _>("first_byte_ms"),
+            input_tokens: row.get::<Option<i64>, _>("input_tokens"),
+            output_tokens: row.get::<Option<i64>, _>("output_tokens"),
+            total_tokens: row.get::<Option<i64>, _>("total_tokens"),
+            usage_json: row.get::<Option<String>, _>("usage_json"),
+            error_stage: row.get::<Option<String>, _>("error_stage"),
+            error_type: row.get::<Option<String>, _>("error_type"),
             error: row.get::<Option<String>, _>("error"),
             created_at: row.get::<String, _>("created_at"),
         })

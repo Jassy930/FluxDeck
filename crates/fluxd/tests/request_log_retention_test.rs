@@ -48,6 +48,8 @@ async fn trims_old_logs_by_count_limit() {
                     status_code: 200,
                     latency_ms: 30 + idx,
                     error: None,
+                    observation: Default::default(),
+                    usage: Default::default(),
                 },
                 5,
                 &json!({
@@ -59,12 +61,11 @@ async fn trims_old_logs_by_count_limit() {
             .expect("append and trim");
     }
 
-    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
-        "SELECT request_id, error FROM request_logs ORDER BY rowid ASC",
-    )
-    .fetch_all(&pool)
-    .await
-    .expect("select logs");
+    let rows: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT request_id, error FROM request_logs ORDER BY rowid ASC")
+            .fetch_all(&pool)
+            .await
+            .expect("select logs");
 
     let ids: Vec<String> = rows.iter().map(|item| item.0.clone()).collect();
     assert_eq!(ids, vec!["req_2", "req_3", "req_4", "req_5", "req_6"]);
@@ -118,6 +119,8 @@ async fn stores_dimensions_in_error_for_failed_log_entry() {
                 status_code: 502,
                 latency_ms: 31,
                 error: Some("upstream failed".to_string()),
+                observation: Default::default(),
+                usage: Default::default(),
             },
             10,
             &json!({

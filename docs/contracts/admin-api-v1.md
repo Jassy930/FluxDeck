@@ -155,8 +155,20 @@
 - `gateway_id: string`
 - `provider_id: string`
 - `model: string | null`
+- `inbound_protocol: string | null`
+- `upstream_protocol: string | null`
+- `model_requested: string | null`
+- `model_effective: string | null`
 - `status_code: number`
 - `latency_ms: number`
+- `stream: boolean`
+- `first_byte_ms: number | null`
+- `input_tokens: number | null`
+- `output_tokens: number | null`
+- `total_tokens: number | null`
+- `usage_json: string | null`
+- `error_stage: string | null`
+- `error_type: string | null`
 - `error: string | null`
 - `created_at: string`
 
@@ -171,6 +183,9 @@
 
 - `error` 字段在兼容模式相关路径下可能附带维度标签，格式示例：
   - `dimensions={"compatibility_mode":"compatible","event":"degraded_to_estimate"}`
+- `inbound_protocol / upstream_protocol` 用于区分真实转发链路，例如 `anthropic -> openai`、`anthropic -> anthropic`
+- `model_requested / model_effective` 用于区分入站请求模型与最终发往上游的模型（例如发生了模型映射）
+- `usage_json` 当前以字符串形式返回原始 usage JSON，便于前端先稳定消费；后续如改为对象需升级契约版本
 
 ## 版本策略
 

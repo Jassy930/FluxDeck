@@ -33,6 +33,33 @@ async fn forwards_anthropic_messages_to_openai_upstream() {
 }
 
 #[tokio::test]
+async fn anthropic_forwarding_records_effective_model_and_usage_fields() {
+    let upstream = spawn_upstream_mock().await;
+    let (gateway, pool) =
+        setup_gateway_with_provider_base_url_and_pool(format!("http://{}/v1", upstream.addr))
+            .await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages", gateway.addr))
+        .json(&json!({
+            "model": "claude-3-7-sonnet",
+            "max_tokens": 128,
+            "messages": [{"role": "user", "content": "hello"}]
+        }))
+        .send()
+        .await
+        .expect("call gateway");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let log = latest_request_log(&pool).await;
+    assert_eq!(log.inbound_protocol.as_deref(), Some("anthropic"));
+    assert_eq!(log.upstream_protocol.as_deref(), Some("openai"));
+    assert!(log.model_effective.is_some());
+    assert_eq!(log.input_tokens, Some(10));
+}
+
+#[tokio::test]
 async fn maps_openai_tool_calls_to_anthropic_tool_use_blocks() {
     let upstream = spawn_upstream_tool_call_mock().await;
     let gateway = setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
@@ -260,6 +287,13 @@ struct SpawnedServer {
     addr: SocketAddr,
 }
 
+struct RequestLogRow {
+    inbound_protocol: Option<String>,
+    upstream_protocol: Option<String>,
+    model_effective: Option<String>,
+    input_tokens: Option<i64>,
+}
+
 async fn spawn_upstream_mock() -> SpawnedServer {
     let app = Router::new().route("/v1/chat/completions", post(upstream_chat_completions));
     spawn_gateway(app).await
@@ -314,6 +348,47 @@ async fn setup_gateway_with_provider_base_url(base_url: String) -> SpawnedServer
     setup_gateway_with_provider_base_url_and_protocol_config(base_url, json!({})).await
 }
 
+async fn setup_gateway_with_provider_base_url_and_pool(
+    base_url: String,
+) -> (SpawnedServer, sqlx::SqlitePool) {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    sqlx::query(
+        "INSERT INTO providers (id, name, kind, base_url, api_key, enabled) VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+    )
+    .bind("provider_openai")
+    .bind("OpenAI Upstream")
+    .bind("openai")
+    .bind(base_url)
+    .bind("sk-upstream")
+    .execute(&pool)
+    .await
+    .expect("insert provider");
+
+    sqlx::query(
+        "INSERT INTO gateways (id, name, listen_host, listen_port, inbound_protocol, upstream_protocol, protocol_config_json, default_provider_id, default_model, enabled) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
+    )
+    .bind("gw_anthropic")
+    .bind("Gateway Anthropic")
+    .bind("127.0.0.1")
+    .bind(18889_i64)
+    .bind("anthropic")
+    .bind("openai")
+    .bind(json!({}).to_string())
+    .bind("provider_openai")
+    .bind("gpt-4o-mini")
+    .execute(&pool)
+    .await
+    .expect("insert gateway");
+
+    let app = build_anthropic_router(AnthropicRouteState::new(pool.clone(), "gw_anthropic"));
+    let gateway = spawn_gateway(app).await;
+    (gateway, pool)
+}
+
 async fn setup_gateway_with_provider_base_url_and_protocol_config(
     base_url: String,
     protocol_config_json: Value,
@@ -353,6 +428,22 @@ async fn setup_gateway_with_provider_base_url_and_protocol_config(
 
     let app = build_anthropic_router(AnthropicRouteState::new(pool, "gw_anthropic"));
     spawn_gateway(app).await
+}
+
+async fn latest_request_log(pool: &sqlx::SqlitePool) -> RequestLogRow {
+    let row = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>, Option<i64>)>(
+        "SELECT inbound_protocol, upstream_protocol, model_effective, input_tokens FROM request_logs ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("fetch request log");
+
+    RequestLogRow {
+        inbound_protocol: row.0,
+        upstream_protocol: row.1,
+        model_effective: row.2,
+        input_tokens: row.3,
+    }
 }
 
 async fn upstream_chat_completions(Json(payload): Json<Value>) -> impl IntoResponse {

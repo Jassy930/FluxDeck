@@ -63,3 +63,32 @@ curl -X POST http://127.0.0.1:18080/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}'
 ```
+
+## Anthropics 原生上游网关示例
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
+  --id gateway_anthropic_native \
+  --name "Gateway Anthropic Native" \
+  --listen-host 127.0.0.1 \
+  --listen-port 18081 \
+  --inbound-protocol anthropic \
+  --upstream-protocol anthropic \
+  --default-provider-id provider_main \
+  --default-model claude-sonnet-4-5
+```
+
+## 查看转发日志字段
+
+```bash
+curl 'http://127.0.0.1:7777/admin/logs?limit=5'
+```
+
+重点检查这些字段：
+
+- `inbound_protocol`：入站协议，例如 `openai` / `anthropic`
+- `upstream_protocol`：上游协议，例如 `openai` / `anthropic`
+- `model_requested`：客户端请求模型
+- `model_effective`：实际发往上游的模型
+- `input_tokens/output_tokens/total_tokens`：usage 统计
+- `stream` 与 `first_byte_ms`：流式请求与首包耗时

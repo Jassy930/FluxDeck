@@ -300,9 +300,34 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 logs --limit 20
 
 - 日志来自 `request_logs` 表
 - `GET /admin/logs` 默认返回分页对象，`items` 为当前页日志，`next_cursor` 用于继续翻页
+- 每条日志现在会额外暴露转发维度：`inbound_protocol`、`upstream_protocol`、`model_requested`、`model_effective`
+- 若请求带有 usage 数据，还会暴露：`input_tokens`、`output_tokens`、`total_tokens`、`usage_json`
+- 流式请求会额外记录：`stream`、`first_byte_ms`
 - Native 首页只加载最近样本窗口；Logs 页面进入时默认拉第一页，再通过 `Load More` 继续请求下一页
 - `fluxctl logs --limit N` 会把 `limit=N` 传给 Admin API
 - 系统会按条数自动滚动清理（当前保留最近 10,000 条）
+
+也可以直接查看 Admin API：
+
+```bash
+curl 'http://127.0.0.1:7777/admin/logs?limit=5'
+```
+
+典型返回项会包含：
+
+```json
+{
+  "request_id": "req_xxx",
+  "gateway_id": "gateway_anthropic",
+  "provider_id": "provider_main",
+  "inbound_protocol": "anthropic",
+  "upstream_protocol": "openai",
+  "model_requested": "claude-3-7-sonnet",
+  "model_effective": "qwen3-coder-plus",
+  "input_tokens": 128,
+  "output_tokens": 64
+}
+```
 
 ## 7. 多网关示例
 
