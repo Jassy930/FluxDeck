@@ -49,6 +49,20 @@
   - 改动后端返回字段时，先更新契约文档，再更新 `fluxd` 测试与 `apps/desktop/src/api/admin.ts`。
   - 改动前端表单字段时，同步检查 `components/*Form.tsx` 与 `App.test.tsx` 的断言。
 
+## 文档同步规范（强制）
+- **代码与文档必须同步更新**：任何涉及 API、数据结构、功能行为的代码变更，必须同时更新相关文档。
+- 文档类型与对应位置：
+  - API 契约：`docs/contracts/admin-api-v1.md`
+  - 使用说明：`docs/USAGE.md`
+  - 运行手册：`docs/ops/local-runbook.md`
+  - 前端类型：`apps/desktop/src/api/admin.ts`（与契约保持一致）
+- 变更检查清单：
+  - [ ] 后端字段变更 → 更新 `docs/contracts/admin-api-v1.md`
+  - [ ] 前端类型变更 → 与契约对比确认一致性
+  - [ ] 新增 CLI 参数 → 更新 `docs/USAGE.md` 和 `docs/ops/local-runbook.md`
+  - [ ] 新增功能 → 更新 README.md 和相关 docs
+- 提交前验证：确保文档与代码描述一致，无过时或遗漏信息。
+
 ## 协作与交付流程
 - 开始开发前：阅读 `README.md`、`docs/USAGE.md` 与相关 `docs/plans/*`。
 - 开发中：小步提交，确保 `git status --short` 仅包含当前任务文件。

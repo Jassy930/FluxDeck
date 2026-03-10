@@ -66,6 +66,7 @@ describe('createAdminApi', () => {
       default_provider_id: 'provider_protocol',
       default_model: 'claude-3-7-sonnet',
       enabled: true,
+      auto_start: false,
     });
 
     expect(JSON.parse(bodies[0] ?? '{}')).toMatchObject({

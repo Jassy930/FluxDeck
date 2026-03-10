@@ -3,8 +3,8 @@ export type Provider = {
   name: string;
   kind: string;
   base_url: string;
-  api_key?: string;
-  models?: string[];
+  api_key: string;
+  models: string[];
   enabled: boolean;
 };
 
@@ -17,10 +17,11 @@ export type Gateway = {
   upstream_protocol: string;
   protocol_config_json: Record<string, unknown>;
   default_provider_id: string;
-  default_model?: string | null;
+  default_model: string | null;
   enabled: boolean;
-  runtime_status?: 'running' | 'stopped' | 'error' | string;
-  last_error?: string | null;
+  auto_start: boolean;
+  runtime_status: 'running' | 'stopped' | string;
+  last_error: string | null;
 };
 
 export type RequestLog = {
@@ -28,8 +29,20 @@ export type RequestLog = {
   gateway_id: string;
   provider_id: string;
   model: string | null;
+  inbound_protocol: string | null;
+  upstream_protocol: string | null;
+  model_requested: string | null;
+  model_effective: string | null;
   status_code: number;
   latency_ms: number;
+  stream: boolean;
+  first_byte_ms: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  usage_json: string | null;
+  error_stage: string | null;
+  error_type: string | null;
   error: string | null;
   created_at: string;
 };
@@ -74,8 +87,9 @@ export type CreateGatewayInput = {
   upstream_protocol: string;
   protocol_config_json: Record<string, unknown>;
   default_provider_id: string;
-  default_model: string;
+  default_model: string | null;
   enabled: boolean;
+  auto_start: boolean;
 };
 
 export type AdminApi = {

@@ -10,9 +10,12 @@
 
 ```bash
 cargo test -q
-bun run test --cwd apps/desktop
+cd apps/desktop && bun run test
+cd ../..
 ./scripts/e2e/smoke.sh
 ```
+
+> 说明：`bun run test --cwd apps/desktop` 在当前 bun 版本下会被解析为脚本参数，建议使用上面的等价写法。
 
 ## 通过标准
 

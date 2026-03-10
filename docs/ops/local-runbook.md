@@ -34,9 +34,14 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
   --default-provider-id provider_main \
   --default-model gpt-4o-mini \
   --auto-start true
-
-cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway start gateway_main
 ```
+
+### auto_start 说明
+
+- `--auto-start true`：fluxd 启动后自动拉起该 Gateway
+- `--auto-start false`（默认）：需要手动执行 `gateway start`
+- 自动启动条件：`enabled=true && auto_start=true`
+- 单个 Gateway 自动启动失败不会阻塞 fluxd 主进程
 
 更新网关配置：
 
@@ -56,6 +61,13 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway update gateway
 
 注意：更新只保存配置，不会热更新当前运行中的 Gateway；如需生效，请手动 stop/start。
 
+手动启动/停止网关：
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway start gateway_main
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway stop gateway_main
+```
+
 ## 调用网关
 
 ```bash
@@ -64,7 +76,7 @@ curl -X POST http://127.0.0.1:18080/v1/chat/completions \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}'
 ```
 
-## Anthropics 原生上游网关示例
+## Anthropic 原生上游网关示例
 
 ```bash
 cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
