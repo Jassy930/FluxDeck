@@ -223,7 +223,8 @@ async fn rewrites_model_with_mapping_rule_before_forwarding() {
 #[tokio::test]
 async fn falls_back_to_fallback_model_when_rule_not_matched() {
     let upstream = spawn_upstream_model_rewrite_mock().await;
-    let gateway = setup_gateway_with_provider_base_url_and_protocol_config(
+    // 不设置 default_model，这样 fallback_model 才会被使用
+    let gateway = setup_gateway_with_provider_base_url_and_protocol_config_no_default_model(
         format!("http://{}/v1", upstream.addr),
         json!({
             "model_mapping": {
@@ -255,7 +256,8 @@ async fn falls_back_to_fallback_model_when_rule_not_matched() {
 #[tokio::test]
 async fn keeps_original_model_when_rule_not_matched_and_no_fallback() {
     let upstream = spawn_upstream_echo_model_mock().await;
-    let gateway = setup_gateway_with_provider_base_url_and_protocol_config(
+    // 不设置 default_model，这样原始模型才会保持
+    let gateway = setup_gateway_with_provider_base_url_and_protocol_config_no_default_model(
         format!("http://{}/v1", upstream.addr),
         json!({
             "model_mapping": {
@@ -393,6 +395,21 @@ async fn setup_gateway_with_provider_base_url_and_protocol_config(
     base_url: String,
     protocol_config_json: Value,
 ) -> SpawnedServer {
+    setup_gateway_with_provider_base_url_and_protocol_config_internal(base_url, protocol_config_json, Some("gpt-4o-mini")).await
+}
+
+async fn setup_gateway_with_provider_base_url_and_protocol_config_no_default_model(
+    base_url: String,
+    protocol_config_json: Value,
+) -> SpawnedServer {
+    setup_gateway_with_provider_base_url_and_protocol_config_internal(base_url, protocol_config_json, None::<&str>).await
+}
+
+async fn setup_gateway_with_provider_base_url_and_protocol_config_internal(
+    base_url: String,
+    protocol_config_json: Value,
+    default_model: Option<&str>,
+) -> SpawnedServer {
     let pool = sqlx::SqlitePool::connect("sqlite::memory:")
         .await
         .expect("connect sqlite memory db");
@@ -421,7 +438,7 @@ async fn setup_gateway_with_provider_base_url_and_protocol_config(
     .bind("openai")
     .bind(protocol_config_json.to_string())
     .bind("provider_openai")
-    .bind("gpt-4o-mini")
+    .bind(default_model)
     .execute(&pool)
     .await
     .expect("insert gateway");

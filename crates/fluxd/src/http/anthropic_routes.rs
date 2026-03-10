@@ -150,7 +150,7 @@ async fn forward_messages(
             }
 
             if let Some(requested_model) = ir.model.as_deref() {
-                let resolved_model = target.model_mapping.resolve(requested_model);
+                let resolved_model = target.model_mapping.resolve(requested_model, target.default_model.as_deref());
                 if resolved_model != requested_model {
                     ir.model = Some(resolved_model.clone());
                     model = Some(resolved_model);
@@ -382,6 +382,14 @@ async fn forward_messages(
                     object.insert("stream".to_string(), Value::Bool(true));
                 }
 
+                maybe_log_upstream_request_payload(
+                    &state.gateway_id,
+                    &request_id,
+                    &target.base_url,
+                    model.as_deref(),
+                    &upstream_payload,
+                );
+
                 let response = state
                     .client
                     .chat_completions_stream(&target.base_url, &target.api_key, &upstream_payload)
@@ -453,6 +461,12 @@ async fn forward_messages(
                         .await;
 
                         let raw_sse = upstream_response.text().await.unwrap_or_default();
+                        maybe_log_upstream_error(
+                            &state.gateway_id,
+                            &request_id,
+                            status_code.as_u16(),
+                            &raw_sse,
+                        );
                         let message = extract_upstream_error_message_from_text(&raw_sse);
 
                         (
@@ -489,6 +503,14 @@ async fn forward_messages(
                     }
                 }
             } else {
+                maybe_log_upstream_request_payload(
+                    &state.gateway_id,
+                    &request_id,
+                    &target.base_url,
+                    model.as_deref(),
+                    &upstream_payload,
+                );
+
                 let response = state
                     .client
                     .chat_completions(&target.base_url, &target.api_key, &upstream_payload)
@@ -564,6 +586,13 @@ async fn forward_messages(
                         )
                         .await;
 
+                        let raw_response = serde_json::to_string(&value).unwrap_or_default();
+                        maybe_log_upstream_error(
+                            &state.gateway_id,
+                            &request_id,
+                            status_code.as_u16(),
+                            &raw_response,
+                        );
                         let message = value
                             .as_object()
                             .and_then(extract_error_message_from_json_map)
@@ -687,7 +716,7 @@ async fn count_tokens_handler(
             );
 
             if let Some(requested_model) = ir.model.as_deref() {
-                let resolved_model = target.model_mapping.resolve(requested_model);
+                let resolved_model = target.model_mapping.resolve(requested_model, target.default_model.as_deref());
                 if resolved_model != requested_model {
                     ir.model = Some(resolved_model.clone());
                     rewrite_payload_model(&mut payload, &resolved_model);
@@ -1146,6 +1175,7 @@ struct ProviderRoutingTarget {
     upstream_protocol: String,
     compatibility_mode: CompatibilityMode,
     model_mapping: ModelMappingConfig,
+    default_model: Option<String>,
     request_debug: RequestDebugConfig,
 }
 
@@ -1227,17 +1257,25 @@ impl ModelMappingConfig {
         }
     }
 
-    fn resolve(&self, requested_model: &str) -> String {
+    fn resolve(&self, requested_model: &str, default_model: Option<&str>) -> String {
+        // 1. rules 匹配
         for rule in &self.rules {
             if model_pattern_matches(&rule.from, requested_model) {
                 return rule.to.clone();
             }
         }
 
+        // 2. default_model（Gateway 配置）
+        if let Some(default) = default_model {
+            return default.to_string();
+        }
+
+        // 3. fallback_model（protocol_config_json.model_mapping.fallback_model）
         if let Some(fallback) = &self.fallback_model {
             return fallback.clone();
         }
 
+        // 4. 原始模型名称
         requested_model.to_string()
     }
 }
@@ -1311,7 +1349,7 @@ async fn fetch_provider_target(
 ) -> anyhow::Result<ProviderRoutingTarget> {
     let row = sqlx::query(
         r#"
-        SELECT p.id AS provider_id, p.kind AS provider_kind, p.base_url, p.api_key, g.protocol_config_json, g.upstream_protocol
+        SELECT p.id AS provider_id, p.kind AS provider_kind, p.base_url, p.api_key, g.protocol_config_json, g.upstream_protocol, g.default_model
         FROM gateways g
         JOIN providers p ON p.id = g.default_provider_id
         WHERE g.id = ?1
@@ -1333,6 +1371,9 @@ async fn fetch_provider_target(
         configured_protocol
     };
 
+    // 读取 default_model，数据库字段可能为 NULL
+    let default_model: Option<String> = row.try_get("default_model").ok().flatten();
+
     Ok(ProviderRoutingTarget {
         provider_id: row.get("provider_id"),
         base_url: row.get("base_url"),
@@ -1340,6 +1381,7 @@ async fn fetch_provider_target(
         upstream_protocol,
         compatibility_mode: CompatibilityMode::from_protocol_config(&protocol_config_json),
         model_mapping: ModelMappingConfig::from_protocol_config(&protocol_config_json),
+        default_model,
         request_debug: RequestDebugConfig::from_protocol_config(&protocol_config_json),
     })
 }
@@ -1420,6 +1462,43 @@ fn truncate_chars(raw: &str, max_chars: usize) -> String {
     let mut truncated = raw.chars().take(max_chars).collect::<String>();
     truncated.push_str("...");
     truncated
+}
+
+fn maybe_log_upstream_request_payload(
+    gateway_id: &str,
+    request_id: &str,
+    target_url: &str,
+    model: Option<&str>,
+    payload: &Value,
+) {
+    if !env_debug_logging_enabled() {
+        return;
+    }
+
+    let model = model.unwrap_or("unknown");
+    let serialized = serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string());
+    let payload_preview = truncate_chars(&serialized, 4_000);
+
+    println!(
+        "[fluxd][upstream-debug] gateway_id={gateway_id} request_id={request_id} target_url={target_url} model={model} payload={payload_preview}"
+    );
+}
+
+fn maybe_log_upstream_error(
+    gateway_id: &str,
+    request_id: &str,
+    status: u16,
+    raw_response: &str,
+) {
+    if !env_debug_logging_enabled() {
+        return;
+    }
+
+    let response_preview = truncate_chars(raw_response, 4_000);
+
+    println!(
+        "[fluxd][upstream-error] gateway_id={gateway_id} request_id={request_id} status={status} raw_response={response_preview}"
+    );
 }
 
 fn model_pattern_matches(pattern: &str, model: &str) -> bool {

@@ -27,11 +27,18 @@ pub fn encode_openai_chat_request(ir: &IrRequest) -> Result<Value, FluxError> {
 
     let tools = normalize_tools(&ir.tools)?;
 
-    let mut payload = json!({
-        "model": model,
-        "messages": messages,
-        "tools": tools
-    });
+    let mut payload = if tools.is_empty() {
+        json!({
+            "model": model,
+            "messages": messages
+        })
+    } else {
+        json!({
+            "model": model,
+            "messages": messages,
+            "tools": tools
+        })
+    };
     apply_common_anthropic_extensions(ir, &mut payload);
 
     Ok(payload)

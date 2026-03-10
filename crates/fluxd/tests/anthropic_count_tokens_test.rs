@@ -11,7 +11,12 @@ use tokio::net::TcpListener;
 #[tokio::test]
 async fn count_tokens_uses_upstream_native_result_when_supported() {
     let upstream = spawn_upstream_with_count_tokens_mock().await;
-    let gateway = setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
+    // 不设置 default_model，保持原始模型名称
+    let gateway = setup_gateway_with_provider_base_url_and_protocol_config_no_default_model(
+        format!("http://{}/v1", upstream.addr),
+        json!({}),
+    )
+    .await;
 
     let payload = json!({
         "model": "claude-3-7-sonnet",
@@ -34,7 +39,12 @@ async fn count_tokens_uses_upstream_native_result_when_supported() {
 #[tokio::test]
 async fn count_tokens_falls_back_to_local_estimator_when_upstream_not_supported() {
     let upstream = spawn_upstream_without_count_tokens_mock().await;
-    let gateway = setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
+    // 不设置 default_model，保持原始模型名称
+    let gateway = setup_gateway_with_provider_base_url_and_protocol_config_no_default_model(
+        format!("http://{}/v1", upstream.addr),
+        json!({}),
+    )
+    .await;
 
     let payload = json!({
         "model": "claude-3-7-sonnet",
@@ -63,7 +73,8 @@ async fn count_tokens_falls_back_to_local_estimator_when_upstream_not_supported(
 #[tokio::test]
 async fn count_tokens_rewrites_model_with_fallback_mapping() {
     let upstream = spawn_upstream_with_count_tokens_rewrite_mock().await;
-    let gateway = setup_gateway_with_provider_base_url_and_protocol_config(
+    // 不设置 default_model，这样 fallback_model 才会被使用
+    let gateway = setup_gateway_with_provider_base_url_and_protocol_config_no_default_model(
         format!("http://{}/v1", upstream.addr),
         json!({
             "model_mapping": {
@@ -94,7 +105,7 @@ async fn count_tokens_rewrites_model_with_fallback_mapping() {
 #[tokio::test]
 async fn count_tokens_keeps_original_model_when_no_fallback_mapping() {
     let upstream = spawn_upstream_with_count_tokens_mock().await;
-    let gateway = setup_gateway_with_provider_base_url_and_protocol_config(
+    let gateway = setup_gateway_with_provider_base_url_and_protocol_config_no_default_model(
         format!("http://{}/v1", upstream.addr),
         json!({
             "model_mapping": {
@@ -124,6 +135,41 @@ async fn count_tokens_keeps_original_model_when_no_fallback_mapping() {
     assert_eq!(body["estimated"], false);
 }
 
+#[tokio::test]
+async fn count_tokens_uses_default_model_as_fallback() {
+    // 当没有 rules 匹配且没有 fallback_model 时，应使用 gateway 的 default_model
+    let upstream = spawn_upstream_with_count_tokens_expect_default_model_mock().await;
+    let gateway = setup_gateway_with_provider_base_url_and_protocol_config_no_default_model_with_explicit_default(
+        format!("http://{}/v1", upstream.addr),
+        json!({
+            "model_mapping": {
+                "rules": [
+                    {"from": "claude-opus-*", "to": "qwen3-coder-plus"}
+                ]
+            }
+        }),
+        "gpt-4o-mini", // gateway 的 default_model
+    )
+    .await;
+
+    let payload = json!({
+        "model": "claude-3-7-sonnet",
+        "messages": [{"role": "user", "content": "hello"}]
+    });
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages/count_tokens", gateway.addr))
+        .json(&payload)
+        .send()
+        .await
+        .expect("call gateway");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: Value = resp.json().await.expect("decode gateway response");
+    assert_eq!(body["input_tokens"], 888);
+    assert_eq!(body["estimated"], false);
+}
+
 struct SpawnedServer {
     addr: SocketAddr,
 }
@@ -146,6 +192,14 @@ async fn spawn_upstream_with_count_tokens_rewrite_mock() -> SpawnedServer {
     spawn_server(app).await
 }
 
+async fn spawn_upstream_with_count_tokens_expect_default_model_mock() -> SpawnedServer {
+    let app = Router::new().route(
+        "/v1/messages/count_tokens",
+        post(upstream_count_tokens_expect_default_model),
+    );
+    spawn_server(app).await
+}
+
 async fn spawn_server(app: Router) -> SpawnedServer {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -159,13 +213,25 @@ async fn spawn_server(app: Router) -> SpawnedServer {
     SpawnedServer { addr }
 }
 
-async fn setup_gateway_with_provider_base_url(base_url: String) -> SpawnedServer {
-    setup_gateway_with_provider_base_url_and_protocol_config(base_url, json!({})).await
-}
-
-async fn setup_gateway_with_provider_base_url_and_protocol_config(
+async fn setup_gateway_with_provider_base_url_and_protocol_config_no_default_model(
     base_url: String,
     protocol_config_json: Value,
+) -> SpawnedServer {
+    setup_gateway_with_provider_base_url_and_protocol_config_internal(base_url, protocol_config_json, None::<&str>).await
+}
+
+async fn setup_gateway_with_provider_base_url_and_protocol_config_no_default_model_with_explicit_default(
+    base_url: String,
+    protocol_config_json: Value,
+    default_model: &str,
+) -> SpawnedServer {
+    setup_gateway_with_provider_base_url_and_protocol_config_internal(base_url, protocol_config_json, Some(default_model)).await
+}
+
+async fn setup_gateway_with_provider_base_url_and_protocol_config_internal(
+    base_url: String,
+    protocol_config_json: Value,
+    default_model: Option<&str>,
 ) -> SpawnedServer {
     let pool = sqlx::SqlitePool::connect("sqlite::memory:")
         .await
@@ -195,7 +261,7 @@ async fn setup_gateway_with_provider_base_url_and_protocol_config(
     .bind("openai")
     .bind(protocol_config_json.to_string())
     .bind("provider_openai")
-    .bind("gpt-4o-mini")
+    .bind(default_model)
     .execute(&pool)
     .await
     .expect("insert gateway");
@@ -226,4 +292,10 @@ async fn upstream_chat_completions_placeholder(_: Json<Value>) -> impl IntoRespo
 async fn upstream_count_tokens_expect_rewritten_model(Json(payload): Json<Value>) -> impl IntoResponse {
     assert_eq!(payload["model"], "qwen3-coder-plus");
     Json(json!({ "input_tokens": 777 }))
+}
+
+async fn upstream_count_tokens_expect_default_model(Json(payload): Json<Value>) -> impl IntoResponse {
+    // 验证模型被重写为 gateway 的 default_model
+    assert_eq!(payload["model"], "gpt-4o-mini");
+    Json(json!({ "input_tokens": 888 }))
 }
