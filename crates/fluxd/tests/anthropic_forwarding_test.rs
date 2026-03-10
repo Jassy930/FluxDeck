@@ -614,3 +614,105 @@ async fn upstream_chat_completions_echo_model(Json(payload): Json<Value>) -> imp
         }
     }))
 }
+
+#[tokio::test]
+async fn forwards_anthropic_tool_result_to_openai_tool_message() {
+    let upstream = spawn_upstream_tool_result_mock().await;
+    let gateway = setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
+
+    // Send a request with tool_result content block
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages", gateway.addr))
+        .json(&json!({
+            "model": "claude-3-7-sonnet",
+            "max_tokens": 128,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "What's the weather?"
+                },
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_001",
+                            "name": "get_weather",
+                            "input": {"city": "Beijing"}
+                        }
+                    ]
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_001",
+                            "content": "Sunny, 25°C"
+                        }
+                    ]
+                }
+            ]
+        }))
+        .send()
+        .await
+        .expect("call gateway");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let body: Value = resp.json().await.expect("decode gateway response");
+    assert_eq!(body["type"], "message");
+    assert_eq!(body["role"], "assistant");
+}
+
+async fn spawn_upstream_tool_result_mock() -> SpawnedServer {
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(upstream_chat_completions_expect_tool_result_format),
+    );
+    spawn_gateway(app).await
+}
+
+async fn upstream_chat_completions_expect_tool_result_format(Json(payload): Json<Value>) -> impl IntoResponse {
+    let messages = payload["messages"].as_array().expect("messages array");
+
+    // Verify message structure
+    // Message 0: user with text content
+    assert_eq!(messages[0]["role"], "user");
+    assert_eq!(messages[0]["content"], "What's the weather?");
+
+    // Message 1: assistant with tool_calls
+    assert_eq!(messages[1]["role"], "assistant");
+    let tool_calls = messages[1]["tool_calls"].as_array().expect("tool_calls array");
+    assert_eq!(tool_calls.len(), 1);
+    assert_eq!(tool_calls[0]["id"], "toolu_001");
+    assert_eq!(tool_calls[0]["function"]["name"], "get_weather");
+    assert_eq!(tool_calls[0]["function"]["arguments"], r#"{"city":"Beijing"}"#);
+
+    // Message 2: user message (empty content, parent of tool_result)
+    assert_eq!(messages[2]["role"], "user");
+    assert_eq!(messages[2]["content"], Value::Null);
+
+    // Message 3: tool message with result
+    assert_eq!(messages[3]["role"], "tool");
+    assert_eq!(messages[3]["tool_call_id"], "toolu_001");
+    assert_eq!(messages[3]["content"], "Sunny, 25°C");
+
+    Json(json!({
+        "id": "chatcmpl_tool_result_001",
+        "object": "chat.completion",
+        "model": payload["model"],
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "Based on the weather data, it's sunny in Beijing with 25°C."},
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 50,
+            "completion_tokens": 15,
+            "total_tokens": 65
+        }
+    }))
+}

@@ -3,6 +3,14 @@ use serde_json::{json, Value};
 use crate::protocol::error::{DecodeErrorKind, FluxError};
 use crate::protocol::ir::IrRequest;
 
+/// Result of processing an Anthropic message content for OpenAI format
+struct ProcessedMessage {
+    /// The main message (may have tool_calls attached)
+    main_message: Value,
+    /// Additional tool result messages (role: "tool")
+    tool_messages: Vec<Value>,
+}
+
 pub fn encode_openai_chat_request(ir: &IrRequest) -> Result<Value, FluxError> {
     let model = ir
         .model
@@ -19,10 +27,9 @@ pub fn encode_openai_chat_request(ir: &IrRequest) -> Result<Value, FluxError> {
         }));
     }
     for message in &ir.messages {
-        messages.push(json!({
-            "role": &message.role,
-            "content": normalize_content_for_openai(&message.content)
-        }));
+        let processed = process_anthropic_message(&message.role, &message.content);
+        messages.push(processed.main_message);
+        messages.extend(processed.tool_messages);
     }
 
     let tools = normalize_tools(&ir.tools)?;
@@ -42,6 +49,173 @@ pub fn encode_openai_chat_request(ir: &IrRequest) -> Result<Value, FluxError> {
     apply_common_anthropic_extensions(ir, &mut payload);
 
     Ok(payload)
+}
+
+/// Process an Anthropic message and convert it to OpenAI format
+fn process_anthropic_message(role: &str, content: &Value) -> ProcessedMessage {
+    let content_blocks = match content {
+        Value::Array(blocks) => blocks.clone(),
+        Value::String(text) => {
+            return ProcessedMessage {
+                main_message: json!({
+                    "role": role,
+                    "content": text
+                }),
+                tool_messages: Vec::new(),
+            };
+        }
+        Value::Null => {
+            return ProcessedMessage {
+                main_message: json!({
+                    "role": role,
+                    "content": Value::Null
+                }),
+                tool_messages: Vec::new(),
+            };
+        }
+        other => {
+            // Try to extract text from single object
+            if let Some(text) = extract_text_block_text(other) {
+                return ProcessedMessage {
+                    main_message: json!({
+                        "role": role,
+                        "content": text
+                    }),
+                    tool_messages: Vec::new(),
+                };
+            }
+            vec![other.clone()]
+        }
+    };
+
+    let mut text_parts: Vec<String> = Vec::new();
+    let mut tool_calls: Vec<Value> = Vec::new();
+    let mut tool_messages: Vec<Value> = Vec::new();
+
+    for block in &content_blocks {
+        let block_type = block
+            .as_object()
+            .and_then(|obj| obj.get("type").and_then(Value::as_str));
+
+        match block_type {
+            Some("text") => {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    text_parts.push(text.to_string());
+                }
+            }
+            Some("tool_use") => {
+                if let Some(tool_call) = convert_tool_use_to_openai(block) {
+                    tool_calls.push(tool_call);
+                }
+            }
+            Some("tool_result") => {
+                if let Some(tool_msg) = convert_tool_result_to_openai(block) {
+                    tool_messages.push(tool_msg);
+                }
+            }
+            Some("image") => {
+                // Convert Anthropic image to OpenAI image_url format
+                if let Some(image_content) = convert_image_to_openai(block) {
+                    text_parts.push(image_content);
+                }
+            }
+            Some("thinking") => {
+                // OpenAI doesn't support thinking blocks, skip them
+                continue;
+            }
+            _ => {
+                // For unknown types, try to extract as text or skip
+                if let Some(text) = extract_text_block_text(block) {
+                    text_parts.push(text.to_string());
+                }
+            }
+        }
+    }
+
+    // Build the main message
+    let content_value = if text_parts.is_empty() {
+        Value::Null
+    } else {
+        Value::String(text_parts.join("\n"))
+    };
+
+    let mut main_message = json!({
+        "role": role,
+        "content": content_value
+    });
+
+    // Attach tool_calls if present (for assistant messages)
+    if !tool_calls.is_empty() {
+        if let Some(obj) = main_message.as_object_mut() {
+            obj.insert("tool_calls".to_string(), Value::Array(tool_calls));
+        }
+    }
+
+    ProcessedMessage {
+        main_message,
+        tool_messages,
+    }
+}
+
+/// Convert Anthropic tool_use block to OpenAI tool_call format
+fn convert_tool_use_to_openai(block: &Value) -> Option<Value> {
+    let obj = block.as_object()?;
+    let id = obj.get("id").and_then(Value::as_str)?;
+    let name = obj.get("name").and_then(Value::as_str)?;
+
+    // Arguments should be a JSON string in OpenAI format
+    let input = obj.get("input").cloned().unwrap_or(json!({}));
+    let arguments = serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string());
+
+    Some(json!({
+        "id": id,
+        "type": "function",
+        "function": {
+            "name": name,
+            "arguments": arguments
+        }
+    }))
+}
+
+/// Convert Anthropic tool_result block to OpenAI tool message format
+fn convert_tool_result_to_openai(block: &Value) -> Option<Value> {
+    let obj = block.as_object()?;
+    let tool_use_id = obj.get("tool_use_id").and_then(Value::as_str)?;
+
+    // Extract content from tool_result
+    let content = match obj.get("content") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(blocks)) => {
+            // Join text blocks, serialize others
+            let parts: Vec<String> = blocks
+                .iter()
+                .filter_map(|b| match b {
+                    Value::String(s) => Some(s.clone()),
+                    other => other.get("text").and_then(Value::as_str).map(ToOwned::to_owned),
+                })
+                .collect();
+            parts.join("\n")
+        }
+        Some(other) => serde_json::to_string(other).unwrap_or_default(),
+        None => String::new(),
+    };
+
+    Some(json!({
+        "role": "tool",
+        "tool_call_id": tool_use_id,
+        "content": content
+    }))
+}
+
+/// Convert Anthropic image block to OpenAI image_url format (returns text description for now)
+fn convert_image_to_openai(block: &Value) -> Option<String> {
+    let obj = block.as_object();
+
+    // For now, we'll skip image conversion in text content
+    // Images need to be handled as separate content parts in OpenAI format
+    // This is a placeholder - full image support would require restructuring the message format
+    let _ = obj;
+    None
 }
 
 fn apply_common_anthropic_extensions(ir: &IrRequest, payload: &mut Value) {

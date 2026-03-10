@@ -302,3 +302,231 @@ fn normalizes_text_block_array_to_string_content() {
     let payload = encode_openai_chat_request(&ir).expect("encode text block array");
     assert_eq!(payload["messages"][0]["content"], json!("line1\nline2"));
 }
+
+#[test]
+fn converts_tool_use_to_openai_tool_calls() {
+    let ir = IrRequest {
+        source_protocol: "anthropic".to_string(),
+        target_protocol: "openai".to_string(),
+        model: Some("gpt-4o-mini".to_string()),
+        system_parts: Vec::new(),
+        messages: vec![ProtocolIrMessage {
+            role: "assistant".to_string(),
+            content: json!([
+                {"type": "text", "text": "Let me check the weather."},
+                {
+                    "type": "tool_use",
+                    "id": "toolu_123",
+                    "name": "get_weather",
+                    "input": {"city": "Beijing"}
+                }
+            ]),
+        }],
+        tools: Vec::new(),
+        extensions: BTreeMap::new(),
+        metadata: BTreeMap::new(),
+    };
+
+    let payload = encode_openai_chat_request(&ir).expect("encode tool_use");
+
+    assert_eq!(payload["messages"][0]["role"], "assistant");
+    assert_eq!(payload["messages"][0]["content"], "Let me check the weather.");
+    assert_eq!(payload["messages"][0]["tool_calls"][0]["id"], "toolu_123");
+    assert_eq!(payload["messages"][0]["tool_calls"][0]["type"], "function");
+    assert_eq!(payload["messages"][0]["tool_calls"][0]["function"]["name"], "get_weather");
+    assert_eq!(
+        payload["messages"][0]["tool_calls"][0]["function"]["arguments"],
+        r#"{"city":"Beijing"}"#
+    );
+}
+
+#[test]
+fn converts_tool_result_to_openai_tool_message() {
+    let ir = IrRequest {
+        source_protocol: "anthropic".to_string(),
+        target_protocol: "openai".to_string(),
+        model: Some("gpt-4o-mini".to_string()),
+        system_parts: Vec::new(),
+        messages: vec![ProtocolIrMessage {
+            role: "user".to_string(),
+            content: json!([
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_123",
+                    "content": "The weather in Beijing is sunny."
+                }
+            ]),
+        }],
+        tools: Vec::new(),
+        extensions: BTreeMap::new(),
+        metadata: BTreeMap::new(),
+    };
+
+    let payload = encode_openai_chat_request(&ir).expect("encode tool_result");
+
+    // First message should be the original user message with null content
+    assert_eq!(payload["messages"][0]["role"], "user");
+    assert_eq!(payload["messages"][0]["content"], Value::Null);
+
+    // Second message should be the tool result as a tool message
+    assert_eq!(payload["messages"][1]["role"], "tool");
+    assert_eq!(payload["messages"][1]["tool_call_id"], "toolu_123");
+    assert_eq!(payload["messages"][1]["content"], "The weather in Beijing is sunny.");
+}
+
+#[test]
+fn handles_multi_turn_tool_conversation() {
+    let ir = IrRequest {
+        source_protocol: "anthropic".to_string(),
+        target_protocol: "openai".to_string(),
+        model: Some("gpt-4o-mini".to_string()),
+        system_parts: Vec::new(),
+        messages: vec![
+            ProtocolIrMessage {
+                role: "user".to_string(),
+                content: json!("What's the weather in Beijing?"),
+            },
+            ProtocolIrMessage {
+                role: "assistant".to_string(),
+                content: json!([
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_001",
+                        "name": "get_weather",
+                        "input": {"city": "Beijing"}
+                    }
+                ]),
+            },
+            ProtocolIrMessage {
+                role: "user".to_string(),
+                content: json!([
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_001",
+                        "content": "Sunny, 25°C"
+                    }
+                ]),
+            },
+        ],
+        tools: vec![json!({
+            "name": "get_weather",
+            "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}}
+        })],
+        extensions: BTreeMap::new(),
+        metadata: BTreeMap::new(),
+    };
+
+    let payload = encode_openai_chat_request(&ir).expect("encode multi-turn tool conversation");
+
+    // user: "What's the weather?"
+    assert_eq!(payload["messages"][0]["role"], "user");
+    assert_eq!(payload["messages"][0]["content"], "What's the weather in Beijing?");
+
+    // assistant with tool_call
+    assert_eq!(payload["messages"][1]["role"], "assistant");
+    assert_eq!(payload["messages"][1]["content"], Value::Null);
+    assert_eq!(payload["messages"][1]["tool_calls"][0]["id"], "toolu_001");
+
+    // user message (empty, from tool_result parent)
+    assert_eq!(payload["messages"][2]["role"], "user");
+    assert_eq!(payload["messages"][2]["content"], Value::Null);
+
+    // tool result
+    assert_eq!(payload["messages"][3]["role"], "tool");
+    assert_eq!(payload["messages"][3]["tool_call_id"], "toolu_001");
+    assert_eq!(payload["messages"][3]["content"], "Sunny, 25°C");
+}
+
+#[test]
+fn handles_multiple_tool_uses_in_single_message() {
+    let ir = IrRequest {
+        source_protocol: "anthropic".to_string(),
+        target_protocol: "openai".to_string(),
+        model: Some("gpt-4o-mini".to_string()),
+        system_parts: Vec::new(),
+        messages: vec![ProtocolIrMessage {
+            role: "assistant".to_string(),
+            content: json!([
+                {
+                    "type": "tool_use",
+                    "id": "toolu_001",
+                    "name": "get_weather",
+                    "input": {"city": "Beijing"}
+                },
+                {
+                    "type": "tool_use",
+                    "id": "toolu_002",
+                    "name": "get_weather",
+                    "input": {"city": "Shanghai"}
+                }
+            ]),
+        }],
+        tools: Vec::new(),
+        extensions: BTreeMap::new(),
+        metadata: BTreeMap::new(),
+    };
+
+    let payload = encode_openai_chat_request(&ir).expect("encode multiple tool_uses");
+
+    assert_eq!(payload["messages"][0]["tool_calls"].as_array().unwrap().len(), 2);
+    assert_eq!(payload["messages"][0]["tool_calls"][0]["id"], "toolu_001");
+    assert_eq!(payload["messages"][0]["tool_calls"][1]["id"], "toolu_002");
+}
+
+#[test]
+fn skips_thinking_blocks() {
+    let ir = IrRequest {
+        source_protocol: "anthropic".to_string(),
+        target_protocol: "openai".to_string(),
+        model: Some("gpt-4o-mini".to_string()),
+        system_parts: Vec::new(),
+        messages: vec![ProtocolIrMessage {
+            role: "assistant".to_string(),
+            content: json!([
+                {"type": "thinking", "thinking": "Let me think about this..."},
+                {"type": "text", "text": "Here is my answer."}
+            ]),
+        }],
+        tools: Vec::new(),
+        extensions: BTreeMap::new(),
+        metadata: BTreeMap::new(),
+    };
+
+    let payload = encode_openai_chat_request(&ir).expect("encode with thinking block");
+
+    assert_eq!(payload["messages"][0]["role"], "assistant");
+    assert_eq!(payload["messages"][0]["content"], "Here is my answer.");
+    // thinking block should not appear
+    assert!(payload["messages"][0].get("thinking").is_none());
+}
+
+#[test]
+fn handles_tool_result_with_array_content() {
+    let ir = IrRequest {
+        source_protocol: "anthropic".to_string(),
+        target_protocol: "openai".to_string(),
+        model: Some("gpt-4o-mini".to_string()),
+        system_parts: Vec::new(),
+        messages: vec![ProtocolIrMessage {
+            role: "user".to_string(),
+            content: json!([
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_123",
+                    "content": [
+                        {"type": "text", "text": "Result part 1"},
+                        {"type": "text", "text": "Result part 2"}
+                    ]
+                }
+            ]),
+        }],
+        tools: Vec::new(),
+        extensions: BTreeMap::new(),
+        metadata: BTreeMap::new(),
+    };
+
+    let payload = encode_openai_chat_request(&ir).expect("encode tool_result with array content");
+
+    assert_eq!(payload["messages"][1]["role"], "tool");
+    assert_eq!(payload["messages"][1]["content"], "Result part 1\nResult part 2");
+}
