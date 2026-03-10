@@ -5,8 +5,8 @@ use crate::protocol::ir::IrRequest;
 
 /// Result of processing an Anthropic message content for OpenAI format
 struct ProcessedMessage {
-    /// The main message (may have tool_calls attached)
-    main_message: Value,
+    /// The main message (may have tool_calls attached), None if only tool_results
+    main_message: Option<Value>,
     /// Additional tool result messages (role: "tool")
     tool_messages: Vec<Value>,
 }
@@ -28,7 +28,10 @@ pub fn encode_openai_chat_request(ir: &IrRequest) -> Result<Value, FluxError> {
     }
     for message in &ir.messages {
         let processed = process_anthropic_message(&message.role, &message.content);
-        messages.push(processed.main_message);
+        // Only add main_message if it exists (it may be None for tool_result-only messages)
+        if let Some(main_msg) = processed.main_message {
+            messages.push(main_msg);
+        }
         messages.extend(processed.tool_messages);
     }
 
@@ -57,19 +60,19 @@ fn process_anthropic_message(role: &str, content: &Value) -> ProcessedMessage {
         Value::Array(blocks) => blocks.clone(),
         Value::String(text) => {
             return ProcessedMessage {
-                main_message: json!({
+                main_message: Some(json!({
                     "role": role,
                     "content": text
-                }),
+                })),
                 tool_messages: Vec::new(),
             };
         }
         Value::Null => {
             return ProcessedMessage {
-                main_message: json!({
+                main_message: Some(json!({
                     "role": role,
                     "content": Value::Null
-                }),
+                })),
                 tool_messages: Vec::new(),
             };
         }
@@ -77,10 +80,10 @@ fn process_anthropic_message(role: &str, content: &Value) -> ProcessedMessage {
             // Try to extract text from single object
             if let Some(text) = extract_text_block_text(other) {
                 return ProcessedMessage {
-                    main_message: json!({
+                    main_message: Some(json!({
                         "role": role,
                         "content": text
-                    }),
+                    })),
                     tool_messages: Vec::new(),
                 };
             }
@@ -132,24 +135,32 @@ fn process_anthropic_message(role: &str, content: &Value) -> ProcessedMessage {
         }
     }
 
-    // Build the main message
-    let content_value = if text_parts.is_empty() {
-        Value::Null
+    // Build the main message only if there's content or tool_calls
+    // If the message only contains tool_results, skip the main message entirely
+    let main_message = if text_parts.is_empty() && tool_calls.is_empty() {
+        // Only tool_results - don't create a main message with null content
+        None
     } else {
-        Value::String(text_parts.join("\n"))
-    };
+        let content_value = if text_parts.is_empty() {
+            Value::Null
+        } else {
+            Value::String(text_parts.join("\n"))
+        };
 
-    let mut main_message = json!({
-        "role": role,
-        "content": content_value
-    });
+        let mut msg = json!({
+            "role": role,
+            "content": content_value
+        });
 
-    // Attach tool_calls if present (for assistant messages)
-    if !tool_calls.is_empty() {
-        if let Some(obj) = main_message.as_object_mut() {
-            obj.insert("tool_calls".to_string(), Value::Array(tool_calls));
+        // Attach tool_calls if present (for assistant messages)
+        if !tool_calls.is_empty() {
+            if let Some(obj) = msg.as_object_mut() {
+                obj.insert("tool_calls".to_string(), Value::Array(tool_calls));
+            }
         }
-    }
+
+        Some(msg)
+    };
 
     ProcessedMessage {
         main_message,

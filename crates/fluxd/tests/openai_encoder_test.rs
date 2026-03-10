@@ -364,14 +364,11 @@ fn converts_tool_result_to_openai_tool_message() {
 
     let payload = encode_openai_chat_request(&ir).expect("encode tool_result");
 
-    // First message should be the original user message with null content
-    assert_eq!(payload["messages"][0]["role"], "user");
-    assert_eq!(payload["messages"][0]["content"], Value::Null);
-
-    // Second message should be the tool result as a tool message
-    assert_eq!(payload["messages"][1]["role"], "tool");
-    assert_eq!(payload["messages"][1]["tool_call_id"], "toolu_123");
-    assert_eq!(payload["messages"][1]["content"], "The weather in Beijing is sunny.");
+    // The user message with only tool_result is converted directly to tool message
+    // No empty user message with null content
+    assert_eq!(payload["messages"][0]["role"], "tool");
+    assert_eq!(payload["messages"][0]["tool_call_id"], "toolu_123");
+    assert_eq!(payload["messages"][0]["content"], "The weather in Beijing is sunny.");
 }
 
 #[test]
@@ -427,14 +424,11 @@ fn handles_multi_turn_tool_conversation() {
     assert_eq!(payload["messages"][1]["content"], Value::Null);
     assert_eq!(payload["messages"][1]["tool_calls"][0]["id"], "toolu_001");
 
-    // user message (empty, from tool_result parent)
-    assert_eq!(payload["messages"][2]["role"], "user");
-    assert_eq!(payload["messages"][2]["content"], Value::Null);
-
-    // tool result
-    assert_eq!(payload["messages"][3]["role"], "tool");
-    assert_eq!(payload["messages"][3]["tool_call_id"], "toolu_001");
-    assert_eq!(payload["messages"][3]["content"], "Sunny, 25°C");
+    // tool result (no empty user message before it)
+    // The user message with only tool_result is converted directly to tool message
+    assert_eq!(payload["messages"][2]["role"], "tool");
+    assert_eq!(payload["messages"][2]["tool_call_id"], "toolu_001");
+    assert_eq!(payload["messages"][2]["content"], "Sunny, 25°C");
 }
 
 #[test]
@@ -527,6 +521,8 @@ fn handles_tool_result_with_array_content() {
 
     let payload = encode_openai_chat_request(&ir).expect("encode tool_result with array content");
 
-    assert_eq!(payload["messages"][1]["role"], "tool");
-    assert_eq!(payload["messages"][1]["content"], "Result part 1\nResult part 2");
+    // Tool result with array content is converted directly to tool message
+    // No empty user message before it
+    assert_eq!(payload["messages"][0]["role"], "tool");
+    assert_eq!(payload["messages"][0]["content"], "Result part 1\nResult part 2");
 }

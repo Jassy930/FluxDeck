@@ -689,14 +689,11 @@ async fn upstream_chat_completions_expect_tool_result_format(Json(payload): Json
     assert_eq!(tool_calls[0]["function"]["name"], "get_weather");
     assert_eq!(tool_calls[0]["function"]["arguments"], r#"{"city":"Beijing"}"#);
 
-    // Message 2: user message (empty content, parent of tool_result)
-    assert_eq!(messages[2]["role"], "user");
-    assert_eq!(messages[2]["content"], Value::Null);
-
-    // Message 3: tool message with result
-    assert_eq!(messages[3]["role"], "tool");
-    assert_eq!(messages[3]["tool_call_id"], "toolu_001");
-    assert_eq!(messages[3]["content"], "Sunny, 25°C");
+    // Message 2: tool message with result (no empty user message before it)
+    // The user message with only tool_result is converted directly to tool message
+    assert_eq!(messages[2]["role"], "tool");
+    assert_eq!(messages[2]["tool_call_id"], "toolu_001");
+    assert_eq!(messages[2]["content"], "Sunny, 25°C");
 
     Json(json!({
         "id": "chatcmpl_tool_result_001",
