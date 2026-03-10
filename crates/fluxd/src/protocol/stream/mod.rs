@@ -7,5 +7,14 @@ pub enum StreamEvent {
     TextDelta {
         text: String,
     },
+    ToolCallStart {
+        index: usize,
+        id: String,
+        name: String,
+    },
+    ToolCallDelta {
+        index: usize,
+        arguments: String,
+    },
     MessageStop,
 }

@@ -6,7 +6,7 @@ pub struct AnthropicSseEncoder {
     message_id: String,
     model: Option<String>,
     sent_message_start: bool,
-    opened_content_block: bool,
+    current_content_block_index: Option<usize>,
 }
 
 impl AnthropicSseEncoder {
@@ -15,7 +15,7 @@ impl AnthropicSseEncoder {
             message_id: "msg_chatcmpl_unknown".to_string(),
             model: None,
             sent_message_start: false,
-            opened_content_block: false,
+            current_content_block_index: None,
         }
     }
 
@@ -38,7 +38,20 @@ impl AnthropicSseEncoder {
                     self.push_message_start(&mut body);
                     self.sent_message_start = true;
                 }
-                if !self.opened_content_block {
+                // Close any open tool_use block before starting text block
+                if let Some(idx) = self.current_content_block_index {
+                    push_event(
+                        &mut body,
+                        "content_block_stop",
+                        json!({
+                            "type": "content_block_stop",
+                            "index": idx
+                        }),
+                    );
+                    self.current_content_block_index = None;
+                }
+                // Start text block at index 0 if not already open
+                if self.current_content_block_index.is_none() {
                     push_event(
                         &mut body,
                         "content_block_start",
@@ -51,7 +64,7 @@ impl AnthropicSseEncoder {
                             }
                         }),
                     );
-                    self.opened_content_block = true;
+                    self.current_content_block_index = Some(0);
                 }
 
                 push_event(
@@ -67,21 +80,72 @@ impl AnthropicSseEncoder {
                     }),
                 );
             }
-            StreamEvent::MessageStop => {
+            StreamEvent::ToolCallStart { index, id, name } => {
                 if !self.sent_message_start {
                     self.push_message_start(&mut body);
                     self.sent_message_start = true;
                 }
-                if self.opened_content_block {
+                // Close any open content block
+                if let Some(idx) = self.current_content_block_index {
                     push_event(
                         &mut body,
                         "content_block_stop",
                         json!({
                             "type": "content_block_stop",
-                            "index": 0
+                            "index": idx
                         }),
                     );
-                    self.opened_content_block = false;
+                }
+                // Start a new tool_use block
+                push_event(
+                    &mut body,
+                    "content_block_start",
+                    json!({
+                        "type": "content_block_start",
+                        "index": index,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": id,
+                            "name": name,
+                            "input": {}
+                        }
+                    }),
+                );
+                self.current_content_block_index = Some(*index);
+            }
+            StreamEvent::ToolCallDelta { index, arguments } => {
+                if !self.sent_message_start {
+                    self.push_message_start(&mut body);
+                    self.sent_message_start = true;
+                }
+                push_event(
+                    &mut body,
+                    "content_block_delta",
+                    json!({
+                        "type": "content_block_delta",
+                        "index": index,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": arguments
+                        }
+                    }),
+                );
+            }
+            StreamEvent::MessageStop => {
+                if !self.sent_message_start {
+                    self.push_message_start(&mut body);
+                    self.sent_message_start = true;
+                }
+                if let Some(idx) = self.current_content_block_index {
+                    push_event(
+                        &mut body,
+                        "content_block_stop",
+                        json!({
+                            "type": "content_block_stop",
+                            "index": idx
+                        }),
+                    );
+                    self.current_content_block_index = None;
                 }
                 push_event(&mut body, "message_stop", json!({ "type": "message_stop" }));
             }

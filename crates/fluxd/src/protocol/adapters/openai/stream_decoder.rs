@@ -110,6 +110,52 @@ impl OpenAiSseDecoder {
             }
         }
 
+        // Handle tool_calls in delta
+        if let Some(tool_calls) = chunk
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("delta"))
+            .and_then(|delta| delta.get("tool_calls"))
+            .and_then(Value::as_array)
+        {
+            for tool_call in tool_calls {
+                let index = tool_call
+                    .get("index")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+
+                // Check if this is a start chunk (has id and function.name)
+                if let (Some(id), Some(name)) = (
+                    tool_call.get("id").and_then(Value::as_str),
+                    tool_call
+                        .get("function")
+                        .and_then(|f| f.get("name"))
+                        .and_then(Value::as_str),
+                ) {
+                    events.push(StreamEvent::ToolCallStart {
+                        index,
+                        id: id.to_string(),
+                        name: name.to_string(),
+                    });
+                }
+
+                // Check for arguments delta
+                if let Some(arguments) = tool_call
+                    .get("function")
+                    .and_then(|f| f.get("arguments"))
+                    .and_then(Value::as_str)
+                {
+                    if !arguments.is_empty() {
+                        events.push(StreamEvent::ToolCallDelta {
+                            index,
+                            arguments: arguments.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -158,6 +204,85 @@ data: [DONE]
                 },
                 StreamEvent::TextDelta {
                     text: "  \"title\":\"GLM\"".to_string()
+                },
+                StreamEvent::MessageStop
+            ]
+        );
+    }
+
+    #[test]
+    fn decodes_tool_calls_from_sse_stream() {
+        let body = r#"data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_123","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"loc"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ation\":\""}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"Tokyo\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+
+"#;
+
+        let events = decode_openai_sse_events(body).expect("decode stream events");
+        assert_eq!(
+            events,
+            vec![
+                StreamEvent::MessageStart {
+                    id: "chatcmpl-123".to_string(),
+                    model: None
+                },
+                StreamEvent::ToolCallStart {
+                    index: 0,
+                    id: "call_123".to_string(),
+                    name: "get_weather".to_string(),
+                },
+                StreamEvent::ToolCallDelta {
+                    index: 0,
+                    arguments: "{\"loc".to_string(),
+                },
+                StreamEvent::ToolCallDelta {
+                    index: 0,
+                    arguments: "ation\":\"".to_string(),
+                },
+                StreamEvent::ToolCallDelta {
+                    index: 0,
+                    arguments: "Tokyo\"}".to_string(),
+                },
+                StreamEvent::MessageStop
+            ]
+        );
+    }
+
+    #[test]
+    fn decodes_tool_calls_with_empty_first_arguments() {
+        // Some models send an empty arguments string in the first chunk
+        let body = r#"data: {"id":"chatcmpl-456","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_456","type":"function","function":{"name":"search","arguments":""}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-456","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"query\":\"test\"}"}}]},"finish_reason":null}]}
+
+data: [DONE]
+
+"#;
+
+        let events = decode_openai_sse_events(body).expect("decode stream events");
+        assert_eq!(
+            events,
+            vec![
+                StreamEvent::MessageStart {
+                    id: "chatcmpl-456".to_string(),
+                    model: None
+                },
+                StreamEvent::ToolCallStart {
+                    index: 0,
+                    id: "call_456".to_string(),
+                    name: "search".to_string(),
+                },
+                StreamEvent::ToolCallDelta {
+                    index: 0,
+                    arguments: "{\"query\":\"test\"}".to_string(),
                 },
                 StreamEvent::MessageStop
             ]
