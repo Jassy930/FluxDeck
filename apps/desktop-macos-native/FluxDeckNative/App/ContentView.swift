@@ -1159,8 +1159,8 @@ private struct ProviderFormSheet: View {
                                     textInput(placeholder: "Main Provider", text: $name)
                                 }
 
-                                providerField(title: "Kind") {
-                                    textInput(placeholder: "openai", text: $kind, monospaced: true)
+                                providerField(title: "Kind", caption: "Choose one of the supported upstream provider types.") {
+                                    providerKindPicker(selection: $kind)
                                 }
                             }
                         }
@@ -1416,7 +1416,7 @@ private struct ProviderFormSheet: View {
             Spacer(minLength: 16)
 
             HStack(spacing: 8) {
-                compactMetric(title: "Kind", value: kind.isEmpty ? "-" : kind)
+                compactMetric(title: "Kind", value: providerKindLabel(for: kind))
                 compactMetric(title: "Models", value: "\(parsedModelCount)")
                 compactMetric(title: "Auth", value: apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Off" : "On")
             }
@@ -1519,6 +1519,33 @@ private struct ProviderFormSheet: View {
             )
     }
 
+    private func providerKindPicker(selection: Binding<String>) -> some View {
+        Picker("Kind", selection: selection) {
+            if let unsupportedKindLabel {
+                Text(unsupportedKindLabel)
+                    .tag(kind)
+            }
+
+            ForEach(ProviderKindOption.allCases) { option in
+                Text(option.label)
+                    .tag(option.rawValue)
+            }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(DesignTokens.surfacePrimary.opacity(0.92))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(DesignTokens.borderSubtle.opacity(0.9), lineWidth: 1)
+        )
+    }
+
     private func secureInput(placeholder: String, text: Binding<String>) -> some View {
         SecureField(placeholder, text: text)
             .textFieldStyle(.plain)
@@ -1553,6 +1580,22 @@ private struct ProviderFormSheet: View {
             )
     }
 
+    private var unsupportedKindLabel: String? {
+        guard !kind.isEmpty, ProviderKindOption(rawValue: kind) == nil else {
+            return nil
+        }
+
+        return "Unsupported current value: \(kind)"
+    }
+
+    private func providerKindLabel(for rawValue: String) -> String {
+        if rawValue.isEmpty {
+            return "-"
+        }
+
+        return ProviderKindOption(rawValue: rawValue)?.label ?? rawValue
+    }
+
     private func submit() {
         let normalizedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1571,6 +1614,10 @@ private struct ProviderFormSheet: View {
 
         guard !normalizedName.isEmpty, !normalizedKind.isEmpty, !normalizedBaseURL.isEmpty, !normalizedApiKey.isEmpty else {
             validationError = "Name, Kind, Base URL and API Key are required."
+            return
+        }
+        guard ProviderKindOption(rawValue: normalizedKind) != nil else {
+            validationError = "Choose one of the supported provider kinds."
             return
         }
         guard URL(string: normalizedBaseURL) != nil else {

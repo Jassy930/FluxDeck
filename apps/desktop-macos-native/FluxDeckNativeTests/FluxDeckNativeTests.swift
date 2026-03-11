@@ -841,4 +841,21 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertFalse(model.hasData)
     }
 
+    func testProviderKindOptionsExposeStableMachineValuesAndLabels() {
+        XCTAssertEqual(
+            ProviderKindOption.allCases.map(\.rawValue),
+            [
+                "openai",
+                "openai-response",
+                "gemini",
+                "anthropic",
+                "azure-openai",
+                "new-api",
+                "ollama"
+            ]
+        )
+        XCTAssertEqual(ProviderKindOption.openAIResponse.label, "OpenAI-Response")
+        XCTAssertEqual(ProviderKindOption.azureOpenAI.label, "Azure OpenAI")
+        XCTAssertEqual(ProviderKindOption.newAPI.label, "New API")
+    }
 }

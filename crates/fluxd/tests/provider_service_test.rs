@@ -70,3 +70,74 @@ fn assert_provider(p: &Provider) {
     assert_eq!(p.models, vec!["gpt-4o-mini".to_string(), "gpt-4.1".to_string()]);
     assert!(p.enabled);
 }
+
+#[tokio::test]
+async fn create_provider_rejects_unknown_kind() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let service = ProviderService::new(pool);
+
+    let err = service
+        .create_provider(CreateProviderInput {
+            id: "provider_invalid".to_string(),
+            name: "Invalid Provider".to_string(),
+            kind: "not-supported".to_string(),
+            base_url: "https://example.com/v1".to_string(),
+            api_key: "sk-invalid".to_string(),
+            models: vec!["model-a".to_string()],
+            enabled: true,
+        })
+        .await
+        .expect_err("unsupported kind should fail");
+
+    let message = err.to_string();
+    assert!(message.contains("not-supported"));
+    assert!(message.contains("openai"));
+    assert!(message.contains("ollama"));
+}
+
+#[tokio::test]
+async fn update_provider_rejects_unknown_kind() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let service = ProviderService::new(pool.clone());
+
+    service
+        .create_provider(CreateProviderInput {
+            id: "provider_update_invalid".to_string(),
+            name: "Valid Provider".to_string(),
+            kind: "openai".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: "sk-valid".to_string(),
+            models: vec!["gpt-4o-mini".to_string()],
+            enabled: true,
+        })
+        .await
+        .expect("seed valid provider");
+
+    let err = service
+        .update_provider(
+            "provider_update_invalid",
+            fluxd::domain::provider::UpdateProviderInput {
+                name: "Still Invalid".to_string(),
+                kind: "bad-kind".to_string(),
+                base_url: "https://example.com/v1".to_string(),
+                api_key: "sk-invalid".to_string(),
+                models: vec!["model-b".to_string()],
+                enabled: false,
+            },
+        )
+        .await
+        .expect_err("unsupported update kind should fail");
+
+    let message = err.to_string();
+    assert!(message.contains("bad-kind"));
+    assert!(message.contains("azure-openai"));
+    assert!(message.contains("new-api"));
+}

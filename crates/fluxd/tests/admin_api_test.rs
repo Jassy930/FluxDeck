@@ -420,6 +420,77 @@ async fn admin_api_returns_gateway_runtime_status() {
 }
 
 #[tokio::test]
+async fn admin_api_rejects_invalid_provider_kind() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    let create_resp = client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_invalid_kind",
+            "name": "Invalid Kind",
+            "kind": "totally-invalid",
+            "base_url": "https://example.com/v1",
+            "api_key": "sk-invalid",
+            "models": ["model-a"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create invalid provider request");
+
+    assert_eq!(create_resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let create_body: serde_json::Value = create_resp.json().await.expect("decode create error body");
+    assert!(create_body.get("error").is_some());
+
+    let valid_create_resp = client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_valid_kind",
+            "name": "Valid Kind",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-valid",
+            "models": ["gpt-4o-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create valid provider request");
+    assert_eq!(valid_create_resp.status(), reqwest::StatusCode::CREATED);
+
+    let update_resp = client
+        .put(format!("{base}/admin/providers/provider_valid_kind"))
+        .json(&json!({
+            "name": "Valid Kind Updated",
+            "kind": "still-invalid",
+            "base_url": "https://example.com/v1",
+            "api_key": "sk-updated",
+            "models": ["model-b"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("update invalid provider request");
+
+    assert_eq!(update_resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let update_body: serde_json::Value = update_resp.json().await.expect("decode update error body");
+    let error = update_body
+        .get("error")
+        .and_then(serde_json::Value::as_str)
+        .expect("error message");
+    assert!(error.contains("still-invalid"));
+    assert!(error.contains("openai-response"));
+}
+
+#[tokio::test]
 async fn admin_api_defaults_gateway_auto_start_to_false_when_omitted() {
     let pool = sqlx::SqlitePool::connect("sqlite::memory:")
         .await

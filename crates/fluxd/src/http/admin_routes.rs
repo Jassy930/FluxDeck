@@ -57,20 +57,14 @@ pub fn build_admin_router(state: AdminApiState) -> Router {
 async fn create_provider(
     State(state): State<AdminApiState>,
     Json(input): Json<CreateProviderInput>,
-) -> (StatusCode, Json<Provider>) {
+) -> (StatusCode, Json<Value>) {
     match state.provider_service.create_provider(input).await {
-        Ok(provider) => (StatusCode::CREATED, Json(provider)),
+        Ok(provider) => (StatusCode::CREATED, Json(json!(provider))),
         Err(err) => (
             StatusCode::BAD_REQUEST,
-            Json(Provider {
-                id: format!("error:{err}"),
-                name: String::new(),
-                kind: String::new(),
-                base_url: String::new(),
-                api_key: String::new(),
-                models: vec![],
-                enabled: false,
-            }),
+            Json(json!({
+                "error": err.to_string()
+            })),
         ),
     }
 }
@@ -511,13 +505,12 @@ async fn get_stats_overview(
     };
 
     // Get total stats
-    let total_stats = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+    let total_stats = sqlx::query_as::<_, (i64, i64, i64, i64)>(
         "SELECT
             COUNT(*) as total_requests,
             SUM(CASE WHEN status_code < 400 AND error IS NULL THEN 1 ELSE 0 END) as successful_requests,
             SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_requests,
-            COALESCE(SUM(total_tokens), 0) as total_tokens,
-            COALESCE(AVG(latency_ms), 0) as avg_latency
+            COALESCE(SUM(total_tokens), 0) as total_tokens
          FROM request_logs
          WHERE created_at >= ?",
     )
@@ -525,10 +518,10 @@ async fn get_stats_overview(
     .fetch_one(&state.pool)
     .await;
 
-    let (total_requests, successful_requests, error_requests, total_tokens, avg_latency) =
+    let (total_requests, successful_requests, error_requests, total_tokens) =
         match total_stats {
             Ok(row) => row,
-            Err(_) => (0, 0, 0, 0, 0),
+            Err(_) => (0, 0, 0, 0),
         };
 
     let success_rate = if total_requests > 0 {
@@ -551,7 +544,7 @@ async fn get_stats_overview(
             SUM(CASE WHEN status_code < 400 AND error IS NULL THEN 1 ELSE 0 END) as success_count,
             SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count,
             COALESCE(SUM(total_tokens), 0) as total_tokens,
-            COALESCE(AVG(latency_ms), 0) as avg_latency
+            CAST(ROUND(COALESCE(AVG(latency_ms), 0)) AS INTEGER) as avg_latency
          FROM request_logs
          WHERE created_at >= ?
          GROUP BY gateway_id
@@ -583,7 +576,7 @@ async fn get_stats_overview(
             SUM(CASE WHEN status_code < 400 AND error IS NULL THEN 1 ELSE 0 END) as success_count,
             SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count,
             COALESCE(SUM(total_tokens), 0) as total_tokens,
-            COALESCE(AVG(latency_ms), 0) as avg_latency
+            CAST(ROUND(COALESCE(AVG(latency_ms), 0)) AS INTEGER) as avg_latency
          FROM request_logs
          WHERE created_at >= ?
          GROUP BY provider_id
@@ -615,7 +608,7 @@ async fn get_stats_overview(
             SUM(CASE WHEN status_code < 400 AND error IS NULL THEN 1 ELSE 0 END) as success_count,
             SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count,
             COALESCE(SUM(total_tokens), 0) as total_tokens,
-            COALESCE(AVG(latency_ms), 0) as avg_latency
+            CAST(ROUND(COALESCE(AVG(latency_ms), 0)) AS INTEGER) as avg_latency
          FROM request_logs
          WHERE created_at >= ?
          GROUP BY model_effective
@@ -701,7 +694,7 @@ async fn get_stats_trend(
             "SELECT
                 {} as time_bucket,
                 COUNT(*) as request_count,
-                COALESCE(AVG(latency_ms), 0) as avg_latency,
+                CAST(ROUND(COALESCE(AVG(latency_ms), 0)) AS INTEGER) as avg_latency,
                 SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count,
                 COALESCE(SUM(input_tokens), 0) as input_tokens,
                 COALESCE(SUM(output_tokens), 0) as output_tokens

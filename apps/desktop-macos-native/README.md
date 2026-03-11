@@ -20,6 +20,8 @@
 
 - 现阶段重点是统一原生桌面壳层与页面风格
 - 仍复用 `fluxd` Admin API 的现有数据流
+- Provider 表单中的 `kind` 已改为固定选择，不再允许自由文本输入
+- Provider `kind` 提交机器值：`openai | openai-response | gemini | anthropic | azure-openai | new-api | ollama`
 - `Traffic` 页面现已接入 `/admin/stats/overview` 与 `/admin/stats/trend`
 - `Traffic` 支持 `1h / 6h / 24h` 时间范围切换、关键指标、趋势、维度分布和异常摘要
 - `Traffic` 已进一步压缩为高密度监控台布局，优先首屏扫描 KPI 与趋势主区

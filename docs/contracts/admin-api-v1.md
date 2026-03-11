@@ -17,6 +17,7 @@
 - `id: string`
 - `name: string`
 - `kind: string`
+  - 允许值：`openai | openai-response | gemini | anthropic | azure-openai | new-api | ollama`
 - `base_url: string`
 - `api_key: string`
 - `models: string[]`
@@ -26,6 +27,10 @@
 
 请求体与响应体字段同上；创建成功返回 `201`.
 
+错误响应：
+
+- 非法 `kind` 或其他校验失败：`400`，返回 `{ "error": string }`
+
 ### `PUT /admin/providers/{id}`
 
 更新指定 Provider（`id` 由路径指定，不可变更）。
@@ -34,6 +39,7 @@
 
 - `name: string`
 - `kind: string`
+  - 允许值：`openai | openai-response | gemini | anthropic | azure-openai | new-api | ollama`
 - `base_url: string`
 - `api_key: string`
 - `models: string[]`
@@ -42,6 +48,7 @@
 响应：
 
 - 成功：`200`，返回更新后的 Provider（字段同 `GET /admin/providers`）
+- 非法 `kind` 或其他校验失败：`400`，返回 `{ "error": string }`
 - 不存在：`404`
 
 ## 2) Gateway

@@ -83,6 +83,37 @@ struct DashboardMetrics: Equatable {
     let errorGatewayCount: Int
 }
 
+enum ProviderKindOption: String, CaseIterable, Identifiable {
+    case openAI = "openai"
+    case openAIResponse = "openai-response"
+    case gemini = "gemini"
+    case anthropic = "anthropic"
+    case azureOpenAI = "azure-openai"
+    case newAPI = "new-api"
+    case ollama = "ollama"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .openAI:
+            return "OpenAI"
+        case .openAIResponse:
+            return "OpenAI-Response"
+        case .gemini:
+            return "Gemini"
+        case .anthropic:
+            return "Anthropic"
+        case .azureOpenAI:
+            return "Azure OpenAI"
+        case .newAPI:
+            return "New API"
+        case .ollama:
+            return "Ollama"
+        }
+    }
+}
+
 struct CreateProviderInput: Encodable {
     let id: String
     let name: String
