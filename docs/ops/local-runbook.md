@@ -20,6 +20,14 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider create \
   --models gpt-4o-mini,gpt-4.1
 ```
 
+Provider `base_url` 说明：
+
+- `openai` / `openai-response` / `azure-openai` / `new-api` 一般填写带 `/v1` 的 API 前缀
+- `anthropic` 兼容两种写法：
+  - `https://host/api/anthropic`
+  - `https://host/api/anthropic/v1`
+- 如果你更新了 Provider 配置，而对应 Gateway 已在运行，需要手动 `stop -> start` 才会加载新地址
+
 ## 创建并启动网关
 
 ```bash
@@ -83,6 +91,20 @@ curl -X POST http://127.0.0.1:18080/v1/chat/completions \
 ```
 
 ## Anthropic 原生上游网关示例
+
+先创建 Anthropic Provider（以智谱 Claude 兼容端点为例）：
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider create \
+  --id provider_anthropic \
+  --name "Anthropic Compatible" \
+  --kind anthropic \
+  --base-url https://open.bigmodel.cn/api/anthropic \
+  --api-key sk-xxx \
+  --models GLM-5
+```
+
+`--base-url` 也可以填写 `https://open.bigmodel.cn/api/anthropic/v1`，FluxDeck 会在运行时统一归一化。
 
 ```bash
 cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \

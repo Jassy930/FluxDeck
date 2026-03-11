@@ -105,6 +105,14 @@ curl -X PUT http://127.0.0.1:7777/admin/providers/provider_main \
   }'
 ```
 
+Provider `base_url` 补充说明：
+
+- `openai` / `openai-response` / `azure-openai` / `new-api` 通常填写带 `/v1` 的 API 前缀
+- `anthropic` 兼容两种写法：
+  - `https://host/api/anthropic`
+  - `https://host/api/anthropic/v1`
+- 如果 Provider 已被运行中的 Gateway 使用，更新 `base_url` 后需要手动 `gateway stop` 再 `gateway start`
+
 ## 4. 配置并启动 Gateway
 
 创建 Gateway：
@@ -215,6 +223,23 @@ curl -X POST http://127.0.0.1:18080/v1/chat/completions \
 如果配置正确，会返回上游模型响应（JSON）。
 
 ### 5.1 Anthropics 入站与兼容模式示例
+
+如果上游本身就是 Anthropic 兼容接口，可先创建 `kind=anthropic` 的 Provider：
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider create \
+  --id provider_anthropic \
+  --name "Anthropic Compatible" \
+  --kind anthropic \
+  --base-url https://open.bigmodel.cn/api/anthropic \
+  --api-key sk-xxx \
+  --models GLM-5
+```
+
+说明：
+
+- `--base-url` 写成 `https://open.bigmodel.cn/api/anthropic` 或 `https://open.bigmodel.cn/api/anthropic/v1` 都可以
+- FluxDeck 会在运行时统一调用 `/v1/messages` 与 `/v1/messages/count_tokens`
 
 创建 Anthropics 入站网关（转发到 OpenAI 兼容上游）：
 

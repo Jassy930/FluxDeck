@@ -23,6 +23,14 @@
 - `models: string[]`
 - `enabled: boolean`
 
+`base_url` 语义补充：
+
+- `kind=openai | openai-response | azure-openai | new-api` 时，`base_url` 应包含对应 API 版本前缀，例如 `https://api.openai.com/v1`
+- `kind=anthropic` 时，FluxDeck 同时兼容以下两种写法：
+  - `https://host/api/anthropic`
+  - `https://host/api/anthropic/v1`
+  - 运行时会自动规范化到 `/v1/messages` 与 `/v1/messages/count_tokens`
+
 ### `POST /admin/providers`
 
 请求体与响应体字段同上；创建成功返回 `201`.
@@ -44,6 +52,8 @@
 - `api_key: string`
 - `models: string[]`
 - `enabled: boolean`
+
+`base_url` 语义与 `POST /admin/providers` 保持一致。
 
 响应：
 
