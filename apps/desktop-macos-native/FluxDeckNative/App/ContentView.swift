@@ -9,6 +9,12 @@ struct ContentView: View {
     @State private var logsPageCursor: AdminLogCursor?
     @State private var logsPageHasMore = false
     @State private var isLogsPageLoading = false
+    @State private var trafficOverview: AdminStatsOverview?
+    @State private var trafficTrend: AdminStatsTrend?
+    @State private var selectedTrafficPeriod = Self.defaultTrafficPeriod
+    @State private var isTrafficLoading = false
+    @State private var trafficError: String?
+    @State private var trafficLastRefreshedAt: Date?
     @State private var selectedSection: SidebarSection? = .overview
     @State private var isLoading = false
     @State private var isSubmitting = false
@@ -50,6 +56,14 @@ struct ContentView: View {
         ].joined(separator: "|")
     }
 
+    private var trafficTaskKey: String {
+        [
+            selectedSection?.rawValue ?? "none",
+            selectedTrafficPeriod,
+            persistedAdminBaseURL
+        ].joined(separator: "|")
+    }
+
     var body: some View {
         AppShellView(
             title: selectedSection?.rawValue ?? SidebarSection.overview.rawValue,
@@ -78,6 +92,12 @@ struct ContentView: View {
                 return
             }
             await loadLogsPage(reset: true)
+        }
+        .task(id: trafficTaskKey) {
+            guard selectedSection == .traffic else {
+                return
+            }
+            await loadTrafficStats()
         }
         .onAppear {
             selectedSection = selectedSection ?? .overview
@@ -222,7 +242,23 @@ struct ContentView: View {
             )
         case .traffic:
             TrafficAnalyticsView(
-                model: TrafficAnalyticsModel.make(logs: dashboardLogs)
+                model: TrafficAnalyticsModel.make(
+                    overview: trafficOverview,
+                    trend: trafficTrend,
+                    selectedPeriod: selectedTrafficPeriod
+                ),
+                isLoading: isTrafficLoading,
+                error: trafficError,
+                lastRefreshedAt: trafficLastRefreshedAt,
+                selectedPeriod: selectedTrafficPeriod,
+                onSelectPeriod: { period in
+                    selectedTrafficPeriod = period
+                },
+                onRefresh: {
+                    Task {
+                        await loadTrafficStats()
+                    }
+                }
             )
         case .connections:
             ConnectionsView(
@@ -375,6 +411,9 @@ struct ContentView: View {
         if selectedSection == .logs {
             await loadLogsPage(reset: true)
         }
+        if selectedSection == .traffic {
+            await loadTrafficStats()
+        }
     }
 
     @MainActor
@@ -470,6 +509,7 @@ struct ContentView: View {
     private static let logFilterAll = "All"
     private static let dashboardLogLimit = 20
     private static let logsPageLimit = 50
+    private static let defaultTrafficPeriod = "1h"
     private static let statusFilterOptions = [logFilterAll, "200", "400", "401", "403", "404", "429", "500", "502", "503"]
 
     private var gatewayLogOptions: [String] {
@@ -513,6 +553,34 @@ struct ContentView: View {
         selectedLogProvider = Self.logFilterAll
         selectedLogStatus = Self.logFilterAll
         logErrorsOnly = false
+    }
+
+    @MainActor
+    private func loadTrafficStats() async {
+        guard selectedSection == .traffic else {
+            return
+        }
+        guard !isTrafficLoading else {
+            return
+        }
+
+        isTrafficLoading = true
+        defer { isTrafficLoading = false }
+
+        do {
+            async let overviewTask = client.fetchStatsOverview(period: selectedTrafficPeriod)
+            async let trendTask = client.fetchStatsTrend(
+                period: selectedTrafficPeriod,
+                interval: trafficTrendInterval(for: selectedTrafficPeriod)
+            )
+
+            trafficOverview = try await overviewTask
+            trafficTrend = try await trendTask
+            trafficError = nil
+            trafficLastRefreshedAt = Date()
+        } catch {
+            trafficError = error.localizedDescription
+        }
     }
 
     @MainActor
@@ -570,6 +638,17 @@ struct ContentView: View {
         adminBaseURLInput = normalizedValue
         settingsError = nil
         await refreshAll()
+    }
+
+    private func trafficTrendInterval(for period: String) -> String {
+        switch period {
+        case "24h":
+            return "1h"
+        case "6h":
+            return "15m"
+        default:
+            return "5m"
+        }
     }
 }
 

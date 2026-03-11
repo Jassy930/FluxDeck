@@ -849,6 +849,122 @@ async fn admin_logs_expose_forwarding_protocol_and_usage_fields() {
     assert!(first.get("input_tokens").is_some());
 }
 
+#[tokio::test]
+async fn admin_stats_include_recent_logs_even_when_average_latency_is_fractional() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool.clone()));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_stats_fractional",
+            "name": "Stats Provider",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-stats",
+            "models": ["gpt-4o-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider request");
+
+    client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_stats_fractional",
+            "name": "Stats Gateway",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "default_provider_id": "provider_stats_fractional",
+            "default_model": "gpt-4o-mini",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create gateway request");
+
+    sqlx::query(
+        r#"
+        INSERT INTO request_logs (request_id, gateway_id, provider_id, model, status_code, latency_ms, error, created_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now', '-5 minutes'))
+        "#,
+    )
+    .bind("req_stats_fractional_1")
+    .bind("gateway_stats_fractional")
+    .bind("provider_stats_fractional")
+    .bind("gpt-4o-mini")
+    .bind(200_i64)
+    .bind(100_i64)
+    .bind(Option::<String>::None)
+    .execute(&pool)
+    .await
+    .expect("insert first stats log");
+
+    sqlx::query(
+        r#"
+        INSERT INTO request_logs (request_id, gateway_id, provider_id, model, status_code, latency_ms, error, created_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now', '-4 minutes'))
+        "#,
+    )
+    .bind("req_stats_fractional_2")
+    .bind("gateway_stats_fractional")
+    .bind("provider_stats_fractional")
+    .bind("gpt-4o-mini")
+    .bind(200_i64)
+    .bind(101_i64)
+    .bind(Option::<String>::None)
+    .execute(&pool)
+    .await
+    .expect("insert second stats log");
+
+    let overview: serde_json::Value = client
+        .get(format!("{base}/admin/stats/overview?period=1h"))
+        .send()
+        .await
+        .expect("fetch stats overview")
+        .json()
+        .await
+        .expect("decode stats overview");
+
+    assert_eq!(overview.get("total_requests"), Some(&json!(2)));
+    assert_eq!(overview.get("successful_requests"), Some(&json!(2)));
+    assert_eq!(overview.get("error_requests"), Some(&json!(0)));
+    assert_eq!(
+        overview["by_gateway"][0].get("gateway_id"),
+        Some(&json!("gateway_stats_fractional"))
+    );
+
+    let trend: serde_json::Value = client
+        .get(format!("{base}/admin/stats/trend?period=1h&interval=5m"))
+        .send()
+        .await
+        .expect("fetch stats trend")
+        .json()
+        .await
+        .expect("decode stats trend");
+
+    let trend_data = trend
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .expect("stats trend data array");
+    assert!(!trend_data.is_empty());
+    let total_trend_requests: i64 = trend_data
+        .iter()
+        .filter_map(|point| point.get("request_count").and_then(serde_json::Value::as_i64))
+        .sum();
+    assert_eq!(total_trend_requests, 2);
+    assert!(trend_data[0].get("avg_latency").is_some());
+}
+
 
 async fn insert_request_log(
     pool: &sqlx::SqlitePool,

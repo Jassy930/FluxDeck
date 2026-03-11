@@ -187,6 +187,57 @@
 - `model_requested / model_effective` 用于区分入站请求模型与最终发往上游的模型（例如发生了模型映射）
 - `usage_json` 当前以字符串形式返回原始 usage JSON，便于前端先稳定消费；后续如改为对象需升级契约版本
 
+## 4) Stats
+
+### `GET /admin/stats/overview`
+
+查询参数：
+
+- `period?: string`
+  - 支持如 `1h`、`6h`、`24h`、`7d`
+  - 默认 `1h`
+
+返回对象：
+
+- `total_requests: number`
+- `successful_requests: number`
+- `error_requests: number`
+- `success_rate: number`
+- `requests_per_minute: number`
+- `total_tokens: number`
+- `by_gateway: Array<{ gateway_id: string, request_count: number, success_count: number, error_count: number, total_tokens: number, avg_latency: number }>`
+- `by_provider: Array<{ provider_id: string, request_count: number, success_count: number, error_count: number, total_tokens: number, avg_latency: number }>`
+- `by_model: Array<{ model: string, request_count: number, success_count: number, error_count: number, total_tokens: number, avg_latency: number }>`
+
+语义：
+
+- 所有统计都从 `request_logs` 聚合得出
+- 时间窗口基于服务端当前 UTC 时间回看 `period`
+- `avg_latency` 当前以整数毫秒返回
+
+### `GET /admin/stats/trend`
+
+查询参数：
+
+- `period?: string`
+  - 支持如 `1h`、`6h`、`24h`、`7d`
+  - 默认 `1h`
+- `interval?: string`
+  - 支持如 `5m`、`15m`、`1h`
+  - 默认 `5m`
+
+返回对象：
+
+- `period: string`
+- `interval: string`
+- `data: Array<{ timestamp: string, request_count: number, avg_latency: number, error_count: number, input_tokens: number, output_tokens: number }>`
+
+语义：
+
+- `timestamp` 为服务端聚合后的 UTC bucket 时间
+- `avg_latency` 当前以整数毫秒返回
+- `input_tokens / output_tokens` 在源日志缺失时聚合为 `0`
+
 ## 版本策略
 
 - 本文档定义的字段视为前端契约；新增字段允许，删除/重命名字段需升级版本。

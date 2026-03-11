@@ -583,4 +583,262 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertNil(normalizedAdminBaseURL("ftp://example.com"))
         XCTAssertNil(normalizedAdminBaseURL("not a url"))
     }
+
+    func testAdminStatsOverviewDecodingUsesAdminContract() throws {
+        let data = """
+        {
+          "total_requests": 72,
+          "successful_requests": 60,
+          "error_requests": 12,
+          "success_rate": 83.3,
+          "requests_per_minute": 1.2,
+          "total_tokens": 123456,
+          "by_gateway": [
+            {
+              "gateway_id": "gw_alpha",
+              "request_count": 40,
+              "success_count": 35,
+              "error_count": 5,
+              "total_tokens": 64000,
+              "avg_latency": 420
+            }
+          ],
+          "by_provider": [
+            {
+              "provider_id": "pv_main",
+              "request_count": 72,
+              "success_count": 60,
+              "error_count": 12,
+              "total_tokens": 123456,
+              "avg_latency": 380
+            }
+          ],
+          "by_model": [
+            {
+              "model": "gpt-4.1-mini",
+              "request_count": 51,
+              "success_count": 46,
+              "error_count": 5,
+              "total_tokens": 92000,
+              "avg_latency": 410
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        let overview = try AdminApiClient.decodeStatsOverview(from: data)
+
+        XCTAssertEqual(overview.totalRequests, 72)
+        XCTAssertEqual(overview.successRate, 83.3, accuracy: 0.001)
+        XCTAssertEqual(overview.byGateway.first?.gatewayID, "gw_alpha")
+        XCTAssertEqual(overview.byProvider.first?.providerID, "pv_main")
+        XCTAssertEqual(overview.byModel.first?.model, "gpt-4.1-mini")
+    }
+
+    func testAdminStatsTrendDecodingUsesAdminContract() throws {
+        let data = """
+        {
+          "period": "1h",
+          "interval": "5m",
+          "data": [
+            {
+              "timestamp": "2026-03-11 10:00:00",
+              "request_count": 12,
+              "avg_latency": 180,
+              "error_count": 1,
+              "input_tokens": 800,
+              "output_tokens": 1200
+            },
+            {
+              "timestamp": "2026-03-11 10:05:00",
+              "request_count": 18,
+              "avg_latency": 240,
+              "error_count": 3,
+              "input_tokens": 1000,
+              "output_tokens": 1800
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        let trend = try AdminApiClient.decodeStatsTrend(from: data)
+
+        XCTAssertEqual(trend.period, "1h")
+        XCTAssertEqual(trend.interval, "5m")
+        XCTAssertEqual(trend.data.count, 2)
+        XCTAssertEqual(trend.data.last?.avgLatency, 240)
+    }
+
+    func testTrafficMonitorModelBuildsKpisAlertsAndBreakdowns() {
+        let overview = AdminStatsOverview(
+            totalRequests: 72,
+            successfulRequests: 60,
+            errorRequests: 12,
+            successRate: 83.3,
+            requestsPerMinute: 1.2,
+            totalTokens: 123_456,
+            byGateway: [
+                AdminGatewayStats(
+                    gatewayID: "gw_alpha",
+                    requestCount: 40,
+                    successCount: 35,
+                    errorCount: 5,
+                    totalTokens: 64_000,
+                    avgLatency: 420
+                ),
+                AdminGatewayStats(
+                    gatewayID: "gw_beta",
+                    requestCount: 32,
+                    successCount: 25,
+                    errorCount: 7,
+                    totalTokens: 59_456,
+                    avgLatency: 1_250
+                )
+            ],
+            byProvider: [
+                AdminProviderStats(
+                    providerID: "pv_main",
+                    requestCount: 72,
+                    successCount: 60,
+                    errorCount: 12,
+                    totalTokens: 123_456,
+                    avgLatency: 380
+                )
+            ],
+            byModel: [
+                AdminModelStats(
+                    model: "gpt-4.1-mini",
+                    requestCount: 51,
+                    successCount: 46,
+                    errorCount: 5,
+                    totalTokens: 92_000,
+                    avgLatency: 410
+                )
+            ]
+        )
+        let trend = AdminStatsTrend(
+            period: "1h",
+            interval: "5m",
+            data: [
+                AdminStatsTrendPoint(
+                    timestamp: "2026-03-11 10:00:00",
+                    requestCount: 12,
+                    avgLatency: 180,
+                    errorCount: 1,
+                    inputTokens: 800,
+                    outputTokens: 1_200
+                ),
+                AdminStatsTrendPoint(
+                    timestamp: "2026-03-11 10:05:00",
+                    requestCount: 18,
+                    avgLatency: 240,
+                    errorCount: 3,
+                    inputTokens: 1_000,
+                    outputTokens: 1_800
+                )
+            ]
+        )
+
+        let model = TrafficAnalyticsModel.make(
+            overview: overview,
+            trend: trend,
+            selectedPeriod: "1h"
+        )
+
+        XCTAssertEqual(model.requestsPerMinuteText, "1.2")
+        XCTAssertEqual(model.successRateText, "83.3%")
+        XCTAssertEqual(model.topGatewayID, "gw_alpha")
+        XCTAssertEqual(model.topProviderID, "pv_main")
+        XCTAssertEqual(model.topModelName, "gpt-4.1-mini")
+        XCTAssertEqual(model.gatewayBreakdown.first?.title, "gw_alpha")
+        XCTAssertEqual(model.alerts.first?.level, .error)
+    }
+
+    func testTrafficMonitorModelExposesCompactTopRowsForDenseLayout() {
+        let rows = [
+            TrafficBreakdownRow(title: "a", requestCountText: "1", latencyText: "1", errorText: "0", tokenText: "1"),
+            TrafficBreakdownRow(title: "b", requestCountText: "2", latencyText: "2", errorText: "0", tokenText: "2"),
+            TrafficBreakdownRow(title: "c", requestCountText: "3", latencyText: "3", errorText: "0", tokenText: "3"),
+            TrafficBreakdownRow(title: "d", requestCountText: "4", latencyText: "4", errorText: "0", tokenText: "4")
+        ]
+        let model = TrafficAnalyticsModel(
+            totalRequests: 0,
+            errorCount: 0,
+            successCount: 0,
+            averageLatencyText: "0 ms",
+            requestsPerMinuteText: "0.0",
+            successRateText: "0.0%",
+            totalTokensText: "0",
+            topGatewayID: "No gateway",
+            topProviderID: "No provider",
+            topModelName: "No model",
+            gatewayBreakdown: rows,
+            providerBreakdown: rows,
+            modelBreakdown: rows,
+            trendPoints: [],
+            alerts: [],
+            selectedPeriod: "1h",
+            hasData: false
+        )
+
+        XCTAssertEqual(model.compactGatewayBreakdown.count, 3)
+        XCTAssertEqual(model.compactGatewayBreakdown.map(\.title), ["a", "b", "c"])
+        XCTAssertEqual(model.compactProviderBreakdown.count, 3)
+        XCTAssertEqual(model.compactModelBreakdown.count, 3)
+    }
+
+    func testTrafficMonitorModelExposesKpiStripItems() {
+        let overview = AdminStatsOverview(
+            totalRequests: 95,
+            successfulRequests: 72,
+            errorRequests: 23,
+            successRate: 75.8,
+            requestsPerMinute: 0.1,
+            totalTokens: 146_184,
+            byGateway: [],
+            byProvider: [],
+            byModel: []
+        )
+
+        let model = TrafficAnalyticsModel.make(
+            overview: overview,
+            trend: AdminStatsTrend(period: "24h", interval: "1h", data: []),
+            selectedPeriod: "24h"
+        )
+
+        XCTAssertEqual(model.kpiStripItems.count, 4)
+        XCTAssertEqual(
+            model.kpiStripItems.map(\.title),
+            ["Requests / min", "Success Rate", "Avg Latency", "Total Tokens"]
+        )
+        XCTAssertEqual(model.kpiStripItems.first?.value, "0.1")
+    }
+
+    func testTrafficMonitorModelKeepsRenderableScaffoldWhenStatsAreEmpty() {
+        let overview = AdminStatsOverview(
+            totalRequests: 0,
+            successfulRequests: 0,
+            errorRequests: 0,
+            successRate: 0,
+            requestsPerMinute: 0,
+            totalTokens: 0,
+            byGateway: [],
+            byProvider: [],
+            byModel: []
+        )
+        let trend = AdminStatsTrend(period: "1h", interval: "5m", data: [])
+
+        let model = TrafficAnalyticsModel.make(
+            overview: overview,
+            trend: trend,
+            selectedPeriod: "1h"
+        )
+
+        XCTAssertEqual(model.requestsPerMinuteText, "0.0")
+        XCTAssertEqual(model.successRateText, "0.0%")
+        XCTAssertEqual(model.totalTokensText, "0")
+        XCTAssertEqual(model.alerts.first?.level, .info)
+        XCTAssertFalse(model.hasData)
+    }
+
 }

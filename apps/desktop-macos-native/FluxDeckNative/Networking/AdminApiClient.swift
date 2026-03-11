@@ -325,6 +325,108 @@ struct AdminLogPage: Decodable {
     }
 }
 
+struct AdminGatewayStats: Decodable, Equatable {
+    let gatewayID: String
+    let requestCount: Int
+    let successCount: Int
+    let errorCount: Int
+    let totalTokens: Int
+    let avgLatency: Int
+
+    enum CodingKeys: String, CodingKey {
+        case gatewayID = "gateway_id"
+        case requestCount = "request_count"
+        case successCount = "success_count"
+        case errorCount = "error_count"
+        case totalTokens = "total_tokens"
+        case avgLatency = "avg_latency"
+    }
+}
+
+struct AdminProviderStats: Decodable, Equatable {
+    let providerID: String
+    let requestCount: Int
+    let successCount: Int
+    let errorCount: Int
+    let totalTokens: Int
+    let avgLatency: Int
+
+    enum CodingKeys: String, CodingKey {
+        case providerID = "provider_id"
+        case requestCount = "request_count"
+        case successCount = "success_count"
+        case errorCount = "error_count"
+        case totalTokens = "total_tokens"
+        case avgLatency = "avg_latency"
+    }
+}
+
+struct AdminModelStats: Decodable, Equatable {
+    let model: String
+    let requestCount: Int
+    let successCount: Int
+    let errorCount: Int
+    let totalTokens: Int
+    let avgLatency: Int
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case requestCount = "request_count"
+        case successCount = "success_count"
+        case errorCount = "error_count"
+        case totalTokens = "total_tokens"
+        case avgLatency = "avg_latency"
+    }
+}
+
+struct AdminStatsOverview: Decodable, Equatable {
+    let totalRequests: Int
+    let successfulRequests: Int
+    let errorRequests: Int
+    let successRate: Double
+    let requestsPerMinute: Double
+    let totalTokens: Int
+    let byGateway: [AdminGatewayStats]
+    let byProvider: [AdminProviderStats]
+    let byModel: [AdminModelStats]
+
+    enum CodingKeys: String, CodingKey {
+        case totalRequests = "total_requests"
+        case successfulRequests = "successful_requests"
+        case errorRequests = "error_requests"
+        case successRate = "success_rate"
+        case requestsPerMinute = "requests_per_minute"
+        case totalTokens = "total_tokens"
+        case byGateway = "by_gateway"
+        case byProvider = "by_provider"
+        case byModel = "by_model"
+    }
+}
+
+struct AdminStatsTrendPoint: Decodable, Equatable {
+    let timestamp: String
+    let requestCount: Int
+    let avgLatency: Int
+    let errorCount: Int
+    let inputTokens: Int
+    let outputTokens: Int
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp
+        case requestCount = "request_count"
+        case avgLatency = "avg_latency"
+        case errorCount = "error_count"
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+    }
+}
+
+struct AdminStatsTrend: Decodable, Equatable {
+    let period: String
+    let interval: String
+    let data: [AdminStatsTrendPoint]
+}
+
 struct AdminApiClient {
     let baseURL: URL
     var session: URLSession = .shared
@@ -352,6 +454,25 @@ struct AdminApiClient {
     func fetchDashboardLogs(limit: Int = 20) async throws -> [AdminLog] {
         let page = try await fetchLogsPage(limit: limit)
         return page.items
+    }
+
+    func fetchStatsOverview(period: String = "1h") async throws -> AdminStatsOverview {
+        let data = try await get(
+            path: "/admin/stats/overview",
+            queryItems: [URLQueryItem(name: "period", value: period)]
+        )
+        return try Self.decodeStatsOverview(from: data)
+    }
+
+    func fetchStatsTrend(period: String = "1h", interval: String = "5m") async throws -> AdminStatsTrend {
+        let data = try await get(
+            path: "/admin/stats/trend",
+            queryItems: [
+                URLQueryItem(name: "period", value: period),
+                URLQueryItem(name: "interval", value: interval)
+            ]
+        )
+        return try Self.decodeStatsTrend(from: data)
     }
 
     func fetchLogsPage(
@@ -438,6 +559,14 @@ struct AdminApiClient {
 
     static func decodeLogPage(from data: Data) throws -> AdminLogPage {
         try JSONDecoder().decode(AdminLogPage.self, from: data)
+    }
+
+    static func decodeStatsOverview(from data: Data) throws -> AdminStatsOverview {
+        try JSONDecoder().decode(AdminStatsOverview.self, from: data)
+    }
+
+    static func decodeStatsTrend(from data: Data) throws -> AdminStatsTrend {
+        try JSONDecoder().decode(AdminStatsTrend.self, from: data)
     }
 
     private func get(path: String, queryItems: [URLQueryItem] = []) async throws -> Data {
