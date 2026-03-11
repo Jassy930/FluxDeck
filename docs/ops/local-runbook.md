@@ -43,6 +43,12 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
 - 自动启动条件：`enabled=true && auto_start=true`
 - 单个 Gateway 自动启动失败不会阻塞 fluxd 主进程
 
+如果你使用原生桌面端配置 Gateway：
+
+- `New Gateway` 与 `Edit Gateway` 已统一为工作台式编辑界面
+- `Default Provider`、`Inbound Protocol`、`Upstream Protocol` 优先通过受控选择填写
+- `Routing JSON` 会在保存前做 JSON object 校验；若 Gateway 已运行，仍需手动 stop/start 才会生效
+
 更新网关配置：
 
 ```bash

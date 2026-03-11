@@ -1684,6 +1684,147 @@ private struct PlaceholderDetailView: View {
     }
 }
 
+struct GatewayPickerOption: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let subtitle: String?
+    let isFallback: Bool
+}
+
+enum GatewayProtocolKind {
+    case inbound
+    case upstream
+}
+
+struct GatewayFormSnapshot: Equatable {
+    let title: String
+    let endpoint: String
+    let providerLabel: String
+    let protocolSummary: String
+    let runtimeStatus: String
+    let startupMode: String
+    let routingMode: String
+    let footerSummary: String
+}
+
+enum GatewayFormSupport {
+    static func providerOptions(providers: [AdminProvider], selectedProviderID: String) -> [GatewayPickerOption] {
+        let normalizedSelectedID = selectedProviderID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseOptions = providers.map { provider in
+            GatewayPickerOption(id: provider.id, title: provider.id, subtitle: provider.name, isFallback: false)
+        }
+
+        guard !normalizedSelectedID.isEmpty,
+              providers.contains(where: { $0.id == normalizedSelectedID }) == false else {
+            return baseOptions
+        }
+
+        return [
+            GatewayPickerOption(
+                id: normalizedSelectedID,
+                title: "Current value: \(normalizedSelectedID)",
+                subtitle: "Unavailable provider",
+                isFallback: true
+            )
+        ] + baseOptions
+    }
+
+    static func protocolOptions(kind: GatewayProtocolKind, selectedValue: String) -> [GatewayPickerOption] {
+        let normalizedSelectedValue = selectedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseOptions = defaultProtocolOptions(for: kind)
+
+        guard !normalizedSelectedValue.isEmpty,
+              baseOptions.contains(where: { $0.id == normalizedSelectedValue }) == false else {
+            return baseOptions
+        }
+
+        return [
+            GatewayPickerOption(
+                id: normalizedSelectedValue,
+                title: "Current value: \(normalizedSelectedValue)",
+                subtitle: "Unsupported saved value",
+                isFallback: true
+            )
+        ] + baseOptions
+    }
+
+    static func snapshot(
+        name: String,
+        listenHost: String,
+        listenPort: String,
+        inboundProtocol: String,
+        upstreamProtocol: String,
+        defaultProviderID: String,
+        defaultModel: String,
+        enabled: Bool,
+        autoStart: Bool,
+        protocolConfigJSON: String,
+        providers: [AdminProvider]
+    ) -> GatewayFormSnapshot {
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedHost = listenHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPort = listenPort.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedProviderID = defaultProviderID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedProtocolConfig = protocolConfigJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let title = normalizedName.isEmpty ? "Untitled Gateway" : normalizedName
+        let endpoint = normalizedHost.isEmpty || normalizedPort.isEmpty ? "No endpoint configured" : "\(normalizedHost):\(normalizedPort)"
+        let protocolSummary = "\(protocolTitle(for: inboundProtocol, kind: .inbound)) -> \(protocolTitle(for: upstreamProtocol, kind: .upstream))"
+        let routingMode: String
+
+        if let parsed = try? JSONValue.parseObject(from: normalizedProtocolConfig.isEmpty ? "{}" : normalizedProtocolConfig), !parsed.isEmpty {
+            routingMode = "Mapped"
+        } else if upstreamProtocol.trimmingCharacters(in: .whitespacesAndNewlines) == "provider_default" {
+            routingMode = "Direct"
+        } else {
+            routingMode = "Bridge"
+        }
+
+        let providerLabel = normalizedProviderID.isEmpty ? "Unassigned" : (providers.first(where: { $0.id == normalizedProviderID })?.id ?? normalizedProviderID)
+
+        _ = defaultModel
+
+        return GatewayFormSnapshot(
+            title: title,
+            endpoint: endpoint,
+            providerLabel: providerLabel,
+            protocolSummary: protocolSummary,
+            runtimeStatus: enabled ? "Active" : "Disabled",
+            startupMode: autoStart ? "Automatic" : "Manual",
+            routingMode: routingMode,
+            footerSummary: endpoint == "No endpoint configured"
+                ? (autoStart ? "Auto Start On" : "Auto Start Off")
+                : "\(endpoint) · \(autoStart ? "Auto Start On" : "Auto Start Off")"
+        )
+    }
+
+    static func protocolTitle(for rawValue: String, kind: GatewayProtocolKind) -> String {
+        let normalizedRawValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedRawValue.isEmpty else {
+            return "-"
+        }
+
+        return defaultProtocolOptions(for: kind).first(where: { $0.id == normalizedRawValue })?.title ?? normalizedRawValue
+    }
+
+    private static func defaultProtocolOptions(for kind: GatewayProtocolKind) -> [GatewayPickerOption] {
+        switch kind {
+        case .inbound:
+            return [
+                GatewayPickerOption(id: "openai", title: "OpenAI", subtitle: "OpenAI-compatible client ingress", isFallback: false),
+                GatewayPickerOption(id: "anthropic", title: "Anthropic", subtitle: "Anthropic messages ingress", isFallback: false)
+            ]
+        case .upstream:
+            return [
+                GatewayPickerOption(id: "provider_default", title: "Provider Default", subtitle: "Delegate protocol to provider kind", isFallback: false),
+                GatewayPickerOption(id: "openai", title: "OpenAI", subtitle: "Forward using OpenAI-compatible upstream", isFallback: false),
+                GatewayPickerOption(id: "anthropic", title: "Anthropic", subtitle: "Forward using Anthropic upstream", isFallback: false)
+            ]
+        }
+    }
+}
+
 private enum GatewayFormMode {
     case create
     case edit(AdminGateway)
@@ -1753,72 +1894,271 @@ private struct GatewayFormSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section(isCreateMode ? "Gateway" : "Gateway Snapshot") {
-                    if isCreateMode {
-                        TextField("ID", text: $id)
-                    } else {
-                        LabeledContent("ID") {
-                            Text(id)
-                                .font(.caption.monospaced())
+        VStack(spacing: 0) {
+            gatewayHeader
+
+            Divider()
+                .overlay(DesignTokens.borderSubtle)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    gatewaySummaryCard
+
+                    HStack(alignment: .top, spacing: 14) {
+                        SurfaceCard(title: "Identity") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                if isCreateMode {
+                                    gatewayField(title: "Gateway ID", caption: "Stable local route identifier used by admin workflows.") {
+                                        textInput(placeholder: "gateway_main", text: $id, monospaced: true)
+                                    }
+                                } else {
+                                    gatewayField(title: "Gateway ID", caption: "Locked after creation to keep local clients and scripts stable.") {
+                                        readOnlyValue(id, monospaced: true)
+                                    }
+                                }
+
+                                gatewayField(title: "Display Name") {
+                                    textInput(placeholder: "Gateway Main", text: $name)
+                                }
+
+                                gatewayField(title: "Default Provider", caption: "Choose the upstream provider that receives unmatched traffic.") {
+                                    providerPicker
+                                }
+
+                                gatewayField(title: "Default Model", caption: "Optional model hint for clients that omit the model field.") {
+                                    textInput(placeholder: "gpt-4o-mini", text: $defaultModel, monospaced: true)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        SurfaceCard(title: "Runtime") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Text(enabled ? "Routing enabled" : "Routing disabled")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(DesignTokens.textPrimary)
+                                    Spacer()
+                                    Toggle("Enabled", isOn: $enabled)
+                                        .toggleStyle(.switch)
+                                        .labelsHidden()
+                                }
+
+                                HStack {
+                                    Text(autoStart ? "Auto start on fluxd launch" : "Manual startup")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(DesignTokens.textPrimary)
+                                    Spacer()
+                                    Toggle("Auto Start", isOn: $autoStart)
+                                        .toggleStyle(.switch)
+                                        .labelsHidden()
+                                }
+
+                                Text("Quick runtime snapshot for the current gateway profile.")
+                                    .font(.caption)
+                                    .foregroundStyle(DesignTokens.textSecondary)
+
+                                dividerLine
+
+                                VStack(alignment: .leading, spacing: 10) {
+                                    gatewayMetaRow(label: "Status", value: snapshot.runtimeStatus)
+                                    gatewayMetaRow(label: "Startup", value: snapshot.startupMode)
+                                    gatewayMetaRow(label: "Endpoint", value: snapshot.endpoint)
+                                    gatewayMetaRow(label: "Routing", value: snapshot.routingMode)
+                                }
+                            }
+                        }
+                        .frame(width: 240)
+                    }
+
+                    SurfaceCard(title: "Network & Protocols") {
+                        HStack(alignment: .top, spacing: 12) {
+                            gatewayField(title: "Listen Host", caption: "Local bind address for the gateway process.") {
+                                textInput(placeholder: "127.0.0.1", text: $listenHost, monospaced: true)
+                            }
+
+                            gatewayField(title: "Listen Port", caption: "Expose a unique local port between 1 and 65535.") {
+                                textInput(placeholder: "18080", text: $listenPort, monospaced: true)
+                            }
+
+                            gatewayField(title: "Inbound Protocol", caption: "Client-facing protocol accepted at the local endpoint.") {
+                                protocolPicker(kind: .inbound, selection: $inboundProtocol)
+                            }
+
+                            gatewayField(title: "Upstream Protocol", caption: "Protocol used when forwarding to the selected provider.") {
+                                protocolPicker(kind: .upstream, selection: $upstreamProtocol)
+                            }
                         }
                     }
-                    TextField("Name", text: $name)
-                    TextField("Listen Host", text: $listenHost)
-                    TextField("Listen Port", text: $listenPort)
-                    TextField("Inbound Protocol", text: $inboundProtocol)
-                    TextField("Upstream Protocol", text: $upstreamProtocol)
-                    TextField("Default Provider ID", text: $defaultProviderID)
-                    TextField("Default Model (optional)", text: $defaultModel)
-                    Toggle("Enabled", isOn: $enabled)
-                    Toggle("Auto Start", isOn: $autoStart)
-                }
 
-                Section("Routing JSON") {
-                    TextEditor(text: $protocolConfigJSON)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(minHeight: 120)
-                    Text("Saved to configuration only. If this gateway is currently running, stop and start it manually to apply runtime changes.")
+                    HStack(alignment: .top, spacing: 14) {
+                        SurfaceCard(title: "Routing JSON") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Protocol compatibility and routing overrides are saved to configuration only. If this gateway is running, stop and start it manually to apply runtime changes.")
+                                    .font(.caption)
+                                    .foregroundStyle(DesignTokens.textSecondary)
+
+                                TextEditor(text: $protocolConfigJSON)
+                                    .scrollContentBackground(.hidden)
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundStyle(DesignTokens.textPrimary)
+                                    .frame(minHeight: 180, maxHeight: 220)
+                                    .padding(12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .fill(DesignTokens.surfacePrimary.opacity(0.92))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .stroke(DesignTokens.borderSubtle.opacity(0.9), lineWidth: 1)
+                                    )
+
+                                if let routingValidationError {
+                                    Label(routingValidationError, systemImage: "exclamationmark.triangle.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(DesignTokens.statusColors.error.fill)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        SurfaceCard(title: "Routing Targets") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Use this reference list to confirm the provider selected as the default upstream target.")
+                                    .font(.caption)
+                                    .foregroundStyle(DesignTokens.textSecondary)
+
+                                if providerOptions.isEmpty {
+                                    Text("No providers available yet.")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(DesignTokens.textPrimary)
+                                } else {
+                                    ForEach(providerOptions) { option in
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            HStack {
+                                                Text(option.title)
+                                                    .font(.subheadline.weight(.semibold))
+                                                    .foregroundStyle(DesignTokens.textPrimary)
+                                                Spacer()
+                                                if let provider = providers.first(where: { $0.id == option.id }) {
+                                                    StatusPill(
+                                                        text: provider.enabled ? "Enabled" : "Disabled",
+                                                        semanticColor: provider.enabled ? DesignTokens.statusColors.running : DesignTokens.statusColors.inactive
+                                                    )
+                                                } else if option.isFallback {
+                                                    StatusPill(
+                                                        text: "Fallback",
+                                                        semanticColor: DesignTokens.statusColors.warning
+                                                    )
+                                                }
+                                            }
+
+                                            if let subtitle = option.subtitle {
+                                                Text(subtitle)
+                                                    .font(.caption)
+                                                    .foregroundStyle(DesignTokens.textSecondary)
+                                            }
+                                        }
+                                        .padding(.bottom, option.id == providerOptions.last?.id ? 0 : 6)
+                                    }
+                                }
+                            }
+                        }
+                        .frame(width: 240)
+                    }
+
+                    if let validationError {
+                        SurfaceCard {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(DesignTokens.statusColors.error.fill)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(validationError)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(DesignTokens.textPrimary)
+                                    Text("Review the required fields before saving this gateway configuration.")
+                                        .font(.caption)
+                                        .foregroundStyle(DesignTokens.textSecondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
+            }
+
+            Divider()
+                .overlay(DesignTokens.borderSubtle)
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(isCreateMode ? "Create a local gateway profile" : "Update local routing and protocol configuration")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(DesignTokens.textPrimary)
+                    Text(snapshot.footerSummary)
                         .font(.caption)
                         .foregroundStyle(DesignTokens.textSecondary)
                 }
 
-                if !providers.isEmpty {
-                    Section("Available Providers") {
-                        ForEach(providers) { provider in
-                            Text(provider.id)
-                                .font(.caption)
-                        }
-                    }
-                }
+                Spacer()
 
-                if let validationError {
-                    Section {
-                        Label(validationError, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                    }
+                Button("Cancel") {
+                    dismiss()
                 }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .foregroundStyle(DesignTokens.textSecondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(DesignTokens.surfacePrimary.opacity(0.92))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(DesignTokens.borderSubtle.opacity(0.85), lineWidth: 1)
+                )
+                .disabled(isSubmitting)
+
+                Button {
+                    submit()
+                } label: {
+                    HStack(spacing: 8) {
+                        if isSubmitting {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(isCreateMode ? "Create Gateway" : "Save Changes")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(red: 0.13, green: 0.52, blue: 0.92))
+                    )
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .disabled(isSubmitting)
             }
-            .navigationTitle(isCreateMode ? "New Gateway" : "Edit Gateway")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                    .focusable(false)
-                    .disabled(isSubmitting)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(isCreateMode ? "Create" : "Save") {
-                        submit()
-                    }
-                    .focusable(false)
-                    .disabled(isSubmitting)
-                }
-            }
-            .frame(width: 560, height: 460)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(DesignTokens.surfacePrimary.opacity(0.9))
         }
+        .frame(width: 760, height: 680)
+        .background(
+            LinearGradient(
+                colors: [
+                    DesignTokens.surfacePrimary.opacity(0.98),
+                    DesignTokens.surfaceSecondary.opacity(0.94)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
     }
 
     private func submit() {
@@ -1836,8 +2176,13 @@ private struct GatewayFormSheet: View {
             return
         }
 
-        guard !normalizedName.isEmpty, !normalizedHost.isEmpty, !normalizedProtocol.isEmpty, !normalizedUpstreamProtocol.isEmpty, !normalizedProviderID.isEmpty else {
-            validationError = "Name, Host, Protocols and Default Provider ID are required."
+        guard !normalizedName.isEmpty, !normalizedHost.isEmpty, !normalizedProtocol.isEmpty, !normalizedUpstreamProtocol.isEmpty else {
+            validationError = "Name, Host and Protocols are required."
+            return
+        }
+
+        guard !normalizedProviderID.isEmpty else {
+            validationError = "Default Provider is required."
             return
         }
 
@@ -1900,5 +2245,248 @@ private struct GatewayFormSheet: View {
             return true
         }
         return false
+    }
+
+    private var snapshot: GatewayFormSnapshot {
+        GatewayFormSupport.snapshot(
+            name: name,
+            listenHost: listenHost,
+            listenPort: listenPort,
+            inboundProtocol: inboundProtocol,
+            upstreamProtocol: upstreamProtocol,
+            defaultProviderID: defaultProviderID,
+            defaultModel: defaultModel,
+            enabled: enabled,
+            autoStart: autoStart,
+            protocolConfigJSON: protocolConfigJSON,
+            providers: providers
+        )
+    }
+
+    private var providerOptions: [GatewayPickerOption] {
+        GatewayFormSupport.providerOptions(providers: providers, selectedProviderID: defaultProviderID)
+    }
+
+    private var routingValidationError: String? {
+        let normalizedProtocolConfig = protocolConfigJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedProtocolConfig.isEmpty else {
+            return nil
+        }
+
+        do {
+            _ = try JSONValue.parseObject(from: normalizedProtocolConfig)
+            return nil
+        } catch {
+            return "Routing JSON must be a valid JSON object."
+        }
+    }
+
+    private var gatewayHeader: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: isCreateMode ? "point.3.connected.trianglepath.dotted" : "slider.horizontal.3")
+                .font(.headline)
+                .foregroundStyle(isCreateMode ? DesignTokens.statusColors.running.fill : DesignTokens.statusColors.warning.fill)
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(isCreateMode ? "Create Gateway" : "Configure Gateway")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                Text("Manage the local endpoint, protocol bridge and default upstream route in one compact control surface.")
+                    .font(.caption)
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            StatusPill(
+                text: enabled ? "Enabled" : "Disabled",
+                semanticColor: enabled ? DesignTokens.statusColors.running : DesignTokens.statusColors.inactive
+            )
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .background(DesignTokens.surfacePrimary.opacity(0.86))
+    }
+
+    private var gatewaySummaryCard: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(isCreateMode ? "Gateway Profile" : "Gateway Snapshot")
+                    .font(.caption2.weight(.semibold))
+                    .textCase(.uppercase)
+                    .foregroundStyle(DesignTokens.textSecondary)
+                Text(snapshot.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                Text(snapshot.endpoint)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 16)
+
+            HStack(spacing: 8) {
+                compactMetric(title: "Inbound", value: GatewayFormSupport.protocolTitle(for: inboundProtocol, kind: .inbound))
+                compactMetric(title: "Upstream", value: GatewayFormSupport.protocolTitle(for: upstreamProtocol, kind: .upstream))
+                compactMetric(title: "Provider", value: snapshot.providerLabel)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(DesignTokens.surfaceSecondary.opacity(0.82))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(DesignTokens.borderSubtle.opacity(0.75), lineWidth: 1)
+        )
+    }
+
+    private var providerPicker: some View {
+        Group {
+            if providerOptions.isEmpty {
+                readOnlyValue("No providers available")
+            } else {
+                Picker("Default Provider", selection: $defaultProviderID) {
+                    ForEach(providerOptions) { option in
+                        Text(option.title)
+                            .tag(option.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(DesignTokens.surfacePrimary.opacity(0.92))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(DesignTokens.borderSubtle.opacity(0.9), lineWidth: 1)
+                )
+            }
+        }
+    }
+
+    private func protocolPicker(kind: GatewayProtocolKind, selection: Binding<String>) -> some View {
+        let options = GatewayFormSupport.protocolOptions(kind: kind, selectedValue: selection.wrappedValue)
+
+        return Picker(kind == .inbound ? "Inbound Protocol" : "Upstream Protocol", selection: selection) {
+            ForEach(options) { option in
+                Text(option.title)
+                    .tag(option.id)
+            }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(DesignTokens.surfacePrimary.opacity(0.92))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(DesignTokens.borderSubtle.opacity(0.9), lineWidth: 1)
+        )
+    }
+
+    private var dividerLine: some View {
+        Rectangle()
+            .fill(DesignTokens.borderSubtle.opacity(0.75))
+            .frame(height: 1)
+    }
+
+    private func compactMetric(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .textCase(.uppercase)
+                .foregroundStyle(DesignTokens.textSecondary)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+                .lineLimit(1)
+        }
+        .frame(minWidth: 72, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(DesignTokens.surfacePrimary.opacity(0.88))
+        )
+    }
+
+    private func gatewayMetaRow(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(DesignTokens.textSecondary)
+            Spacer()
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+                .lineLimit(1)
+        }
+    }
+
+    private func gatewayField<Content: View>(title: String, caption: String? = nil, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                if let caption {
+                    Text(caption)
+                        .font(.caption)
+                        .foregroundStyle(DesignTokens.textSecondary)
+                        .lineLimit(2)
+                }
+            }
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func textInput(placeholder: String, text: Binding<String>, monospaced: Bool = false) -> some View {
+        TextField(placeholder, text: text)
+            .textFieldStyle(.plain)
+            .font(monospaced ? .system(.body, design: .monospaced) : .body)
+            .foregroundStyle(DesignTokens.textPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(DesignTokens.surfacePrimary.opacity(0.92))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(DesignTokens.borderSubtle.opacity(0.9), lineWidth: 1)
+            )
+    }
+
+    private func readOnlyValue(_ value: String, monospaced: Bool = false) -> some View {
+        Text(value)
+            .font(monospaced ? .system(.body, design: .monospaced) : .body)
+            .foregroundStyle(DesignTokens.textPrimary.opacity(0.85))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(DesignTokens.surfacePrimary.opacity(0.72))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(DesignTokens.borderSubtle.opacity(0.75), lineWidth: 1)
+            )
     }
 }

@@ -127,6 +127,10 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
 
 - `fluxctl gateway create` 已支持 `--auto-start true|false`
 - 原生前端也已支持创建/编辑 Gateway 配置，并可直接切换 `Auto Start`
+- 原生前端中的 Gateway 创建/编辑弹窗现已与 Provider 配置页统一为工作台式布局：
+  - 顶部摘要会显示监听地址、入口协议、出口协议与默认 Provider
+  - `Default Provider`、`Inbound Protocol`、`Upstream Protocol` 使用受控选择，减少拼写错误
+  - `Routing JSON` 提供独立大编辑区，并在 JSON 非法时直接显示错误提示
 - 若你更偏好直接调 Admin API，也可以这样创建：
 
 ```bash
@@ -168,6 +172,12 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway update gateway
   --enabled true \
   --auto-start false
 ```
+
+原生前端编辑 Gateway 时还会额外提供：
+
+- `Runtime` 摘要卡，展示当前 `Status`、`Startup`、`Endpoint`、`Routing`
+- `Routing Targets` 辅助卡，快速确认当前 `default_provider_id` 指向的 Provider
+- 如果 Gateway 正在运行，修改保存后仍需手动 `stop/start` 才会让新的运行时配置生效
 
 说明：
 

@@ -374,6 +374,87 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(metrics.errorGatewayCount, 1)
     }
 
+    func testGatewayFormSupportBuildsSnapshotAndFooterSummary() {
+        let providers = [
+            AdminProvider(
+                id: "glm-coding-id",
+                name: "glm-coding",
+                kind: "anthropic",
+                baseURL: "https://open.bigmodel.cn/api/anthropic",
+                apiKey: "sk-gateway",
+                models: ["GLM-5"],
+                enabled: true
+            )
+        ]
+
+        let snapshot = GatewayFormSupport.snapshot(
+            name: "glm-coding",
+            listenHost: "127.0.0.1",
+            listenPort: "18072",
+            inboundProtocol: "anthropic",
+            upstreamProtocol: "anthropic",
+            defaultProviderID: "glm-coding-id",
+            defaultModel: "GLM-5",
+            enabled: true,
+            autoStart: true,
+            protocolConfigJSON: """
+            {
+              "compatibility_mode": "compatible"
+            }
+            """,
+            providers: providers
+        )
+
+        XCTAssertEqual(snapshot.title, "glm-coding")
+        XCTAssertEqual(snapshot.endpoint, "127.0.0.1:18072")
+        XCTAssertEqual(snapshot.providerLabel, "glm-coding-id")
+        XCTAssertEqual(snapshot.protocolSummary, "Anthropic -> Anthropic")
+        XCTAssertEqual(snapshot.runtimeStatus, "Active")
+        XCTAssertEqual(snapshot.startupMode, "Automatic")
+        XCTAssertEqual(snapshot.routingMode, "Mapped")
+        XCTAssertEqual(snapshot.footerSummary, "127.0.0.1:18072 · Auto Start On")
+    }
+
+    func testGatewayFormSupportPreservesUnknownSelectionsAsFallbackOptions() {
+        let providers = [
+            AdminProvider(
+                id: "provider_main",
+                name: "Main Provider",
+                kind: "openai",
+                baseURL: "https://api.openai.com/v1",
+                apiKey: "sk-main",
+                models: ["gpt-4o-mini"],
+                enabled: true
+            )
+        ]
+
+        let providerOptions = GatewayFormSupport.providerOptions(
+            providers: providers,
+            selectedProviderID: "legacy_provider"
+        )
+        let inboundOptions = GatewayFormSupport.protocolOptions(
+            kind: .inbound,
+            selectedValue: "legacy-inbound"
+        )
+        let upstreamOptions = GatewayFormSupport.protocolOptions(
+            kind: .upstream,
+            selectedValue: "legacy-upstream"
+        )
+
+        XCTAssertEqual(providerOptions.first?.id, "legacy_provider")
+        XCTAssertEqual(providerOptions.first?.title, "Current value: legacy_provider")
+        XCTAssertEqual(providerOptions.first?.subtitle, "Unavailable provider")
+        XCTAssertTrue(providerOptions.first?.isFallback == true)
+
+        XCTAssertEqual(inboundOptions.first?.id, "legacy-inbound")
+        XCTAssertEqual(inboundOptions.first?.title, "Current value: legacy-inbound")
+        XCTAssertTrue(inboundOptions.first?.isFallback == true)
+
+        XCTAssertEqual(upstreamOptions.first?.id, "legacy-upstream")
+        XCTAssertEqual(upstreamOptions.first?.title, "Current value: legacy-upstream")
+        XCTAssertTrue(upstreamOptions.first?.isFallback == true)
+    }
+
     func testEncodesCreatePayloadWithSnakeCaseKeys() throws {
         let providerInput = CreateProviderInput(
             id: "provider_ui",
