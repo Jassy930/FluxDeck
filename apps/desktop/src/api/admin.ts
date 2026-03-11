@@ -98,7 +98,64 @@ export type AdminApi = {
   listLogs: (params?: ListLogsParams) => Promise<RequestLogPage>;
   createProvider: (input: CreateProviderInput) => Promise<Provider>;
   createGateway: (input: CreateGatewayInput) => Promise<Gateway>;
+  getStatsOverview: (period?: string) => Promise<StatsOverview>;
+  getStatsTrend: (period?: string, interval?: string) => Promise<StatsTrend>;
 };
+
+// Stats types
+export type StatsOverview = {
+  total_requests: number;
+  successful_requests: number;
+  error_requests: number;
+  success_rate: number;
+  requests_per_minute: number;
+  total_tokens: number;
+  by_gateway: GatewayStats[];
+  by_provider: ProviderStats[];
+  by_model: ModelStats[];
+};
+
+export type GatewayStats = {
+  gateway_id: string;
+  request_count: number;
+  success_count: number;
+  error_count: number;
+  total_tokens: number;
+  avg_latency: number;
+};
+
+export type ProviderStats = {
+  provider_id: string;
+  request_count: number;
+  success_count: number;
+  error_count: number;
+  total_tokens: number;
+  avg_latency: number;
+};
+
+export type ModelStats = {
+  model: string;
+  request_count: number;
+  success_count: number;
+  error_count: number;
+  total_tokens: number;
+  avg_latency: number;
+};
+
+export type StatsTrendPoint = {
+  timestamp: string;
+  request_count: number;
+  avg_latency: number;
+  error_count: number;
+  input_tokens: number;
+  output_tokens: number;
+};
+
+export type StatsTrend = {
+  period: string;
+  interval: string;
+  data: StatsTrendPoint[];
+}
 
 export type DashboardLists = {
   providers: Provider[];
@@ -159,5 +216,13 @@ export function createAdminApi(baseUrl = ''): AdminApi {
     },
     createProvider: (input) => postJson<CreateProviderInput, Provider>('/admin/providers', input),
     createGateway: (input) => postJson<CreateGatewayInput, Gateway>('/admin/gateways', input),
+    getStatsOverview: (period = '1h') => {
+      const query = new URLSearchParams({ period });
+      return getJson<StatsOverview>('/admin/stats/overview', query);
+    },
+    getStatsTrend: (period = '1h', interval = '5m') => {
+      const query = new URLSearchParams({ period, interval });
+      return getJson<StatsTrend>('/admin/stats/trend', query);
+    },
   };
 }
