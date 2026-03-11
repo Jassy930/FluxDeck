@@ -49,6 +49,8 @@ pub fn build_admin_router(state: AdminApiState) -> Router {
         .route("/admin/gateways/{id}/start", post(start_gateway))
         .route("/admin/gateways/{id}/stop", post(stop_gateway))
         .route("/admin/logs", get(list_logs))
+        .route("/admin/stats/overview", get(get_stats_overview))
+        .route("/admin/stats/trend", get(get_stats_trend))
         .with_state(state)
 }
 
@@ -228,6 +230,71 @@ struct LogListResponse {
     has_more: bool,
 }
 
+// Stats API types
+#[derive(Debug, Deserialize, Default)]
+struct StatsQuery {
+    period: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct StatsTrendQuery {
+    period: Option<String>,
+    interval: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct StatsOverviewResponse {
+    total_requests: i64,
+    successful_requests: i64,
+    error_requests: i64,
+    success_rate: f64,
+    requests_per_minute: f64,
+    total_tokens: i64,
+    by_gateway: Vec<DimensionStats>,
+    by_provider: Vec<DimensionStats>,
+    by_model: Vec<ModelDimensionStats>,
+}
+
+#[derive(Debug, Serialize)]
+struct DimensionStats {
+    #[serde(rename = "gateway_id")]
+    _gateway_id: Option<String>,
+    #[serde(rename = "provider_id")]
+    _provider_id: Option<String>,
+    request_count: i64,
+    success_count: i64,
+    error_count: i64,
+    total_tokens: i64,
+    avg_latency: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct ModelDimensionStats {
+    model: String,
+    request_count: i64,
+    success_count: i64,
+    error_count: i64,
+    total_tokens: i64,
+    avg_latency: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct StatsTrendResponse {
+    period: String,
+    interval: String,
+    data: Vec<StatsTrendPoint>,
+}
+
+#[derive(Debug, Serialize)]
+struct StatsTrendPoint {
+    timestamp: String,
+    request_count: i64,
+    avg_latency: i64,
+    error_count: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+}
+
 async fn start_gateway(
     State(state): State<AdminApiState>,
     Path(gateway_id): Path<String>,
@@ -362,6 +429,314 @@ async fn list_logs(
             items,
             next_cursor,
             has_more,
+        }),
+    )
+}
+
+/// Parse period string like "1h", "6h", "24h", "1d", "7d" into hours
+fn parse_period_to_hours(period: &str) -> i64 {
+    let period = period.trim();
+    if period.is_empty() {
+        return 1; // default 1 hour
+    }
+
+    let num_part: String = period.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let unit_part: String = period.chars().skip_while(|c| c.is_ascii_digit()).collect();
+
+    let num: i64 = num_part.parse().unwrap_or(1);
+
+    match unit_part.to_lowercase().as_str() {
+        "m" | "min" | "minute" | "minutes" => num / 60, // convert minutes to hours
+        "h" | "hour" | "hours" => num,
+        "d" | "day" | "days" => num * 24,
+        "w" | "week" | "weeks" => num * 24 * 7,
+        _ => 1, // default 1 hour
+    }
+}
+
+/// Parse interval string like "1m", "5m", "15m", "1h" into minutes
+fn parse_interval_to_minutes(interval: &str) -> i64 {
+    let interval = interval.trim();
+    if interval.is_empty() {
+        return 5; // default 5 minutes
+    }
+
+    let num_part: String = interval.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let unit_part: String = interval.chars().skip_while(|c| c.is_ascii_digit()).collect();
+
+    let num: i64 = num_part.parse().unwrap_or(5);
+
+    match unit_part.to_lowercase().as_str() {
+        "s" | "sec" | "second" | "seconds" => num / 60,
+        "m" | "min" | "minute" | "minutes" => num,
+        "h" | "hour" | "hours" => num * 60,
+        _ => 5,
+    }
+}
+
+async fn get_stats_overview(
+    State(state): State<AdminApiState>,
+    Query(query): Query<StatsQuery>,
+) -> (StatusCode, Json<StatsOverviewResponse>) {
+    let period = query.period.as_deref().unwrap_or("1h");
+    let hours = parse_period_to_hours(period);
+
+    // Calculate time range
+    let since = match sqlx::query_scalar::<_, String>(
+        &format!(
+            "SELECT datetime('now', '-{} hours')",
+            hours
+        ),
+    )
+    .fetch_one(&state.pool)
+    .await
+    {
+        Ok(t) => t,
+        Err(_) => {
+            return (
+                StatusCode::OK,
+                Json(StatsOverviewResponse {
+                    total_requests: 0,
+                    successful_requests: 0,
+                    error_requests: 0,
+                    success_rate: 0.0,
+                    requests_per_minute: 0.0,
+                    total_tokens: 0,
+                    by_gateway: vec![],
+                    by_provider: vec![],
+                    by_model: vec![],
+                }),
+            );
+        }
+    };
+
+    // Get total stats
+    let total_stats = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+        "SELECT
+            COUNT(*) as total_requests,
+            SUM(CASE WHEN status_code < 400 AND error IS NULL THEN 1 ELSE 0 END) as successful_requests,
+            SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_requests,
+            COALESCE(SUM(total_tokens), 0) as total_tokens,
+            COALESCE(AVG(latency_ms), 0) as avg_latency
+         FROM request_logs
+         WHERE created_at >= ?",
+    )
+    .bind(&since)
+    .fetch_one(&state.pool)
+    .await;
+
+    let (total_requests, successful_requests, error_requests, total_tokens, avg_latency) =
+        match total_stats {
+            Ok(row) => row,
+            Err(_) => (0, 0, 0, 0, 0),
+        };
+
+    let success_rate = if total_requests > 0 {
+        (successful_requests as f64 / total_requests as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    let requests_per_minute = if hours > 0 {
+        total_requests as f64 / (hours as f64 * 60.0)
+    } else {
+        0.0
+    };
+
+    // Get stats by gateway
+    let by_gateway = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64)>(
+        "SELECT
+            gateway_id,
+            COUNT(*) as request_count,
+            SUM(CASE WHEN status_code < 400 AND error IS NULL THEN 1 ELSE 0 END) as success_count,
+            SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count,
+            COALESCE(SUM(total_tokens), 0) as total_tokens,
+            COALESCE(AVG(latency_ms), 0) as avg_latency
+         FROM request_logs
+         WHERE created_at >= ?
+         GROUP BY gateway_id
+         ORDER BY request_count DESC",
+    )
+    .bind(&since)
+    .fetch_all(&state.pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|(gateway_id, request_count, success_count, error_count, total_tokens, avg_latency)| {
+        DimensionStats {
+            _gateway_id: Some(gateway_id),
+            _provider_id: None,
+            request_count,
+            success_count,
+            error_count,
+            total_tokens,
+            avg_latency,
+        }
+    })
+    .collect();
+
+    // Get stats by provider
+    let by_provider = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64)>(
+        "SELECT
+            provider_id,
+            COUNT(*) as request_count,
+            SUM(CASE WHEN status_code < 400 AND error IS NULL THEN 1 ELSE 0 END) as success_count,
+            SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count,
+            COALESCE(SUM(total_tokens), 0) as total_tokens,
+            COALESCE(AVG(latency_ms), 0) as avg_latency
+         FROM request_logs
+         WHERE created_at >= ?
+         GROUP BY provider_id
+         ORDER BY request_count DESC",
+    )
+    .bind(&since)
+    .fetch_all(&state.pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|(provider_id, request_count, success_count, error_count, total_tokens, avg_latency)| {
+        DimensionStats {
+            _gateway_id: None,
+            _provider_id: Some(provider_id),
+            request_count,
+            success_count,
+            error_count,
+            total_tokens,
+            avg_latency,
+        }
+    })
+    .collect();
+
+    // Get stats by model
+    let by_model = sqlx::query_as::<_, (Option<String>, i64, i64, i64, i64, i64)>(
+        "SELECT
+            model_effective,
+            COUNT(*) as request_count,
+            SUM(CASE WHEN status_code < 400 AND error IS NULL THEN 1 ELSE 0 END) as success_count,
+            SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count,
+            COALESCE(SUM(total_tokens), 0) as total_tokens,
+            COALESCE(AVG(latency_ms), 0) as avg_latency
+         FROM request_logs
+         WHERE created_at >= ?
+         GROUP BY model_effective
+         ORDER BY request_count DESC",
+    )
+    .bind(&since)
+    .fetch_all(&state.pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .filter_map(|(model, request_count, success_count, error_count, total_tokens, avg_latency)| {
+        model.map(|m| ModelDimensionStats {
+            model: m,
+            request_count,
+            success_count,
+            error_count,
+            total_tokens,
+            avg_latency,
+        })
+    })
+    .collect();
+
+    (
+        StatusCode::OK,
+        Json(StatsOverviewResponse {
+            total_requests,
+            successful_requests,
+            error_requests,
+            success_rate,
+            requests_per_minute,
+            total_tokens,
+            by_gateway,
+            by_provider,
+            by_model,
+        }),
+    )
+}
+
+async fn get_stats_trend(
+    State(state): State<AdminApiState>,
+    Query(query): Query<StatsTrendQuery>,
+) -> (StatusCode, Json<StatsTrendResponse>) {
+    let period = query.period.as_deref().unwrap_or("1h");
+    let interval = query.interval.as_deref().unwrap_or("5m");
+
+    let hours = parse_period_to_hours(period);
+    let interval_minutes = parse_interval_to_minutes(interval);
+
+    // Generate time buckets
+    // SQLite doesn't have a generate_series, so we'll query raw data and aggregate in memory
+    // First, get the time range
+    let since = match sqlx::query_scalar::<_, String>(
+        &format!(
+            "SELECT datetime('now', '-{} hours')",
+            hours
+        ),
+    )
+    .fetch_one(&state.pool)
+    .await
+    {
+        Ok(t) => t,
+        Err(_) => {
+            return (
+                StatusCode::OK,
+                Json(StatsTrendResponse {
+                    period: period.to_string(),
+                    interval: interval.to_string(),
+                    data: vec![],
+                }),
+            );
+        }
+    };
+
+    // Query aggregated by time buckets using strftime
+    let interval_seconds = interval_minutes * 60;
+    let bucket_expr = format!(
+        "datetime((strftime('%s', created_at) / {}) * {}, 'unixepoch')",
+        interval_seconds, interval_seconds
+    );
+
+    let rows = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64)>(
+        &format!(
+            "SELECT
+                {} as time_bucket,
+                COUNT(*) as request_count,
+                COALESCE(AVG(latency_ms), 0) as avg_latency,
+                SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count,
+                COALESCE(SUM(input_tokens), 0) as input_tokens,
+                COALESCE(SUM(output_tokens), 0) as output_tokens
+             FROM request_logs
+             WHERE created_at >= ?
+             GROUP BY time_bucket
+             ORDER BY time_bucket ASC",
+            bucket_expr
+        ),
+    )
+    .bind(&since)
+    .fetch_all(&state.pool)
+    .await
+    .unwrap_or_default();
+
+    let data = rows
+        .into_iter()
+        .map(|(timestamp, request_count, avg_latency, error_count, input_tokens, output_tokens)| {
+            StatsTrendPoint {
+                timestamp,
+                request_count,
+                avg_latency,
+                error_count,
+                input_tokens,
+                output_tokens,
+            }
+        })
+        .collect();
+
+    (
+        StatusCode::OK,
+        Json(StatsTrendResponse {
+            period: period.to_string(),
+            interval: interval.to_string(),
+            data,
         }),
     )
 }

@@ -107,11 +107,11 @@ export function App({ initialPage = 'monitor' }: AppProps) {
 
   let pageContent = (
     <MonitorPage
+      api={api}
       providerCount={dashboard.providers.length}
       gatewayCount={dashboard.gateways.length}
       runningGatewayCount={runningGateways}
       errorGatewayCount={errorGateways}
-      logCount={dashboard.logs.length}
       error={loadError}
     />
   );
