@@ -1,7 +1,19 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 
 use crate::protocol::stream::StreamEvent;
+
+static TOOL_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Sanitizes a string to contain only alphanumeric, underscore, and hyphen characters.
+/// Anthropic requires tool_use IDs to match pattern `^[a-zA-Z0-9_-]+$`.
+fn sanitize_tool_id(id: &str) -> String {
+    id.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect()
+}
 
 pub struct OpenAiSseDecoder {
     pending: Vec<u8>,
@@ -126,16 +138,29 @@ impl OpenAiSseDecoder {
                     .unwrap_or(0) as usize;
 
                 // Check if this is a start chunk (has id and function.name)
-                if let (Some(id), Some(name)) = (
+                if let (Some(raw_id), Some(name)) = (
                     tool_call.get("id").and_then(Value::as_str),
                     tool_call
                         .get("function")
                         .and_then(|f| f.get("name"))
                         .and_then(Value::as_str),
                 ) {
+                    // Sanitize ID to match Anthropic's pattern requirement
+                    let id = if raw_id.is_empty() {
+                        let count = TOOL_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+                        format!("toolu_{count}")
+                    } else {
+                        let sanitized = sanitize_tool_id(raw_id);
+                        if sanitized.is_empty() {
+                            let count = TOOL_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+                            format!("toolu_{count}")
+                        } else {
+                            sanitized
+                        }
+                    };
                     events.push(StreamEvent::ToolCallStart {
                         index,
-                        id: id.to_string(),
+                        id,
                         name: name.to_string(),
                     });
                 }
@@ -287,5 +312,43 @@ data: [DONE]
                 StreamEvent::MessageStop
             ]
         );
+    }
+
+    #[test]
+    fn sanitizes_tool_call_ids_with_special_characters() {
+        let body = r#"data: {"id":"chatcmpl-789","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call@special/chars!","type":"function","function":{"name":"test","arguments":""}}]},"finish_reason":null}]}
+
+data: [DONE]
+
+"#;
+
+        let events = decode_openai_sse_events(body).expect("decode stream events");
+        // MessageStart is events[0], ToolCallStart is events[1]
+        // ID should be sanitized: "call@special/chars!" -> "callspecialchars"
+        match &events[1] {
+            StreamEvent::ToolCallStart { id, .. } => {
+                assert_eq!(id, "callspecialchars");
+            }
+            _ => panic!("Expected ToolCallStart at index 1"),
+        }
+    }
+
+    #[test]
+    fn generates_tool_call_id_when_empty() {
+        let body = r#"data: {"id":"chatcmpl-999","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"","type":"function","function":{"name":"empty_id_test","arguments":""}}]},"finish_reason":null}]}
+
+data: [DONE]
+
+"#;
+
+        let events = decode_openai_sse_events(body).expect("decode stream events");
+        // MessageStart is events[0], ToolCallStart is events[1]
+        // Empty ID should be replaced with generated ID
+        match &events[1] {
+            StreamEvent::ToolCallStart { id, .. } => {
+                assert!(id.starts_with("toolu_"));
+            }
+            _ => panic!("Expected ToolCallStart at index 1"),
+        }
     }
 }

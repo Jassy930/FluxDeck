@@ -6,7 +6,14 @@ pub struct AnthropicSseEncoder {
     message_id: String,
     model: Option<String>,
     sent_message_start: bool,
+    /// The index of the currently open content block, if any.
+    /// For text blocks, this is always 0.
+    /// For tool_use blocks, this is the tool call index (>= 1).
     current_content_block_index: Option<usize>,
+    /// Tracks whether a text block has been started.
+    /// This is needed because text always uses index 0, but we may
+    /// interleave text and tool_use blocks (text -> tool -> text).
+    text_block_started: bool,
 }
 
 impl AnthropicSseEncoder {
@@ -16,6 +23,7 @@ impl AnthropicSseEncoder {
             model: None,
             sent_message_start: false,
             current_content_block_index: None,
+            text_block_started: false,
         }
     }
 
@@ -38,7 +46,22 @@ impl AnthropicSseEncoder {
                     self.push_message_start(&mut body);
                     self.sent_message_start = true;
                 }
-                // Start text block at index 0 if not already open for text
+                // Close any open tool_use block before adding text delta
+                if let Some(idx) = self.current_content_block_index {
+                    if idx != 0 {
+                        // Close the tool_use block
+                        push_event(
+                            &mut body,
+                            "content_block_stop",
+                            json!({
+                                "type": "content_block_stop",
+                                "index": idx
+                            }),
+                        );
+                        self.current_content_block_index = None;
+                    }
+                }
+                // Start text block at index 0 if not already open
                 if self.current_content_block_index.is_none() {
                     push_event(
                         &mut body,
@@ -53,24 +76,7 @@ impl AnthropicSseEncoder {
                         }),
                     );
                     self.current_content_block_index = Some(0);
-                }
-                // Close any open tool_use block before adding text delta
-                if let Some(idx) = self.current_content_block_index {
-                    // Only close if it's a tool_use block (index != 0 for text)
-                    if idx != 0 {
-                        push_event(
-                            &mut body,
-                            "content_block_stop",
-                            json!({
-                                "type": "content_block_stop",
-                                "index": idx
-                            }),
-                        );
-                    }
-                    // Reset to None only if we closed a tool_use block
-                    if idx != 0 {
-                        self.current_content_block_index = None;
-                    }
+                    self.text_block_started = true;
                 }
 
                 push_event(
@@ -137,11 +143,53 @@ impl AnthropicSseEncoder {
                     }),
                 );
             }
+            StreamEvent::MessageDelta {
+                stop_reason,
+                stop_sequence,
+                usage,
+            } => {
+                if !self.sent_message_start {
+                    self.push_message_start(&mut body);
+                    self.sent_message_start = true;
+                }
+                // Close any open content block
+                if let Some(idx) = self.current_content_block_index {
+                    push_event(
+                        &mut body,
+                        "content_block_stop",
+                        json!({
+                            "type": "content_block_stop",
+                            "index": idx
+                        }),
+                    );
+                    self.current_content_block_index = None;
+                }
+                // Send message_delta event with stop_reason, stop_sequence, usage
+                let (input_tokens, output_tokens) = usage.as_ref()
+                    .map(|u| (u.input_tokens, u.output_tokens))
+                    .unwrap_or((0, 0));
+                push_event(
+                    &mut body,
+                    "message_delta",
+                    json!({
+                        "type": "message_delta",
+                        "delta": {
+                            "stop_reason": stop_reason,
+                            "stop_sequence": stop_sequence,
+                            "usage": {
+                                "input_tokens": input_tokens,
+                                "output_tokens": output_tokens
+                            }
+                        }
+                    }),
+                );
+            }
             StreamEvent::MessageStop => {
                 if !self.sent_message_start {
                     self.push_message_start(&mut body);
                     self.sent_message_start = true;
                 }
+                // Close any open content block
                 if let Some(idx) = self.current_content_block_index {
                     push_event(
                         &mut body,

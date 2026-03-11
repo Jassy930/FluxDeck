@@ -1,7 +1,26 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use serde_json::{json, Value};
 
 use crate::protocol::error::{DecodeErrorKind, FluxError};
 use crate::protocol::ir::IrRequest;
+
+static TOOL_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Sanitizes a string to contain only alphanumeric, underscore, and hyphen characters.
+/// Anthropic requires tool_use IDs to match pattern `^[a-zA-Z0-9_-]+$`.
+fn sanitize_tool_id_for_request(id: &str) -> String {
+    let sanitized: String = id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
+    if sanitized.is_empty() {
+        let count = TOOL_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("toolu_{count}")
+    } else {
+        sanitized
+    }
+}
 
 /// Result of processing an Anthropic message content for OpenAI format
 struct ProcessedMessage {
@@ -171,8 +190,11 @@ fn process_anthropic_message(role: &str, content: &Value) -> ProcessedMessage {
 /// Convert Anthropic tool_use block to OpenAI tool_call format
 fn convert_tool_use_to_openai(block: &Value) -> Option<Value> {
     let obj = block.as_object()?;
-    let id = obj.get("id").and_then(Value::as_str)?;
+    let raw_id = obj.get("id").and_then(Value::as_str).unwrap_or("");
     let name = obj.get("name").and_then(Value::as_str)?;
+
+    // Sanitize ID to match Anthropic's pattern requirement
+    let id = sanitize_tool_id_for_request(raw_id);
 
     // Arguments should be a JSON string in OpenAI format
     let input = obj.get("input").cloned().unwrap_or(json!({}));
