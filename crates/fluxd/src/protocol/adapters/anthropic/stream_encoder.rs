@@ -38,19 +38,7 @@ impl AnthropicSseEncoder {
                     self.push_message_start(&mut body);
                     self.sent_message_start = true;
                 }
-                // Close any open tool_use block before starting text block
-                if let Some(idx) = self.current_content_block_index {
-                    push_event(
-                        &mut body,
-                        "content_block_stop",
-                        json!({
-                            "type": "content_block_stop",
-                            "index": idx
-                        }),
-                    );
-                    self.current_content_block_index = None;
-                }
-                // Start text block at index 0 if not already open
+                // Start text block at index 0 if not already open for text
                 if self.current_content_block_index.is_none() {
                     push_event(
                         &mut body,
@@ -65,6 +53,24 @@ impl AnthropicSseEncoder {
                         }),
                     );
                     self.current_content_block_index = Some(0);
+                }
+                // Close any open tool_use block before adding text delta
+                if let Some(idx) = self.current_content_block_index {
+                    // Only close if it's a tool_use block (index != 0 for text)
+                    if idx != 0 {
+                        push_event(
+                            &mut body,
+                            "content_block_stop",
+                            json!({
+                                "type": "content_block_stop",
+                                "index": idx
+                            }),
+                        );
+                    }
+                    // Reset to None only if we closed a tool_use block
+                    if idx != 0 {
+                        self.current_content_block_index = None;
+                    }
                 }
 
                 push_event(
