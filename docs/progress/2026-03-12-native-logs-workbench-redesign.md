@@ -137,3 +137,37 @@ xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -sch
 - 新增文件：
   - `crates/fluxd/migrations/006_request_logs_cached_tokens.sql`
   - `docs/progress/2026-03-12-native-logs-workbench-redesign.md`
+
+## 阶段 5：合入后原生端兼容修复
+
+- 时间：2026-03-12 17:45:00 CST
+- 范围：`apps/desktop-macos-native/FluxDeckNative/Networking/AdminApiClient.swift`
+
+### 现象
+
+- 日志工作台分支合入 `main` 后，原生端测试在默认 `DerivedData` 上出现两类异常：
+  - 先是链接阶段找不到旧签名 `AdminLog.init(requestID:gatewayID:providerID:model:statusCode:latencyMs:error:createdAt:)`
+  - 后续在脏增量产物上出现 `outlined destroy of [AdminLog]` 崩溃，看起来像应用启动即退，但实际崩溃进程为 `FluxDeckNativeTests.xctest`
+
+### 处理
+
+- 在 `AdminLog` 上补回旧签名初始化器，内部统一转发到新的全量初始化器，避免旧测试夹具和旧调用点失配。
+- 使用全新 `DerivedData` 路径 `/tmp/fluxdeck-native-derived-mainverify` 重新验证，确认崩溃来自 Xcode 增量构建缓存污染，而不是当前源码的确定性运行时问题。
+
+### 验证
+
+```bash
+xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -derivedDataPath /tmp/fluxdeck-native-derived-mainverify -destination 'platform=macOS,arch=arm64' -quiet
+cargo test -q
+./scripts/e2e/smoke.sh
+```
+
+- 结果：
+  - 原生端测试通过
+  - `cargo test -q` 通过
+  - `./scripts/e2e/smoke.sh` 输出 `smoke ok`
+
+### 当前 git 状态
+
+- 已修改：`apps/desktop-macos-native/FluxDeckNative/Networking/AdminApiClient.swift`
+- 已更新：`docs/progress/2026-03-12-native-logs-workbench-redesign.md`

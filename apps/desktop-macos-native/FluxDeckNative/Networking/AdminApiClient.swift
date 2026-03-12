@@ -538,6 +538,41 @@ struct AdminLog: Decodable, Identifiable {
         self.createdAt = createdAt
     }
 
+    init(
+        requestID: String,
+        gatewayID: String,
+        providerID: String,
+        model: String?,
+        statusCode: Int,
+        latencyMs: Int,
+        error: String?,
+        createdAt: String
+    ) {
+        self.init(
+            requestID: requestID,
+            gatewayID: gatewayID,
+            providerID: providerID,
+            model: model,
+            inboundProtocol: nil,
+            upstreamProtocol: nil,
+            modelRequested: nil,
+            modelEffective: nil,
+            statusCode: statusCode,
+            latencyMs: latencyMs,
+            stream: false,
+            firstByteMs: nil,
+            inputTokens: nil,
+            outputTokens: nil,
+            cachedTokens: nil,
+            totalTokens: nil,
+            usageJSON: nil,
+            errorStage: nil,
+            errorType: nil,
+            error: error,
+            createdAt: createdAt
+        )
+    }
+
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         requestID = try container.decode(String.self, forKey: .requestID)
