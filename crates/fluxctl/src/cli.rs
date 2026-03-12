@@ -44,6 +44,11 @@ pub enum ProviderCmd {
         #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
         enabled: bool,
     },
+    Delete {
+        id: String,
+        #[arg(short = 'y', long = "yes", default_value_t = false)]
+        yes: bool,
+    },
     List,
 }
 
@@ -95,6 +100,11 @@ pub enum GatewayCmd {
         enabled: bool,
         #[arg(long = "auto-start", action = clap::ArgAction::Set, default_value_t = false)]
         auto_start: bool,
+    },
+    Delete {
+        id: String,
+        #[arg(short = 'y', long = "yes", default_value_t = false)]
+        yes: bool,
     },
     List,
     Start {

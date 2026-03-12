@@ -6,6 +6,13 @@ use crate::domain::provider::{
 };
 use crate::repo::provider_repo::ProviderRepo;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeleteProviderResult {
+    Deleted,
+    NotFound,
+    ReferencedByGateways(Vec<String>),
+}
+
 #[derive(Clone)]
 pub struct ProviderService {
     repo: ProviderRepo,
@@ -38,5 +45,25 @@ impl ProviderService {
     ) -> Result<Option<Provider>> {
         validate_provider_kind(&input.kind)?;
         self.repo.update(provider_id, input).await
+    }
+
+    pub async fn delete_provider(&self, provider_id: &str) -> Result<DeleteProviderResult> {
+        let Some(_) = self.repo.get_by_id(provider_id).await? else {
+            return Ok(DeleteProviderResult::NotFound);
+        };
+
+        let referenced_by_gateway_ids = self.repo.list_gateway_ids_referencing(provider_id).await?;
+        if !referenced_by_gateway_ids.is_empty() {
+            return Ok(DeleteProviderResult::ReferencedByGateways(
+                referenced_by_gateway_ids,
+            ));
+        }
+
+        let deleted = self.repo.delete(provider_id).await?;
+        if deleted {
+            Ok(DeleteProviderResult::Deleted)
+        } else {
+            Ok(DeleteProviderResult::NotFound)
+        }
     }
 }

@@ -9,6 +9,7 @@ struct GatewayListView: View {
     let onCreate: () -> Void
     let onConfigure: (AdminGateway) -> Void
     let onToggleRuntime: (AdminGateway) -> Void
+    let onDelete: (AdminGateway) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -103,6 +104,14 @@ struct GatewayListView: View {
                                         .buttonStyle(.plain)
                                         .focusable(false)
                                         .foregroundStyle(DesignTokens.textSecondary)
+                                        .disabled(isSubmitting)
+
+                                        Button("Delete") {
+                                            onDelete(gateway)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .focusable(false)
+                                        .foregroundStyle(DesignTokens.statusColors.error.fill)
                                         .disabled(isSubmitting)
                                     }
                                 }

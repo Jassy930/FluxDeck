@@ -39,6 +39,28 @@ fn parses_provider_create_command() {
 }
 
 #[test]
+fn parses_provider_delete_command_with_yes_flag() {
+    let cli = Cli::parse_from([
+        "fluxctl",
+        "provider",
+        "delete",
+        "provider_1",
+        "--yes",
+    ]);
+
+    match cli.command {
+        Commands::Provider { command } => match command {
+            ProviderCmd::Delete { id, yes } => {
+                assert_eq!(id, "provider_1");
+                assert!(yes);
+            }
+            _ => panic!("expected provider delete command"),
+        },
+        _ => panic!("expected provider command"),
+    }
+}
+
+#[test]
 fn parses_gateway_create_with_protocol_graph_fields() {
     let cli = Cli::parse_from([
         "fluxctl",
@@ -134,6 +156,27 @@ fn parses_gateway_update_command() {
                 assert!(auto_start);
             }
             _ => panic!("expected gateway update command"),
+        },
+        _ => panic!("expected gateway command"),
+    }
+}
+
+#[test]
+fn parses_gateway_delete_command_without_yes_flag() {
+    let cli = Cli::parse_from([
+        "fluxctl",
+        "gateway",
+        "delete",
+        "gateway_1",
+    ]);
+
+    match cli.command {
+        Commands::Gateway { command } => match command {
+            GatewayCmd::Delete { id, yes } => {
+                assert_eq!(id, "gateway_1");
+                assert!(!yes);
+            }
+            _ => panic!("expected gateway delete command"),
         },
         _ => panic!("expected gateway command"),
     }

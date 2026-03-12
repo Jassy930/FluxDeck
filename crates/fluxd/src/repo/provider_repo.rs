@@ -178,6 +178,43 @@ impl ProviderRepo {
         Ok(providers)
     }
 
+    pub async fn list_gateway_ids_referencing(&self, provider_id: &str) -> Result<Vec<String>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id
+            FROM gateways
+            WHERE default_provider_id = ?1
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(provider_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| row.get::<String, _>("id"))
+            .collect())
+    }
+
+    pub async fn delete(&self, provider_id: &str) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query("DELETE FROM provider_models WHERE provider_id = ?1")
+            .bind(provider_id)
+            .execute(&mut *tx)
+            .await?;
+
+        let result = sqlx::query("DELETE FROM providers WHERE id = ?1")
+            .bind(provider_id)
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     async fn list_models(&self, provider_id: &str) -> Result<Vec<String>> {
         let rows = sqlx::query(
             r#"

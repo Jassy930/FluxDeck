@@ -25,6 +25,8 @@ struct ContentView: View {
     @State private var editingProvider: AdminProvider?
     @State private var isGatewaySheetPresented = false
     @State private var editingGateway: AdminGateway?
+    @State private var providerPendingDelete: AdminProvider?
+    @State private var gatewayPendingDelete: AdminGateway?
     @State private var selectedLogGateway = Self.logFilterAll
     @State private var selectedLogProvider = Self.logFilterAll
     @State private var selectedLogStatus = Self.logFilterAll
@@ -154,6 +156,64 @@ struct ContentView: View {
                 }
             )
         }
+        .alert(
+            "Delete Provider?",
+            isPresented: Binding(
+                get: { providerPendingDelete != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        providerPendingDelete = nil
+                    }
+                }
+            ),
+            actions: {
+                Button("Delete", role: .destructive) {
+                    guard let provider = providerPendingDelete else {
+                        return
+                    }
+                    providerPendingDelete = nil
+                    Task {
+                        await deleteProvider(provider)
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    providerPendingDelete = nil
+                }
+            },
+            message: {
+                let providerID = providerPendingDelete?.id ?? "provider"
+                Text("Delete `\(providerID)` permanently. If any Gateway still references this Provider, the operation will fail.")
+            }
+        )
+        .alert(
+            "Delete Gateway?",
+            isPresented: Binding(
+                get: { gatewayPendingDelete != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        gatewayPendingDelete = nil
+                    }
+                }
+            ),
+            actions: {
+                Button("Delete", role: .destructive) {
+                    guard let gateway = gatewayPendingDelete else {
+                        return
+                    }
+                    gatewayPendingDelete = nil
+                    Task {
+                        await deleteGateway(gateway)
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    gatewayPendingDelete = nil
+                }
+            },
+            message: {
+                let gatewayID = gatewayPendingDelete?.id ?? "gateway"
+                Text("Delete `\(gatewayID)` permanently. This does not require deleting its Provider first. If this Gateway is running, the system will stop it before deletion.")
+            }
+        )
     }
 
     @ViewBuilder
@@ -202,6 +262,9 @@ struct ContentView: View {
                         )
                         await updateProvider(id: provider.id, input: input)
                     }
+                },
+                onDelete: { provider in
+                    providerPendingDelete = provider
                 }
             )
         case .gateways:
@@ -219,6 +282,9 @@ struct ContentView: View {
                     Task {
                         await toggleGatewayRuntime(gateway)
                     }
+                },
+                onDelete: { gateway in
+                    gatewayPendingDelete = gateway
                 }
             )
         case .logs:
@@ -453,6 +519,26 @@ struct ContentView: View {
     }
 
     @MainActor
+    private func deleteProvider(_ provider: AdminProvider) async {
+        isSubmitting = true
+        operationNotice = nil
+
+        do {
+            _ = try await client.deleteProvider(id: provider.id)
+            if editingProvider?.id == provider.id {
+                editingProvider = nil
+            }
+            loadError = nil
+            operationNotice = "Provider 已删除。"
+            await refreshAll()
+        } catch {
+            loadError = error.localizedDescription
+        }
+
+        isSubmitting = false
+    }
+
+    @MainActor
     private func createGateway(_ input: CreateGatewayInput) async {
         isSubmitting = true
         operationNotice = nil
@@ -482,6 +568,26 @@ struct ContentView: View {
             await refreshAll()
         } catch {
             operationNotice = nil
+            loadError = error.localizedDescription
+        }
+
+        isSubmitting = false
+    }
+
+    @MainActor
+    private func deleteGateway(_ gateway: AdminGateway) async {
+        isSubmitting = true
+        operationNotice = nil
+
+        do {
+            let result = try await client.deleteGateway(id: gateway.id)
+            if editingGateway?.id == gateway.id {
+                editingGateway = nil
+            }
+            loadError = nil
+            operationNotice = gatewayDeleteNoticeText(for: result)
+            await refreshAll()
+        } catch {
             loadError = error.localizedDescription
         }
 

@@ -697,6 +697,265 @@ async fn admin_api_rejects_invalid_provider_kind() {
 }
 
 #[tokio::test]
+async fn admin_api_deletes_provider_when_not_referenced() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    create_test_provider(&client, &base, "provider_delete_free").await;
+
+    let delete_resp = client
+        .delete(format!("{base}/admin/providers/provider_delete_free"))
+        .send()
+        .await
+        .expect("delete provider request");
+    assert_eq!(delete_resp.status(), reqwest::StatusCode::OK);
+
+    let deleted: serde_json::Value = delete_resp.json().await.expect("decode deleted provider");
+    assert_eq!(deleted.get("ok"), Some(&json!(true)));
+    assert_eq!(deleted.get("id"), Some(&json!("provider_delete_free")));
+
+    let providers: serde_json::Value = client
+        .get(format!("{base}/admin/providers"))
+        .send()
+        .await
+        .expect("list providers request")
+        .json()
+        .await
+        .expect("decode providers");
+    assert!(
+        providers
+            .as_array()
+            .expect("providers array")
+            .iter()
+            .all(|provider| provider.get("id") != Some(&json!("provider_delete_free")))
+    );
+}
+
+#[tokio::test]
+async fn admin_api_rejects_deleting_provider_when_gateway_still_references_it() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    create_test_provider(&client, &base, "provider_delete_used").await;
+    create_test_gateway(
+        &client,
+        &base,
+        "gateway_delete_used",
+        "Gateway Delete Used",
+        next_free_port(),
+    )
+    .await;
+
+    let delete_resp = client
+        .delete(format!("{base}/admin/providers/provider_delete_used"))
+        .send()
+        .await
+        .expect("delete provider request");
+    assert_eq!(delete_resp.status(), reqwest::StatusCode::CONFLICT);
+
+    let conflict: serde_json::Value = delete_resp.json().await.expect("decode conflict body");
+    assert_eq!(conflict.get("id"), Some(&json!("provider_delete_used")));
+    assert_eq!(
+        conflict.get("error"),
+        Some(&json!("provider is referenced by gateways"))
+    );
+    assert_eq!(
+        conflict.get("referenced_by_gateway_ids"),
+        Some(&json!(["gateway_delete_used"]))
+    );
+}
+
+#[tokio::test]
+async fn admin_api_deletes_gateway_and_stops_running_instance_first() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    create_test_provider(&client, &base, "provider_delete_running").await;
+    create_test_gateway(
+        &client,
+        &base,
+        "gateway_delete_running",
+        "Gateway Delete Running",
+        next_free_port(),
+    )
+    .await;
+
+    let start_resp = client
+        .post(format!("{base}/admin/gateways/gateway_delete_running/start"))
+        .send()
+        .await
+        .expect("start gateway request");
+    assert_eq!(start_resp.status(), reqwest::StatusCode::OK);
+
+    let delete_resp = client
+        .delete(format!("{base}/admin/gateways/gateway_delete_running"))
+        .send()
+        .await
+        .expect("delete gateway request");
+    assert_eq!(delete_resp.status(), reqwest::StatusCode::OK);
+
+    let deleted: serde_json::Value = delete_resp.json().await.expect("decode deleted gateway");
+    assert_eq!(deleted.get("ok"), Some(&json!(true)));
+    assert_eq!(deleted.get("id"), Some(&json!("gateway_delete_running")));
+    assert_eq!(deleted.get("stop_performed"), Some(&json!(true)));
+    assert_eq!(
+        deleted.get("runtime_status_before_delete"),
+        Some(&json!("running"))
+    );
+    assert!(deleted
+        .get("user_notice")
+        .and_then(serde_json::Value::as_str)
+        .is_some());
+
+    let gateways: serde_json::Value = client
+        .get(format!("{base}/admin/gateways"))
+        .send()
+        .await
+        .expect("list gateways request")
+        .json()
+        .await
+        .expect("decode gateways");
+    assert!(
+        gateways
+            .as_array()
+            .expect("gateways array")
+            .iter()
+            .all(|gateway| gateway.get("id") != Some(&json!("gateway_delete_running")))
+    );
+}
+
+#[tokio::test]
+async fn admin_api_deletes_gateway_even_when_request_logs_exist() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool.clone()));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    create_test_provider(&client, &base, "provider_delete_with_logs").await;
+    create_test_gateway(
+        &client,
+        &base,
+        "gateway_delete_with_logs",
+        "Gateway Delete With Logs",
+        next_free_port(),
+    )
+    .await;
+
+    insert_request_log(
+        &pool,
+        "req_delete_gateway_with_logs",
+        "gateway_delete_with_logs",
+        "provider_delete_with_logs",
+        200,
+        None,
+        "2026-03-12T13:30:00Z",
+    )
+    .await;
+
+    let delete_resp = client
+        .delete(format!("{base}/admin/gateways/gateway_delete_with_logs"))
+        .send()
+        .await
+        .expect("delete gateway request");
+    assert_eq!(delete_resp.status(), reqwest::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn admin_api_deletes_provider_even_when_only_request_logs_reference_it() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool.clone()));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    create_test_provider(&client, &base, "provider_log_only").await;
+    create_test_provider(&client, &base, "provider_log_owner").await;
+    create_test_gateway(
+        &client,
+        &base,
+        "gateway_log_owner",
+        "Gateway Log Owner",
+        next_free_port(),
+    )
+    .await;
+
+    insert_request_log(
+        &pool,
+        "req_delete_provider_with_logs",
+        "gateway_log_owner",
+        "provider_log_only",
+        200,
+        None,
+        "2026-03-12T13:31:00Z",
+    )
+    .await;
+
+    let delete_resp = client
+        .delete(format!("{base}/admin/providers/provider_log_only"))
+        .send()
+        .await
+        .expect("delete provider request");
+    assert_eq!(delete_resp.status(), reqwest::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn admin_api_returns_not_found_for_missing_delete_targets() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    let delete_provider_resp = client
+        .delete(format!("{base}/admin/providers/provider_missing_delete"))
+        .send()
+        .await
+        .expect("delete missing provider request");
+    assert_eq!(delete_provider_resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    let delete_gateway_resp = client
+        .delete(format!("{base}/admin/gateways/gateway_missing_delete"))
+        .send()
+        .await
+        .expect("delete missing gateway request");
+    assert_eq!(delete_gateway_resp.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn admin_api_defaults_gateway_auto_start_to_false_when_omitted() {
     let pool = sqlx::SqlitePool::connect("sqlite::memory:")
         .await

@@ -181,4 +181,13 @@ impl GatewayRepo {
 
         Ok(gateways)
     }
+
+    pub async fn delete(&self, gateway_id: &str) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM gateways WHERE id = ?1")
+            .bind(gateway_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
 }

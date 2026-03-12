@@ -61,6 +61,28 @@
 - 非法 `kind` 或其他校验失败：`400`，返回 `{ "error": string }`
 - 不存在：`404`
 
+### `DELETE /admin/providers/{id}`
+
+删除指定 Provider。
+
+响应：
+
+- 成功：`200`，返回：
+  - `ok: boolean`
+  - `id: string`
+- 不存在：`404`
+- 仍被 Gateway 引用：`409`，返回：
+  - `error: "provider is referenced by gateways"`
+  - `id: string`
+  - `referenced_by_gateway_ids: string[]`
+
+说明：
+
+- 当任意 Gateway 的 `default_provider_id` 指向该 Provider 时，删除会被拒绝
+- 删除成功时，会一并删除该 Provider 关联的 `provider_models`
+- 这是单向约束：只有 Provider 删除会受 Gateway 引用关系限制；Gateway 删除本身不依赖 Provider 删除
+- 历史 `request_logs` 不会阻止 Provider 删除；日志中的 `provider_id` 作为历史快照保留
+
 ## 2) Gateway
 
 ### `GET /admin/gateways`
@@ -113,6 +135,21 @@
   - `user_notice: string | null`
 - 不存在：`404`
 
+### `DELETE /admin/gateways/{id}`
+
+删除指定 Gateway。
+
+响应：
+
+- 成功：`200`，返回：
+  - `ok: boolean`
+  - `id: string`
+  - `runtime_status_before_delete: "running" | "stopped" | string`
+  - `stop_performed: boolean`
+  - `user_notice: string | null`
+- 不存在：`404`
+- 停机失败或其他删除失败：`400`
+
 说明：
 
 - `auto_start=true` 表示 `fluxd` 进程启动时会自动尝试拉起该 Gateway
@@ -122,6 +159,10 @@
 - 只有当“更新前实例处于 `running`”且“新旧配置确实发生变化”时，才会自动执行 `stop -> start`
 - 若实例未运行，则只保存配置，不会自动启动
 - 若自动重启失败，配置仍然会保存成功，错误会通过 `last_error` 与 `user_notice` 返回
+- `DELETE /admin/gateways/{id}` 在 Gateway 运行中时会先执行 `stop -> delete`
+- 若删除前自动停机失败，删除会中止，Gateway 配置保持不变
+- Gateway 可独立删除；只要删除前停机成功（或本来就是停止态），就不会因为其关联 Provider 仍存在而被阻止
+- 历史 `request_logs` 不会阻止 Gateway 删除；日志中的 `gateway_id` 作为历史快照保留
 
 `protocol_config_json` 约定（当前已使用字段）：
 

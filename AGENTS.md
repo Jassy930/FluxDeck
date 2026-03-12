@@ -30,13 +30,14 @@
 ## 当前开发优先级
 - 当前阶段暂停 `apps/desktop/`（React + Vite 桌面前端）的新增功能开发与体验优化，除非是为原生桌面端迁移提供必要支持的阻塞性修复。
 - 当前阶段全力专注于原生桌面端的设计、实现、测试与交付；涉及资源分配、任务排序、缺陷修复优先级时，原生桌面端始终高于 Web 技术栈桌面端。
+- 在用户明确恢复 `apps/desktop/` 工作前，默认不修改该目录下的实现代码，也不执行 `cd apps/desktop && bun run test`；相关流程统一视为跳过。
 
 ## 构建、测试与开发命令
 
 ### 全量验证（提交前必跑）
 ```bash
 cargo test -q                                    # Rust 单元/集成测试
-cd apps/desktop && bun run test                  # 前端测试
+# apps/desktop 当前暂停处理，默认跳过 bun run test，直到用户明确恢复该工作流
 ./scripts/e2e/smoke.sh                           # E2E 验证（成功输出 "smoke ok"）
 ```
 

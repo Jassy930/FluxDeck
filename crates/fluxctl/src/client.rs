@@ -35,4 +35,11 @@ impl AdminClient {
         let body = resp.json::<Value>().await?;
         Ok(body)
     }
+
+    pub async fn delete_json(&self, path: &str) -> Result<Value> {
+        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
+        let resp = self.http.delete(url).send().await?;
+        let body = resp.json::<Value>().await?;
+        Ok(body)
+    }
 }

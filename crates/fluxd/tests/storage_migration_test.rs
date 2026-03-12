@@ -135,3 +135,21 @@ async fn migration_adds_request_log_forwarding_columns() {
         assert_eq!(found.as_deref(), Some(column));
     }
 }
+
+#[tokio::test]
+async fn migration_removes_request_log_resource_foreign_keys() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+
+    run_migrations(&pool).await.expect("run migrations");
+
+    let foreign_key_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM pragma_foreign_key_list('request_logs')",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("query request_logs foreign keys");
+
+    assert_eq!(foreign_key_count, 0);
+}

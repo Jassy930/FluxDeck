@@ -28,6 +28,19 @@ Provider `base_url` 说明：
   - `https://host/api/anthropic/v1`
 - 如果你更新了 Provider 配置，而对应 Gateway 已在运行，需要手动 `stop -> start` 才会加载新地址
 
+删除 Provider：
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider delete provider_main
+```
+
+说明：
+
+- 默认会要求确认
+- 可通过 `-y` / `--yes` 跳过确认
+- 若仍被任一 Gateway 引用，服务端会拒绝删除，并返回引用它的 Gateway ID 列表
+- 这是 Provider 侧的约束，不影响 Gateway 独立删除
+
 ## 创建并启动网关
 
 ```bash
@@ -87,6 +100,20 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway update gateway
 cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway start gateway_main
 cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway stop gateway_main
 ```
+
+删除 Gateway：
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway delete gateway_main
+```
+
+说明：
+
+- 默认会要求确认
+- 可通过 `-y` / `--yes` 跳过确认
+- 若 Gateway 当前正在运行，`fluxd` 会先自动执行 `stop -> delete`
+- Gateway 删除不要求先删除关联 Provider；只要停机成功即可删除
+- 删除成功后，`fluxctl` 会输出完整 JSON；若服务端提供 `user_notice`，还会额外输出 `Notice: ...`
 
 ## 调用网关
 

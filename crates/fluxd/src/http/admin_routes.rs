@@ -14,6 +14,7 @@ use crate::domain::gateway::{CreateGatewayInput, Gateway, UpdateGatewayInput};
 use crate::domain::provider::{CreateProviderInput, Provider, UpdateProviderInput};
 use crate::http::dto::BasicOk;
 use crate::repo::gateway_repo::GatewayRepo;
+use crate::service::provider_service::DeleteProviderResult;
 use crate::runtime::gateway_manager::GatewayManager;
 use crate::service::provider_service::ProviderService;
 
@@ -43,9 +44,9 @@ impl AdminApiState {
 pub fn build_admin_router(state: AdminApiState) -> Router {
     Router::new()
         .route("/admin/providers", post(create_provider).get(list_providers))
-        .route("/admin/providers/{id}", put(update_provider))
+        .route("/admin/providers/{id}", put(update_provider).delete(delete_provider))
         .route("/admin/gateways", post(create_gateway).get(list_gateways))
-        .route("/admin/gateways/{id}", put(update_gateway))
+        .route("/admin/gateways/{id}", put(update_gateway).delete(delete_gateway))
         .route("/admin/gateways/{id}/start", post(start_gateway))
         .route("/admin/gateways/{id}/stop", post(stop_gateway))
         .route("/admin/logs", get(list_logs))
@@ -88,6 +89,42 @@ async fn update_provider(
             Json(json!({
                 "error": "provider not found",
                 "id": provider_id
+            })),
+        ),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": err.to_string()
+            })),
+        ),
+    }
+}
+
+async fn delete_provider(
+    State(state): State<AdminApiState>,
+    Path(provider_id): Path<String>,
+) -> (StatusCode, Json<Value>) {
+    match state.provider_service.delete_provider(&provider_id).await {
+        Ok(DeleteProviderResult::Deleted) => (
+            StatusCode::OK,
+            Json(json!({
+                "ok": true,
+                "id": provider_id
+            })),
+        ),
+        Ok(DeleteProviderResult::NotFound) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": "provider not found",
+                "id": provider_id
+            })),
+        ),
+        Ok(DeleteProviderResult::ReferencedByGateways(referenced_by_gateway_ids)) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "provider is referenced by gateways",
+                "id": provider_id,
+                "referenced_by_gateway_ids": referenced_by_gateway_ids
             })),
         ),
         Err(err) => (
@@ -195,6 +232,80 @@ async fn update_gateway(
             )
         }
         Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": "gateway not found",
+                "id": gateway_id
+            })),
+        ),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": err.to_string()
+            })),
+        ),
+    }
+}
+
+async fn delete_gateway(
+    State(state): State<AdminApiState>,
+    Path(gateway_id): Path<String>,
+) -> (StatusCode, Json<Value>) {
+    let existing_gateway = match state.gateway_repo.get_by_id(&gateway_id).await {
+        Ok(Some(gateway)) => gateway,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "gateway not found",
+                    "id": gateway_id
+                })),
+            )
+        }
+        Err(err) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": err.to_string()
+                })),
+            )
+        }
+    };
+
+    let runtime_status_before_delete = state.gateway_manager.status(&gateway_id).await;
+    let stop_performed =
+        runtime_status_before_delete == crate::runtime::gateway_manager::GatewayRuntimeStatus::Running;
+    if stop_performed {
+        if let Err(err) = state.gateway_manager.stop_gateway(&gateway_id).await {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": format!("failed to stop running gateway before delete: {err}"),
+                    "id": gateway_id
+                })),
+            );
+        }
+    }
+
+    match state.gateway_repo.delete(&existing_gateway.id).await {
+        Ok(true) => {
+            let user_notice = if stop_performed {
+                "Gateway 已删除。运行中的实例已先停止。"
+            } else {
+                "Gateway 已删除。"
+            };
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "ok": true,
+                    "id": existing_gateway.id,
+                    "runtime_status_before_delete": runtime_status_before_delete.as_str(),
+                    "stop_performed": stop_performed,
+                    "user_notice": user_notice
+                })),
+            )
+        }
+        Ok(false) => (
             StatusCode::NOT_FOUND,
             Json(json!({
                 "error": "gateway not found",

@@ -414,6 +414,67 @@ final class FluxDeckNativeTests: XCTestCase {
         )
     }
 
+    func testDecodesGatewayDeleteResultPayload() throws {
+        let deleteData = """
+        {
+          "ok": true,
+          "id": "gateway_main",
+          "runtime_status_before_delete": "running",
+          "stop_performed": true,
+          "user_notice": "Gateway 已删除。运行中的实例已先停止。"
+        }
+        """.data(using: .utf8)!
+
+        let result = try JSONDecoder().decode(AdminGatewayDeleteResult.self, from: deleteData)
+
+        XCTAssertEqual(result.ok, true)
+        XCTAssertEqual(result.id, "gateway_main")
+        XCTAssertEqual(result.runtimeStatusBeforeDelete, "running")
+        XCTAssertEqual(result.stopPerformed, true)
+        XCTAssertEqual(result.userNotice, "Gateway 已删除。运行中的实例已先停止。")
+    }
+
+    func testGatewayDeleteNoticeTextPrefersServerNoticeAndFallsBackLocally() {
+        let withNotice = AdminGatewayDeleteResult(
+            ok: true,
+            id: "gateway_main",
+            runtimeStatusBeforeDelete: "running",
+            stopPerformed: true,
+            userNotice: "Gateway 已删除。运行中的实例已先停止。"
+        )
+        XCTAssertEqual(
+            gatewayDeleteNoticeText(for: withNotice),
+            "Gateway 已删除。运行中的实例已先停止。"
+        )
+
+        let stoppedDelete = AdminGatewayDeleteResult(
+            ok: true,
+            id: "gateway_main",
+            runtimeStatusBeforeDelete: "stopped",
+            stopPerformed: false,
+            userNotice: nil
+        )
+        XCTAssertEqual(
+            gatewayDeleteNoticeText(for: stoppedDelete),
+            "Gateway 已删除。"
+        )
+    }
+
+    func testBuildsReadableAdminApiErrorMessageForReferencedProviderConflict() {
+        let errorData = """
+        {
+          "error": "provider is referenced by gateways",
+          "id": "provider_main",
+          "referenced_by_gateway_ids": ["gateway_main", "gateway_backup"]
+        }
+        """.data(using: .utf8)!
+
+        XCTAssertEqual(
+            adminAPIErrorMessage(from: errorData, statusCode: 409),
+            "provider is referenced by gateways: gateway_main, gateway_backup"
+        )
+    }
+
     func testRuntimeCategoryAndOverviewMetrics() {
         let providers = [
             AdminProvider(

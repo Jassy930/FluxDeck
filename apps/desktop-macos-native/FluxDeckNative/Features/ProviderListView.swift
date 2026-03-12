@@ -8,6 +8,7 @@ struct ProviderListView: View {
     let onCreate: () -> Void
     let onConfigure: (AdminProvider) -> Void
     let onToggleEnabled: (AdminProvider) -> Void
+    let onDelete: (AdminProvider) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -96,6 +97,14 @@ struct ProviderListView: View {
                                         .buttonStyle(.plain)
                                         .focusable(false)
                                         .foregroundStyle(DesignTokens.textSecondary)
+                                        .disabled(isSubmitting)
+
+                                        Button("Delete") {
+                                            onDelete(provider)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .focusable(false)
+                                        .foregroundStyle(DesignTokens.statusColors.error.fill)
                                         .disabled(isSubmitting)
                                     }
                                 }

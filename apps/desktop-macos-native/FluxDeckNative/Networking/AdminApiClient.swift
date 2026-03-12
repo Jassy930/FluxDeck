@@ -210,6 +210,11 @@ private struct AdminActionResponse: Decodable {
     let ok: Bool
 }
 
+struct AdminDeleteResponse: Decodable {
+    let ok: Bool
+    let id: String
+}
+
 struct AdminProvider: Decodable, Identifiable {
     let id: String
     let name: String
@@ -323,6 +328,22 @@ struct AdminGatewayUpdateResult: Decodable {
         case lastError = "last_error"
         case restartPerformed = "restart_performed"
         case configChanged = "config_changed"
+        case userNotice = "user_notice"
+    }
+}
+
+struct AdminGatewayDeleteResult: Decodable {
+    let ok: Bool
+    let id: String
+    let runtimeStatusBeforeDelete: String
+    let stopPerformed: Bool
+    let userNotice: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case id
+        case runtimeStatusBeforeDelete = "runtime_status_before_delete"
+        case stopPerformed = "stop_performed"
         case userNotice = "user_notice"
     }
 }
@@ -564,6 +585,11 @@ struct AdminApiClient {
         return try JSONDecoder().decode(AdminProvider.self, from: data)
     }
 
+    func deleteProvider(id: String) async throws -> AdminDeleteResponse {
+        let data = try await delete(path: "/admin/providers/\(id)")
+        return try JSONDecoder().decode(AdminDeleteResponse.self, from: data)
+    }
+
     func createGateway(_ input: CreateGatewayInput) async throws -> AdminGateway {
         let data = try await post(path: "/admin/gateways", body: input)
         return try JSONDecoder().decode(AdminGateway.self, from: data)
@@ -572,6 +598,11 @@ struct AdminApiClient {
     func updateGateway(id: String, input: UpdateGatewayInput) async throws -> AdminGatewayUpdateResult {
         let data = try await put(path: "/admin/gateways/\(id)", body: input)
         return try JSONDecoder().decode(AdminGatewayUpdateResult.self, from: data)
+    }
+
+    func deleteGateway(id: String) async throws -> AdminGatewayDeleteResult {
+        let data = try await delete(path: "/admin/gateways/\(id)")
+        return try JSONDecoder().decode(AdminGatewayDeleteResult.self, from: data)
     }
 
     func startGateway(id: String) async throws {
@@ -627,10 +658,7 @@ struct AdminApiClient {
             throw URLError(.badURL)
         }
         let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
-        return data
+        return try validateResponse(data: data, response: response)
     }
 
     private func post(path: String, body: some Encodable) async throws -> Data {
@@ -641,10 +669,7 @@ struct AdminApiClient {
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
-        return data
+        return try validateResponse(data: data, response: response)
     }
 
     private func put(path: String, body: some Encodable) async throws -> Data {
@@ -655,14 +680,41 @@ struct AdminApiClient {
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        return try validateResponse(data: data, response: response)
+    }
+
+    private func delete(path: String) async throws -> Data {
+        let url = baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+
+        let (data, response) = try await session.data(for: request)
+        return try validateResponse(data: data, response: response)
+    }
+
+    private func validateResponse(data: Data, response: URLResponse) throws -> Data {
+        guard let http = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw AdminAPIError.server(adminAPIErrorMessage(from: data, statusCode: http.statusCode))
         }
         return data
     }
 }
 
 private struct EmptyRequest: Encodable {}
+
+enum AdminAPIError: LocalizedError {
+    case server(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .server(let message):
+            return message
+        }
+    }
+}
 
 func runtimeCategory(for gateway: AdminGateway) -> GatewayRuntimeCategory {
     if gateway.lastError != nil {
@@ -704,6 +756,35 @@ func gatewayUpdateNoticeText(for result: AdminGatewayUpdateResult) -> String {
         return "Gateway 配置已保存，运行中的实例已自动重启。"
     }
     return "Gateway 配置已保存。"
+}
+
+func gatewayDeleteNoticeText(for result: AdminGatewayDeleteResult) -> String {
+    if let userNotice = result.userNotice, !userNotice.isEmpty {
+        return userNotice
+    }
+    if result.stopPerformed {
+        return "Gateway 已删除。运行中的实例已先停止。"
+    }
+    return "Gateway 已删除。"
+}
+
+func adminAPIErrorMessage(from data: Data, statusCode: Int) -> String {
+    if
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let error = object["error"] as? String
+    {
+        if let ids = object["referenced_by_gateway_ids"] as? [String], !ids.isEmpty {
+            return "\(error): \(ids.joined(separator: ", "))"
+        }
+        return error
+    }
+
+    if let plainText = String(data: data, encoding: .utf8),
+       !plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        return plainText
+    }
+
+    return "Request failed with HTTP \(statusCode)"
 }
 
 func filterLogs(
