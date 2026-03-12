@@ -17,12 +17,32 @@ use tokio::net::TcpListener;
 
 #[tokio::test]
 async fn openai_chat_completions_streams_through_gateway() {
-    let upstream = setup_openai_gateway_with_streaming_upstream().await;
+    let (upstream, _) = setup_openai_gateway_with_streaming_upstream().await;
 
     let body = call_openai_stream(upstream.addr).await;
 
     assert!(body.contains("chat.completion.chunk"));
     assert!(body.contains("[DONE]"));
+}
+
+#[tokio::test]
+async fn openai_streaming_persists_usage_after_stream_finishes() {
+    let (upstream, pool) = setup_openai_gateway_with_streaming_upstream().await;
+
+    let body = call_openai_stream(upstream.addr).await;
+
+    assert!(body.contains("[DONE]"));
+
+    let row = sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>)>(
+        "SELECT input_tokens, output_tokens, total_tokens FROM request_logs ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("fetch latest request log");
+
+    assert_eq!(row.0, Some(10));
+    assert_eq!(row.1, Some(2));
+    assert_eq!(row.2, Some(12));
 }
 
 async fn call_openai_stream(addr: SocketAddr) -> String {
@@ -45,7 +65,7 @@ struct SpawnedServer {
     addr: SocketAddr,
 }
 
-async fn setup_openai_gateway_with_streaming_upstream() -> SpawnedServer {
+async fn setup_openai_gateway_with_streaming_upstream() -> (SpawnedServer, sqlx::SqlitePool) {
     let upstream = spawn_upstream_stream_mock().await;
 
     let pool = sqlx::SqlitePool::connect("sqlite::memory:")
@@ -79,8 +99,9 @@ async fn setup_openai_gateway_with_streaming_upstream() -> SpawnedServer {
     .await
     .expect("insert gateway");
 
-    let app = build_openai_router(OpenAiRouteState::new(pool, "gw_openai"));
-    spawn_server(app).await
+    let app = build_openai_router(OpenAiRouteState::new(pool.clone(), "gw_openai"));
+    let gateway = spawn_server(app).await;
+    (gateway, pool)
 }
 
 async fn spawn_upstream_stream_mock() -> SpawnedServer {
@@ -103,6 +124,7 @@ async fn spawn_server(app: Router) -> SpawnedServer {
 
 async fn upstream_stream_chat_completions(Json(payload): Json<Value>) -> impl IntoResponse {
     assert_eq!(payload["stream"], true);
+    assert_eq!(payload["stream_options"]["include_usage"], true);
 
     let chunks = vec![
         Ok::<Bytes, std::convert::Infallible>(Bytes::from(
@@ -110,6 +132,9 @@ async fn upstream_stream_chat_completions(Json(payload): Json<Value>) -> impl In
         )),
         Ok(Bytes::from(
             "data: {\"id\":\"chatcmpl_stream_001\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"g\"},\"finish_reason\":\"stop\"}]}\n\n",
+        )),
+        Ok(Bytes::from(
+            "data: {\"id\":\"chatcmpl_stream_001\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o-mini\",\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2,\"total_tokens\":12}}\n\n",
         )),
         Ok(Bytes::from("data: [DONE]\n\n")),
     ];

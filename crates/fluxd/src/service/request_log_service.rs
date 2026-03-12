@@ -100,4 +100,26 @@ impl RequestLogService {
         tx.commit().await?;
         Ok(())
     }
+
+    pub async fn update_usage(&self, request_id: &str, usage: &UsageSnapshot) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE request_logs
+            SET input_tokens = ?2,
+                output_tokens = ?3,
+                total_tokens = ?4,
+                usage_json = ?5
+            WHERE request_id = ?1
+            "#,
+        )
+        .bind(request_id)
+        .bind(usage.input_tokens)
+        .bind(usage.output_tokens)
+        .bind(usage.total_tokens)
+        .bind(usage.usage_json.as_ref().map(Value::to_string))
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
 }

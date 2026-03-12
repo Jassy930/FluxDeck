@@ -65,6 +65,41 @@ async fn maps_openai_sse_to_anthropic_sse_events() {
 }
 
 #[tokio::test]
+async fn persists_usage_for_anthropic_to_openai_streaming_requests() {
+    let upstream = spawn_upstream_stream_mock().await;
+    let (gateway, pool) =
+        setup_gateway_with_provider_base_url_and_pool(format!("http://{}/v1", upstream.addr)).await;
+
+    let body = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages", gateway.addr))
+        .json(&json!({
+            "model": "claude-3-7-sonnet",
+            "max_tokens": 128,
+            "stream": true,
+            "messages": [{"role": "user", "content": "hello"}]
+        }))
+        .send()
+        .await
+        .expect("call gateway")
+        .text()
+        .await
+        .expect("read sse body");
+
+    assert!(body.contains("event: message_stop"));
+
+    let row = sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>)>(
+        "SELECT input_tokens, output_tokens, total_tokens FROM request_logs ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("fetch request log");
+
+    assert_eq!(row.0, Some(10));
+    assert_eq!(row.1, Some(2));
+    assert_eq!(row.2, Some(12));
+}
+
+#[tokio::test]
 async fn streams_first_anthropic_event_before_upstream_completes() {
     let upstream = spawn_upstream_incremental_stream_mock().await;
     let gateway =
@@ -172,6 +207,14 @@ async fn spawn_server(app: Router) -> SpawnedServer {
 }
 
 async fn setup_gateway_with_provider_base_url(base_url: String) -> SpawnedServer {
+    setup_gateway_with_provider_base_url_and_pool(base_url)
+        .await
+        .0
+}
+
+async fn setup_gateway_with_provider_base_url_and_pool(
+    base_url: String,
+) -> (SpawnedServer, sqlx::SqlitePool) {
     let pool = sqlx::SqlitePool::connect("sqlite::memory:")
         .await
         .expect("connect sqlite memory db");
@@ -204,12 +247,14 @@ async fn setup_gateway_with_provider_base_url(base_url: String) -> SpawnedServer
     .await
     .expect("insert gateway");
 
-    let app = build_anthropic_router(AnthropicRouteState::new(pool, "gw_anthropic"));
-    spawn_server(app).await
+    let app = build_anthropic_router(AnthropicRouteState::new(pool.clone(), "gw_anthropic"));
+    let gateway = spawn_server(app).await;
+    (gateway, pool)
 }
 
 async fn upstream_stream_chat_completions(Json(payload): Json<Value>) -> impl IntoResponse {
     assert_eq!(payload["stream"], true);
+    assert_eq!(payload["stream_options"]["include_usage"], true);
     assert_eq!(payload["messages"][0]["role"], "user");
     assert_eq!(payload["messages"][0]["content"], "hello");
 
@@ -239,7 +284,19 @@ async fn upstream_stream_chat_completions(Json(payload): Json<Value>) -> impl In
         ]
     });
 
-    let body = format!("data: {chunk1}\n\ndata: {chunk2}\n\ndata: [DONE]\n\n");
+    let chunk3 = json!({
+        "id": "chatcmpl_stream_001",
+        "object": "chat.completion.chunk",
+        "model": payload["model"],
+        "choices": [],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 2,
+            "total_tokens": 12
+        }
+    });
+
+    let body = format!("data: {chunk1}\n\ndata: {chunk2}\n\ndata: {chunk3}\n\ndata: [DONE]\n\n");
 
     (
         [(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")],
@@ -251,6 +308,7 @@ async fn upstream_incremental_stream_chat_completions(
     Json(payload): Json<Value>,
 ) -> impl IntoResponse {
     assert_eq!(payload["stream"], true);
+    assert_eq!(payload["stream_options"]["include_usage"], true);
     assert_eq!(payload["messages"][0]["role"], "user");
     assert_eq!(payload["messages"][0]["content"], "hello");
 

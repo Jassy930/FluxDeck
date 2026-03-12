@@ -20,6 +20,7 @@ use crate::forwarding::anthropic_inbound::{
     extract_openai_usage as extract_anthropic_openai_usage,
     usage_from_input_tokens,
 };
+use crate::forwarding::types::UsageSnapshot;
 use crate::protocol::adapters::anthropic::{decode_anthropic_request, AnthropicSseEncoder};
 use crate::protocol::adapters::openai::{encode_openai_chat_request, OpenAiSseDecoder};
 use crate::protocol::ir::IrRequest;
@@ -210,10 +211,16 @@ async fn forward_messages(
                                 )
                                 .await;
 
+                                let request_log_service = log_service.clone();
+                                let request_log_request_id = request_id.clone();
                                 return (
                                     status_code,
                                     [(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")],
-                                    Body::from_stream(upstream_response.bytes_stream()),
+                                    Body::from_stream(track_anthropic_stream_usage(
+                                        upstream_response.bytes_stream(),
+                                        request_log_service,
+                                        request_log_request_id,
+                                    )),
                                 )
                                     .into_response();
                             }
@@ -381,6 +388,7 @@ async fn forward_messages(
                 if let Some(object) = upstream_payload.as_object_mut() {
                     object.insert("stream".to_string(), Value::Bool(true));
                 }
+                ensure_openai_stream_include_usage(&mut upstream_payload);
 
                 maybe_log_upstream_request_payload(
                     &state.gateway_id,
@@ -434,8 +442,14 @@ async fn forward_messages(
                             )
                             .await;
 
+                            let request_log_service = log_service.clone();
+                            let request_log_request_id = request_id.clone();
                             let anthropic_stream =
-                                map_upstream_to_anthropic_stream(upstream_response.bytes_stream());
+                                map_upstream_to_anthropic_stream_and_track_usage(
+                                    upstream_response.bytes_stream(),
+                                    request_log_service,
+                                    request_log_request_id,
+                                );
                             return (
                                 status_code,
                                 [(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")],
@@ -1035,8 +1049,10 @@ async fn count_tokens_handler(
     }
 }
 
-fn map_upstream_to_anthropic_stream<S, E>(
+fn map_upstream_to_anthropic_stream_and_track_usage<S, E>(
     upstream: S,
+    log_service: RequestLogService,
+    request_id: String,
 ) -> impl Stream<Item = Result<Bytes, anyhow::Error>> + Send + 'static
 where
     S: Stream<Item = Result<Bytes, E>> + Send + 'static,
@@ -1045,11 +1061,13 @@ where
     async_stream::try_stream! {
         let mut decoder = OpenAiSseDecoder::new();
         let mut encoder = AnthropicSseEncoder::new();
+        let mut usage_tracker = OpenAiStreamUsageTracker::default();
         futures_util::pin_mut!(upstream);
 
         while let Some(chunk_result) = upstream.next().await {
             let chunk = chunk_result
                 .map_err(|err| anyhow::anyhow!("failed to read upstream stream chunk: {err}"))?;
+            usage_tracker.push_chunk(chunk.as_ref())?;
             let events = decoder.push_chunk(chunk.as_ref())?;
             for event in events {
                 let encoded = encoder.encode_event(&event);
@@ -1066,6 +1084,185 @@ where
                 yield Bytes::from(encoded);
             }
         }
+
+        if let Some(usage) = usage_tracker.finish()? {
+            let _ = log_service.update_usage(&request_id, &usage).await;
+        }
+    }
+}
+
+fn track_anthropic_stream_usage<S, E>(
+    upstream: S,
+    log_service: RequestLogService,
+    request_id: String,
+) -> impl Stream<Item = Result<Bytes, anyhow::Error>> + Send + 'static
+where
+    S: Stream<Item = Result<Bytes, E>> + Send + 'static,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    async_stream::try_stream! {
+        let mut tracker = AnthropicStreamUsageTracker::default();
+        futures_util::pin_mut!(upstream);
+
+        while let Some(chunk_result) = upstream.next().await {
+            let chunk = chunk_result
+                .map_err(|err| anyhow::anyhow!("failed to read upstream stream chunk: {err}"))?;
+            tracker.push_chunk(chunk.as_ref())?;
+            yield chunk;
+        }
+
+        if let Some(usage) = tracker.finish()? {
+            let _ = log_service.update_usage(&request_id, &usage).await;
+        }
+    }
+}
+
+#[derive(Default)]
+struct AnthropicStreamUsageTracker {
+    pending: Vec<u8>,
+    usage: Option<UsageSnapshot>,
+}
+
+impl AnthropicStreamUsageTracker {
+    fn push_chunk(&mut self, chunk: &[u8]) -> anyhow::Result<()> {
+        self.pending.extend_from_slice(chunk);
+
+        while let Some(line_end) = self.pending.iter().position(|item| *item == b'\n') {
+            let mut line = self.pending.drain(..=line_end).collect::<Vec<u8>>();
+            trim_sse_line_endings(&mut line);
+            self.parse_line(&line)?;
+        }
+
+        Ok(())
+    }
+
+    fn finish(&mut self) -> anyhow::Result<Option<UsageSnapshot>> {
+        if !self.pending.is_empty() {
+            let mut line = std::mem::take(&mut self.pending);
+            trim_sse_line_endings(&mut line);
+            self.parse_line(&line)?;
+        }
+
+        Ok(self.usage.clone())
+    }
+
+    fn parse_line(&mut self, raw_line: &[u8]) -> anyhow::Result<()> {
+        let line = std::str::from_utf8(raw_line)
+            .map_err(|err| anyhow::anyhow!("failed to decode anthropic sse line as utf-8: {err}"))?
+            .trim();
+
+        if !line.starts_with("data:") {
+            return Ok(());
+        }
+
+        let data = line.trim_start_matches("data:").trim();
+        if data.is_empty() || data == "[DONE]" {
+            return Ok(());
+        }
+
+        let event: Value = serde_json::from_str(data)
+            .map_err(|err| anyhow::anyhow!("failed to parse anthropic sse chunk: {err}"))?;
+
+        if let Some(usage) = extract_anthropic_stream_usage(&event) {
+            self.usage = Some(usage);
+        }
+
+        Ok(())
+    }
+}
+
+fn extract_anthropic_stream_usage(event: &Value) -> Option<UsageSnapshot> {
+    if event.get("type").and_then(Value::as_str) == Some("message_start") {
+        let usage = event.get("message").and_then(|message| message.get("usage"))?;
+        return Some(extract_anthropic_usage(&json!({ "usage": usage })));
+    }
+
+    if event.get("type").and_then(Value::as_str) == Some("message_delta") {
+        if let Some(usage) = event.get("usage") {
+            return Some(extract_anthropic_usage(&json!({ "usage": usage })));
+        }
+
+        let usage = event.get("delta").and_then(|delta| delta.get("usage"))?;
+        return Some(extract_anthropic_usage(&json!({ "usage": usage })));
+    }
+
+    None
+}
+
+#[derive(Default)]
+struct OpenAiStreamUsageTracker {
+    pending: Vec<u8>,
+    usage: Option<UsageSnapshot>,
+}
+
+impl OpenAiStreamUsageTracker {
+    fn push_chunk(&mut self, chunk: &[u8]) -> anyhow::Result<()> {
+        self.pending.extend_from_slice(chunk);
+
+        while let Some(line_end) = self.pending.iter().position(|item| *item == b'\n') {
+            let mut line = self.pending.drain(..=line_end).collect::<Vec<u8>>();
+            trim_sse_line_endings(&mut line);
+            self.parse_line(&line)?;
+        }
+
+        Ok(())
+    }
+
+    fn finish(&mut self) -> anyhow::Result<Option<UsageSnapshot>> {
+        if !self.pending.is_empty() {
+            let mut line = std::mem::take(&mut self.pending);
+            trim_sse_line_endings(&mut line);
+            self.parse_line(&line)?;
+        }
+
+        Ok(self.usage.clone())
+    }
+
+    fn parse_line(&mut self, raw_line: &[u8]) -> anyhow::Result<()> {
+        let line = std::str::from_utf8(raw_line)
+            .map_err(|err| anyhow::anyhow!("failed to decode openai sse line as utf-8: {err}"))?
+            .trim();
+
+        if !line.starts_with("data:") {
+            return Ok(());
+        }
+
+        let data = line.trim_start_matches("data:").trim();
+        if data.is_empty() || data == "[DONE]" {
+            return Ok(());
+        }
+
+        let event: Value = serde_json::from_str(data)
+            .map_err(|err| anyhow::anyhow!("failed to parse openai sse chunk: {err}"))?;
+
+        if let Some(usage) = event.get("usage").and_then(Value::as_object) {
+            self.usage = Some(extract_anthropic_openai_usage(&json!({ "usage": usage })));
+        }
+
+        Ok(())
+    }
+}
+
+fn ensure_openai_stream_include_usage(payload: &mut Value) {
+    let Some(object) = payload.as_object_mut() else {
+        return;
+    };
+
+    let stream_options = object
+        .entry("stream_options".to_string())
+        .or_insert_with(|| json!({}));
+
+    if let Some(stream_options_object) = stream_options.as_object_mut() {
+        stream_options_object.insert("include_usage".to_string(), Value::Bool(true));
+    }
+}
+
+fn trim_sse_line_endings(line: &mut Vec<u8>) {
+    if line.ends_with(b"\n") {
+        line.pop();
+    }
+    if line.ends_with(b"\r") {
+        line.pop();
     }
 }
 

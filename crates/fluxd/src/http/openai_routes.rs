@@ -8,6 +8,8 @@ use axum::{
     routing::post,
     Router,
 };
+use bytes::Bytes;
+use futures_util::{Stream, StreamExt};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 
@@ -16,6 +18,7 @@ use crate::forwarding::openai_inbound::{
     apply_response, build_observation, effective_model, extract_usage, requested_model,
     stream_requested,
 };
+use crate::forwarding::types::UsageSnapshot;
 use crate::service::request_log_service::{RequestLogEntry, RequestLogService};
 use crate::upstream::openai_client::OpenAiClient;
 
@@ -55,7 +58,10 @@ async fn forward_chat_completions(
     let log_service = RequestLogService::new(state.pool.clone());
 
     if is_stream {
-        match execute_openai_stream(&state.pool, &state.gateway_id, &state.client, &payload).await {
+        let mut upstream_payload = payload.clone();
+        ensure_openai_stream_include_usage(&mut upstream_payload);
+
+        match execute_openai_stream(&state.pool, &state.gateway_id, &state.client, &upstream_payload).await {
             Ok((target, status, upstream_response)) => {
                 let status_code =
                     StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
@@ -93,10 +99,16 @@ async fn forward_chat_completions(
                     )
                     .await;
 
+                    let request_log_service = log_service.clone();
+                    let request_log_request_id = request_id.clone();
                     return (
                         status_code,
                         [(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")],
-                        Body::from_stream(upstream_response.bytes_stream()),
+                        Body::from_stream(track_openai_stream_usage(
+                            upstream_response.bytes_stream(),
+                            request_log_service,
+                            request_log_request_id,
+                        )),
                     )
                         .into_response();
                 }
@@ -259,4 +271,107 @@ fn next_request_id() -> String {
         .map(|item| item.as_nanos())
         .unwrap_or(0);
     format!("req_{nanos}")
+}
+
+fn track_openai_stream_usage<S, E>(
+    upstream: S,
+    log_service: RequestLogService,
+    request_id: String,
+) -> impl Stream<Item = Result<Bytes, anyhow::Error>> + Send + 'static
+where
+    S: Stream<Item = Result<Bytes, E>> + Send + 'static,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    async_stream::try_stream! {
+        let mut tracker = OpenAiStreamUsageTracker::default();
+        futures_util::pin_mut!(upstream);
+
+        while let Some(chunk_result) = upstream.next().await {
+            let chunk = chunk_result
+                .map_err(|err| anyhow::anyhow!("failed to read upstream stream chunk: {err}"))?;
+            tracker.push_chunk(chunk.as_ref())?;
+            yield chunk;
+        }
+
+        if let Some(usage) = tracker.finish()? {
+            let _ = log_service.update_usage(&request_id, &usage).await;
+        }
+    }
+}
+
+#[derive(Default)]
+struct OpenAiStreamUsageTracker {
+    pending: Vec<u8>,
+    usage: Option<UsageSnapshot>,
+}
+
+impl OpenAiStreamUsageTracker {
+    fn push_chunk(&mut self, chunk: &[u8]) -> anyhow::Result<()> {
+        self.pending.extend_from_slice(chunk);
+
+        while let Some(line_end) = self.pending.iter().position(|item| *item == b'\n') {
+            let mut line = self.pending.drain(..=line_end).collect::<Vec<u8>>();
+            trim_sse_line_endings(&mut line);
+            self.parse_line(&line)?;
+        }
+
+        Ok(())
+    }
+
+    fn finish(&mut self) -> anyhow::Result<Option<UsageSnapshot>> {
+        if !self.pending.is_empty() {
+            let mut line = std::mem::take(&mut self.pending);
+            trim_sse_line_endings(&mut line);
+            self.parse_line(&line)?;
+        }
+
+        Ok(self.usage.clone())
+    }
+
+    fn parse_line(&mut self, raw_line: &[u8]) -> anyhow::Result<()> {
+        let line = std::str::from_utf8(raw_line)
+            .map_err(|err| anyhow::anyhow!("failed to decode openai sse line as utf-8: {err}"))?
+            .trim();
+
+        if !line.starts_with("data:") {
+            return Ok(());
+        }
+
+        let data = line.trim_start_matches("data:").trim();
+        if data.is_empty() || data == "[DONE]" {
+            return Ok(());
+        }
+
+        let event: Value = serde_json::from_str(data)
+            .map_err(|err| anyhow::anyhow!("failed to parse openai sse chunk: {err}"))?;
+
+        if let Some(usage) = event.get("usage").and_then(Value::as_object) {
+            self.usage = Some(extract_usage(&json!({ "usage": usage })));
+        }
+
+        Ok(())
+    }
+}
+
+fn ensure_openai_stream_include_usage(payload: &mut Value) {
+    let Some(object) = payload.as_object_mut() else {
+        return;
+    };
+
+    let stream_options = object
+        .entry("stream_options".to_string())
+        .or_insert_with(|| json!({}));
+
+    if let Some(stream_options_object) = stream_options.as_object_mut() {
+        stream_options_object.insert("include_usage".to_string(), Value::Bool(true));
+    }
+}
+
+fn trim_sse_line_endings(line: &mut Vec<u8>) {
+    if line.ends_with(b"\n") {
+        line.pop();
+    }
+    if line.ends_with(b"\r") {
+        line.pop();
+    }
 }

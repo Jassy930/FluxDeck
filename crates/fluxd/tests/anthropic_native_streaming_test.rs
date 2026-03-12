@@ -10,7 +10,7 @@ use tokio::net::TcpListener;
 
 #[tokio::test]
 async fn streams_anthropic_events_from_anthropic_upstream() {
-    let gateway = setup_anthropic_native_streaming_gateway().await;
+    let (gateway, pool) = setup_anthropic_native_streaming_gateway().await;
 
     let body = reqwest::Client::new()
         .post(format!("http://{}/v1/messages", gateway.addr))
@@ -29,14 +29,26 @@ async fn streams_anthropic_events_from_anthropic_upstream() {
 
     assert!(body.contains("event: message_start"));
     assert!(body.contains("event: content_block_delta"));
+    assert!(body.contains("event: message_delta"));
     assert!(body.contains("event: message_stop"));
+
+    let row = sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>)>(
+        "SELECT input_tokens, output_tokens, total_tokens FROM request_logs ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("fetch latest request log");
+
+    assert_eq!(row.0, Some(12));
+    assert_eq!(row.1, Some(3));
+    assert_eq!(row.2, Some(15));
 }
 
 struct SpawnedServer {
     addr: SocketAddr,
 }
 
-async fn setup_anthropic_native_streaming_gateway() -> SpawnedServer {
+async fn setup_anthropic_native_streaming_gateway() -> (SpawnedServer, sqlx::SqlitePool) {
     let upstream = spawn_native_upstream_stream_mock().await;
     let pool = sqlx::SqlitePool::connect("sqlite::memory:")
         .await
@@ -71,8 +83,9 @@ async fn setup_anthropic_native_streaming_gateway() -> SpawnedServer {
     .await
     .expect("insert gateway");
 
-    let app = build_anthropic_router(AnthropicRouteState::new(pool, "gw_anthropic_native"));
-    spawn_server(app).await
+    let app = build_anthropic_router(AnthropicRouteState::new(pool.clone(), "gw_anthropic_native"));
+    let gateway = spawn_server(app).await;
+    (gateway, pool)
 }
 
 async fn spawn_native_upstream_stream_mock() -> SpawnedServer {
@@ -102,6 +115,9 @@ async fn native_upstream_messages_stream(Json(payload): Json<Value>) -> impl Int
         )),
         Ok(Bytes::from(
             "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"pong\"}}\n\n",
+        )),
+        Ok(Bytes::from(
+            "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"input_tokens\":12,\"output_tokens\":3}}\n\n",
         )),
         Ok(Bytes::from(
             "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
