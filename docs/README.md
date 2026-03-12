@@ -17,7 +17,7 @@ docs/
 │   └── completed/        # 已完成的计划和设计
 │
 ├── progress/             # 开发日志与进度记录
-│   └── YYYY-MM-DD-dev-log.md
+│   └── YYYY-MM-DD-*.md
 │
 ├── testing/              # 测试策略与验收清单
 │   ├── mvp-e2e.md        # MVP E2E 验证

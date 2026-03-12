@@ -10,7 +10,7 @@
 - 突出当前主线状态：
   - 原生桌面端优先
   - `fluxd` / `fluxctl` 可用
-  - Web 桌面端仍保留但不是当前优先级
+  - Web 桌面端暂停开发，当前不可用
 - 增加当前能力说明：
   - Provider / Gateway 管理
   - OpenAI / Anthropic 兼容链路
