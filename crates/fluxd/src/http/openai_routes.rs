@@ -2,7 +2,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::{
     body::Body,
-    extract::{Json, State},
+    extract::{Json, Request, State},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::post,
@@ -19,6 +19,7 @@ use crate::forwarding::openai_inbound::{
     stream_requested,
 };
 use crate::forwarding::types::UsageSnapshot;
+use crate::http::passthrough::handle_passthrough_request;
 use crate::service::request_log_service::{RequestLogEntry, RequestLogService};
 use crate::upstream::openai_client::OpenAiClient;
 
@@ -28,14 +29,24 @@ const REQUEST_LOG_KEEP: i64 = 10_000;
 pub struct OpenAiRouteState {
     pool: SqlitePool,
     gateway_id: String,
+    inbound_protocol: String,
     client: OpenAiClient,
 }
 
 impl OpenAiRouteState {
     pub fn new(pool: SqlitePool, gateway_id: impl Into<String>) -> Self {
+        Self::new_with_protocol(pool, gateway_id, "openai")
+    }
+
+    pub fn new_with_protocol(
+        pool: SqlitePool,
+        gateway_id: impl Into<String>,
+        inbound_protocol: impl Into<String>,
+    ) -> Self {
         Self {
             pool,
             gateway_id: gateway_id.into(),
+            inbound_protocol: inbound_protocol.into(),
             client: OpenAiClient::new(),
         }
     }
@@ -44,6 +55,7 @@ impl OpenAiRouteState {
 pub fn build_openai_router(state: OpenAiRouteState) -> Router {
     Router::new()
         .route("/v1/chat/completions", post(forward_chat_completions))
+        .fallback(forward_openai_passthrough)
         .with_state(state)
 }
 
@@ -219,6 +231,20 @@ async fn forward_chat_completions(
             .await
         }
     }
+}
+
+async fn forward_openai_passthrough(
+    State(state): State<OpenAiRouteState>,
+    request: Request,
+) -> Response {
+    handle_passthrough_request(
+        state.pool.clone(),
+        &state.gateway_id,
+        &state.inbound_protocol,
+        reqwest::Client::new(),
+        request,
+    )
+    .await
 }
 
 async fn append_log(service: &RequestLogService, entry: RequestLogEntry) {

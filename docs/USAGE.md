@@ -113,6 +113,16 @@ Provider `base_url` 补充说明：
   - `https://host/api/anthropic/v1`
 - 如果 Provider 已被运行中的 Gateway 使用，更新 `base_url` 后需要手动 `gateway stop` 再 `gateway start`
 
+Gateway 协议补充说明：
+
+- `inbound_protocol` 允许值与 Provider `kind` 对齐：
+  - `openai | openai-response | gemini | anthropic | azure-openai | new-api | ollama`
+- `upstream_protocol` 允许值为：
+  - `provider_default | openai | openai-response | gemini | anthropic | azure-openai | new-api | ollama`
+- 当 `inbound_protocol == upstream_protocol` 且请求路径没有命中专门 handler 时，Gateway 会自动执行同协议 passthrough fallback
+  - 默认透传方法、路径、查询参数、请求头与请求体
+  - 当前 OpenAI 系已兼容 `/responses` 与 `/v1/responses`
+
 ## 4. 配置并启动 Gateway
 
 创建 Gateway：
@@ -224,6 +234,20 @@ curl -X POST http://127.0.0.1:18080/v1/chat/completions \
 ```
 
 如果配置正确，会返回上游模型响应（JSON）。
+
+如果你配置的是 `openai-response` / Codex 一类 Gateway，也可以直接调用：
+
+```bash
+curl -X POST http://127.0.0.1:18080/responses \
+  -H 'content-type: application/json' \
+  -d '{"model":"gpt-5-codex","input":"ping"}'
+```
+
+兼容说明：
+
+- 当 Provider `base_url` 已带 `/v1` 时：
+  - `/responses` 会自动转发到上游 `/v1/responses`
+  - `/v1/responses` 也会保持单个 `/v1`，不会被错误拼成 `/v1/v1/responses`
 
 ### 5.1 Anthropics 入站与兼容模式示例
 

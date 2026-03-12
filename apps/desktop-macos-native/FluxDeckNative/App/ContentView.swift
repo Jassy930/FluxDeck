@@ -1926,16 +1926,25 @@ enum GatewayFormSupport {
     private static func defaultProtocolOptions(for kind: GatewayProtocolKind) -> [GatewayPickerOption] {
         switch kind {
         case .inbound:
-            return [
-                GatewayPickerOption(id: "openai", title: "OpenAI", subtitle: "OpenAI-compatible client ingress", isFallback: false),
-                GatewayPickerOption(id: "anthropic", title: "Anthropic", subtitle: "Anthropic messages ingress", isFallback: false)
-            ]
+            return ProviderKindOption.allCases.map { option in
+                GatewayPickerOption(
+                    id: option.rawValue,
+                    title: option.label,
+                    subtitle: option.inboundProtocolSubtitle,
+                    isFallback: false
+                )
+            }
         case .upstream:
             return [
                 GatewayPickerOption(id: "provider_default", title: "Provider Default", subtitle: "Delegate protocol to provider kind", isFallback: false),
-                GatewayPickerOption(id: "openai", title: "OpenAI", subtitle: "Forward using OpenAI-compatible upstream", isFallback: false),
-                GatewayPickerOption(id: "anthropic", title: "Anthropic", subtitle: "Forward using Anthropic upstream", isFallback: false)
-            ]
+            ] + ProviderKindOption.allCases.map { option in
+                GatewayPickerOption(
+                    id: option.rawValue,
+                    title: option.label,
+                    subtitle: option.upstreamProtocolSubtitle,
+                    isFallback: false
+                )
+            }
         }
     }
 }

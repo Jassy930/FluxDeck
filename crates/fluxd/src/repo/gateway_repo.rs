@@ -2,7 +2,10 @@ use anyhow::Result;
 use serde_json::{from_str, Value};
 use sqlx::{Row, SqlitePool};
 
-use crate::domain::gateway::{CreateGatewayInput, Gateway, UpdateGatewayInput};
+use crate::domain::gateway::{
+    validate_gateway_inbound_protocol, validate_gateway_upstream_protocol, CreateGatewayInput,
+    Gateway, UpdateGatewayInput,
+};
 
 #[derive(Clone)]
 pub struct GatewayRepo {
@@ -15,6 +18,9 @@ impl GatewayRepo {
     }
 
     pub async fn create(&self, input: CreateGatewayInput) -> Result<Gateway> {
+        validate_gateway_inbound_protocol(&input.inbound_protocol)?;
+        validate_gateway_upstream_protocol(&input.upstream_protocol)?;
+
         sqlx::query(
             r#"
             INSERT INTO gateways (
@@ -95,6 +101,9 @@ impl GatewayRepo {
         gateway_id: &str,
         input: UpdateGatewayInput,
     ) -> Result<Option<Gateway>> {
+        validate_gateway_inbound_protocol(&input.inbound_protocol)?;
+        validate_gateway_upstream_protocol(&input.upstream_protocol)?;
+
         let result = sqlx::query(
             r#"
             UPDATE gateways

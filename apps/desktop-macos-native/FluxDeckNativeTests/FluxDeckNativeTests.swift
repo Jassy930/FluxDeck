@@ -1090,4 +1090,32 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(ProviderKindOption.azureOpenAI.label, "Azure OpenAI")
         XCTAssertEqual(ProviderKindOption.newAPI.label, "New API")
     }
+
+    func testGatewayProtocolOptionsStayAlignedWithProviderKinds() {
+        let inboundOptions = GatewayFormSupport.protocolOptions(
+            kind: .inbound,
+            selectedValue: "openai"
+        )
+        let upstreamOptions = GatewayFormSupport.protocolOptions(
+            kind: .upstream,
+            selectedValue: "provider_default"
+        )
+
+        XCTAssertEqual(
+            inboundOptions.map(\.id),
+            ProviderKindOption.allCases.map(\.rawValue)
+        )
+        XCTAssertEqual(
+            upstreamOptions.map(\.id),
+            ["provider_default"] + ProviderKindOption.allCases.map(\.rawValue)
+        )
+        XCTAssertEqual(
+            GatewayFormSupport.protocolTitle(for: "openai-response", kind: .inbound),
+            "OpenAI-Response"
+        )
+        XCTAssertEqual(
+            GatewayFormSupport.protocolTitle(for: "provider_default", kind: .upstream),
+            "Provider Default"
+        )
+    }
 }

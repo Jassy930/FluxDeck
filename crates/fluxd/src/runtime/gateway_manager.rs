@@ -6,8 +6,10 @@ use tokio::net::TcpListener;
 use tokio::sync::{oneshot, RwLock};
 use tokio::task::JoinHandle;
 
+use crate::domain::gateway::is_supported_gateway_inbound_protocol;
 use crate::http::anthropic_routes::{build_anthropic_router, AnthropicRouteState};
 use crate::http::openai_routes::{build_openai_router, OpenAiRouteState};
+use crate::http::passthrough::{build_passthrough_router, PassthroughRouteState};
 use crate::repo::gateway_repo::GatewayRepo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,6 +115,13 @@ impl GatewayManager {
                 self.pool.clone(),
                 gateway_id.clone(),
             )),
+            protocol if is_supported_gateway_inbound_protocol(protocol) => {
+                build_passthrough_router(PassthroughRouteState::new(
+                    self.pool.clone(),
+                    gateway_id.clone(),
+                    gateway.inbound_protocol.clone(),
+                ))
+            }
             unsupported => {
                 return Err(anyhow!(
                     "unsupported inbound protocol `{unsupported}` for gateway `{gateway_id}`"

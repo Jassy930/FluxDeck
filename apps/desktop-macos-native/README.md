@@ -22,6 +22,9 @@
 - 仍复用 `fluxd` Admin API 的现有数据流
 - Provider 表单中的 `kind` 已改为固定选择，不再允许自由文本输入
 - Provider `kind` 提交机器值：`openai | openai-response | gemini | anthropic | azure-openai | new-api | ollama`
+- Gateway 表单中的 `Inbound Protocol` 已与 Provider `kind` 使用同一组七种协议类型
+- Gateway 表单中的 `Upstream Protocol` 使用：`provider_default | openai | openai-response | gemini | anthropic | azure-openai | new-api | ollama`
+- Gateway 协议 Picker 选项已改为从共享的 `ProviderKindOption` 派生，避免前后不一致
 - `Traffic` 页面现已接入 `/admin/stats/overview` 与 `/admin/stats/trend`
 - `Traffic` 支持 `1h / 6h / 24h` 时间范围切换、关键指标、趋势、维度分布和异常摘要
 - `Traffic` 已进一步压缩为高密度监控台布局，优先首屏扫描 KPI 与趋势主区

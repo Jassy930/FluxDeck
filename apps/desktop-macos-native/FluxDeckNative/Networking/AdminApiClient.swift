@@ -112,6 +112,44 @@ enum ProviderKindOption: String, CaseIterable, Identifiable {
             return "Ollama"
         }
     }
+
+    var inboundProtocolSubtitle: String {
+        switch self {
+        case .openAI:
+            return "OpenAI-compatible client ingress"
+        case .openAIResponse:
+            return "OpenAI Responses / Codex-style ingress"
+        case .gemini:
+            return "Gemini-compatible client ingress"
+        case .anthropic:
+            return "Anthropic messages ingress"
+        case .azureOpenAI:
+            return "Azure OpenAI-compatible ingress"
+        case .newAPI:
+            return "New API-compatible client ingress"
+        case .ollama:
+            return "Ollama-compatible client ingress"
+        }
+    }
+
+    var upstreamProtocolSubtitle: String {
+        switch self {
+        case .openAI:
+            return "Forward using OpenAI-compatible upstream"
+        case .openAIResponse:
+            return "Forward using OpenAI Responses-compatible upstream"
+        case .gemini:
+            return "Forward using Gemini-compatible upstream"
+        case .anthropic:
+            return "Forward using Anthropic upstream"
+        case .azureOpenAI:
+            return "Forward using Azure OpenAI-compatible upstream"
+        case .newAPI:
+            return "Forward using New API-compatible upstream"
+        case .ollama:
+            return "Forward using Ollama-compatible upstream"
+        }
+    }
 }
 
 struct CreateProviderInput: Encodable {

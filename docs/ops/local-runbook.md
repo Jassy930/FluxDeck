@@ -64,6 +64,16 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
 - 自动启动条件：`enabled=true && auto_start=true`
 - 单个 Gateway 自动启动失败不会阻塞 fluxd 主进程
 
+Gateway 协议补充：
+
+- `inbound_protocol` 允许值与 Provider `kind` 对齐：
+  - `openai | openai-response | gemini | anthropic | azure-openai | new-api | ollama`
+- `upstream_protocol` 允许值为：
+  - `provider_default | openai | openai-response | gemini | anthropic | azure-openai | new-api | ollama`
+- 当 `inbound_protocol == upstream_protocol` 且请求路径没有命中专门 handler 时，Gateway 会自动执行同协议 passthrough fallback
+  - 默认透传方法、路径、查询串、请求头与请求体
+  - OpenAI 系当前已兼容 `/responses` 与 `/v1/responses`
+
 如果你使用原生桌面端配置 Gateway：
 
 - `New Gateway` 与 `Edit Gateway` 已统一为工作台式编辑界面
@@ -123,6 +133,20 @@ curl -X POST http://127.0.0.1:18080/v1/chat/completions \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}'
 ```
 
+如果配置的是 `openai-response` / Codex 一类 Gateway，也可以直接调用：
+
+```bash
+curl -X POST http://127.0.0.1:18080/responses \
+  -H 'content-type: application/json' \
+  -d '{"model":"gpt-5-codex","input":"ping"}'
+```
+
+兼容说明：
+
+- 当上游 `base_url` 已带 `/v1` 时：
+  - `/responses` 会被转发到上游 `/v1/responses`
+  - `/v1/responses` 会保持单个 `/v1`，不会重复拼接成 `/v1/v1/responses`
+
 ## Anthropic 原生上游网关示例
 
 先创建 Anthropic Provider（以智谱 Claude 兼容端点为例）：
@@ -161,6 +185,7 @@ curl 'http://127.0.0.1:7777/admin/logs?limit=5'
 
 - `inbound_protocol`：入站协议，例如 `openai` / `anthropic`
 - `upstream_protocol`：上游协议，例如 `openai` / `anthropic`
+- 同协议 passthrough fallback 目前也会记录最小日志维度：协议、状态码、延迟、错误文本
 - `model_requested`：客户端请求模型
 - `model_effective`：实际发往上游的模型
 - `input_tokens/output_tokens/total_tokens`：usage 统计

@@ -94,7 +94,9 @@
 - `listen_host: string`
 - `listen_port: number`
 - `inbound_protocol: string`
+- 允许值：`openai | openai-response | gemini | anthropic | azure-openai | new-api | ollama`
 - `upstream_protocol: string`
+- 允许值：`provider_default | openai | openai-response | gemini | anthropic | azure-openai | new-api | ollama`
 - `protocol_config_json: object`
 - `default_provider_id: string`
 - `default_model: string | null`
@@ -106,6 +108,14 @@
 ### `POST /admin/gateways`
 
 请求体与响应体字段同上；创建成功返回 `201`.
+
+协议语义补充：
+
+- `inbound_protocol` 与 `upstream_protocol` 的协议值集合与 Provider `kind` 对齐
+- `upstream_protocol=provider_default` 表示运行时跟随默认 Provider 的 `kind`
+- 当 `inbound_protocol == upstream_protocol` 且请求路径没有命中专门 handler 时，Gateway 会启用同协议 passthrough fallback
+  - 默认透传原始方法、路径、查询串、请求头与请求体
+  - 当前 OpenAI 系已兼容 `/responses` 与 `/v1/responses`
 
 ### `PUT /admin/gateways/{id}`
 
@@ -163,6 +173,7 @@
 - 若删除前自动停机失败，删除会中止，Gateway 配置保持不变
 - Gateway 可独立删除；只要删除前停机成功（或本来就是停止态），就不会因为其关联 Provider 仍存在而被阻止
 - 历史 `request_logs` 不会阻止 Gateway 删除；日志中的 `gateway_id` 作为历史快照保留
+- 当 `inbound_protocol == upstream_protocol` 且路径未命中专门 handler 时，Gateway 会自动尝试同协议 passthrough fallback，而不是直接返回框架层 `404`
 
 `protocol_config_json` 约定（当前已使用字段）：
 

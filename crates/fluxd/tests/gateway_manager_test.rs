@@ -150,7 +150,7 @@ async fn routes_gateway_runtime_by_inbound_protocol() {
         .send()
         .await
         .expect("call openai gateway");
-    assert_eq!(openai_resp.status(), reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(openai_resp.status(), reqwest::StatusCode::BAD_GATEWAY);
 
     let anthropic_resp = client
         .post(format!(
@@ -171,6 +171,60 @@ async fn routes_gateway_runtime_by_inbound_protocol() {
         .stop_gateway(&anthropic_gateway.id)
         .await
         .expect("stop anthropic gateway");
+}
+
+#[tokio::test]
+async fn starts_openai_response_gateway_runtime() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    sqlx::query(
+        "INSERT INTO providers (id, name, kind, base_url, api_key, enabled) VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+    )
+    .bind("provider_response")
+    .bind("OpenAI Response")
+    .bind("openai-response")
+    .bind("http://127.0.0.1:9/v1")
+    .bind("sk-test")
+    .execute(&pool)
+    .await
+    .expect("insert response provider");
+
+    let repo = GatewayRepo::new(pool.clone());
+    let response_gateway = repo
+        .create(CreateGatewayInput {
+            id: "gw_openai_response".to_string(),
+            name: "Gateway OpenAI Response".to_string(),
+            listen_host: "127.0.0.1".to_string(),
+            listen_port: next_free_port(),
+            inbound_protocol: "openai-response".to_string(),
+            upstream_protocol: "provider_default".to_string(),
+            protocol_config_json: serde_json::json!({}),
+            default_provider_id: "provider_response".to_string(),
+            default_model: Some("gpt-5-codex".to_string()),
+            enabled: true,
+            auto_start: false,
+        })
+        .await
+        .expect("create openai-response gateway");
+
+    let manager = GatewayManager::new(pool);
+    manager
+        .start_gateway(&response_gateway.id)
+        .await
+        .expect("start openai-response gateway");
+
+    assert_eq!(
+        manager.status(&response_gateway.id).await,
+        GatewayRuntimeStatus::Running
+    );
+
+    manager
+        .stop_gateway(&response_gateway.id)
+        .await
+        .expect("stop openai-response gateway");
 }
 
 #[tokio::test]
