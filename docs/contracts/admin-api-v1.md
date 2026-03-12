@@ -285,15 +285,18 @@
 - `success_rate: number`
 - `requests_per_minute: number`
 - `total_tokens: number`
-- `by_gateway: Array<{ gateway_id: string, request_count: number, success_count: number, error_count: number, total_tokens: number, avg_latency: number }>`
-- `by_provider: Array<{ provider_id: string, request_count: number, success_count: number, error_count: number, total_tokens: number, avg_latency: number }>`
-- `by_model: Array<{ model: string, request_count: number, success_count: number, error_count: number, total_tokens: number, avg_latency: number }>`
+- `cached_tokens: number`
+- `by_gateway: Array<{ gateway_id: string, request_count: number, success_count: number, error_count: number, total_tokens: number, cached_tokens: number, avg_latency: number }>`
+- `by_provider: Array<{ provider_id: string, request_count: number, success_count: number, error_count: number, total_tokens: number, cached_tokens: number, avg_latency: number }>`
+- `by_model: Array<{ model: string, request_count: number, success_count: number, error_count: number, total_tokens: number, cached_tokens: number, avg_latency: number }>`
 
 语义：
 
 - 所有统计都从 `request_logs` 聚合得出
 - 时间窗口基于服务端当前 UTC 时间回看 `period`
 - `avg_latency` 当前以整数毫秒返回
+- `cached_tokens` 直接聚合自 `request_logs.cached_tokens`
+- 当源日志的 `cached_tokens` 为空时，按 `0` 参与聚合
 
 ### `GET /admin/stats/trend`
 
@@ -310,13 +313,13 @@
 
 - `period: string`
 - `interval: string`
-- `data: Array<{ timestamp: string, request_count: number, avg_latency: number, error_count: number, input_tokens: number, output_tokens: number }>`
+- `data: Array<{ timestamp: string, request_count: number, avg_latency: number, error_count: number, input_tokens: number, output_tokens: number, cached_tokens: number }>`
 
 语义：
 
 - `timestamp` 为服务端聚合后的 UTC bucket 时间
 - `avg_latency` 当前以整数毫秒返回
-- `input_tokens / output_tokens` 在源日志缺失时聚合为 `0`
+- `input_tokens / output_tokens / cached_tokens` 在源日志缺失时聚合为 `0`
 
 ## 版本策略
 

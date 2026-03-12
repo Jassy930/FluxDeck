@@ -23,7 +23,12 @@ struct TrafficBreakdownRow: Equatable {
 struct TrafficKpiStripItem: Equatable {
     let title: String
     let value: String
-    let detail: String
+    let detailRows: [TrafficKpiSupplementRow]
+}
+
+struct TrafficKpiSupplementRow: Equatable {
+    let label: String
+    let value: String
 }
 
 struct TrafficAnalyticsModel {
@@ -44,6 +49,10 @@ struct TrafficAnalyticsModel {
     let alerts: [TrafficAlert]
     let selectedPeriod: String
     let hasData: Bool
+    let gatewayStatsForKpi: [AdminGatewayStats]
+    let totalInputTokens: Int
+    let totalOutputTokens: Int
+    let totalCachedTokens: Int
 
     var compactGatewayBreakdown: [TrafficBreakdownRow] {
         Array(gatewayBreakdown.prefix(Self.compactBreakdownLimit))
@@ -58,26 +67,56 @@ struct TrafficAnalyticsModel {
     }
 
     var kpiStripItems: [TrafficKpiStripItem] {
-        [
+        let topGatewayStats = Array(
+            gatewayStatsForKpi
+                .sorted { lhs, rhs in
+                    if lhs.requestCount == rhs.requestCount {
+                        return lhs.gatewayID < rhs.gatewayID
+                    }
+                    return lhs.requestCount > rhs.requestCount
+                }
+                .prefix(Self.kpiGatewayLimit)
+        )
+
+        return [
             TrafficKpiStripItem(
                 title: "Requests / min",
                 value: requestsPerMinuteText,
-                detail: "\(totalRequests) total"
+                detailRows: topGatewayStats.map {
+                    TrafficKpiSupplementRow(
+                        label: $0.gatewayID,
+                        value: "\(formatDecimal(requestsPerMinute(for: $0.requestCount, selectedPeriod: selectedPeriod))) rpm"
+                    )
+                }
             ),
             TrafficKpiStripItem(
                 title: "Success Rate",
                 value: successRateText,
-                detail: "\(successCount) ok / \(errorCount) err"
+                detailRows: topGatewayStats.map {
+                    TrafficKpiSupplementRow(
+                        label: $0.gatewayID,
+                        value: "\($0.successCount) ok / \($0.errorCount) err"
+                    )
+                }
             ),
             TrafficKpiStripItem(
                 title: "Avg Latency",
                 value: averageLatencyText,
-                detail: "selected period"
+                detailRows: topGatewayStats.map {
+                    TrafficKpiSupplementRow(
+                        label: $0.gatewayID,
+                        value: "\($0.avgLatency) ms"
+                    )
+                }
             ),
             TrafficKpiStripItem(
                 title: "Total Tokens",
                 value: totalTokensText,
-                detail: "combined usage"
+                detailRows: [
+                    TrafficKpiSupplementRow(label: "Input", value: formatInteger(totalInputTokens)),
+                    TrafficKpiSupplementRow(label: "Output", value: formatInteger(totalOutputTokens)),
+                    TrafficKpiSupplementRow(label: "Cached", value: formatInteger(totalCachedTokens))
+                ]
             )
         ]
     }
@@ -108,7 +147,11 @@ struct TrafficAnalyticsModel {
             trendPoints: [],
             alerts: [],
             selectedPeriod: "logs",
-            hasData: totalRequests > 0
+            hasData: totalRequests > 0,
+            gatewayStatsForKpi: [],
+            totalInputTokens: logs.compactMap(\.inputTokens).reduce(0, +),
+            totalOutputTokens: logs.compactMap(\.outputTokens).reduce(0, +),
+            totalCachedTokens: logs.compactMap(\.cachedTokens).reduce(0, +)
         )
     }
 
@@ -135,7 +178,11 @@ struct TrafficAnalyticsModel {
                 trendPoints: trend?.data ?? [],
                 alerts: trend?.data.isEmpty == false ? [TrafficAlert(level: .info, title: "No overview data", detail: "Trend points are available but overview statistics are missing.")] : [],
                 selectedPeriod: selectedPeriod,
-                hasData: false
+                hasData: false,
+                gatewayStatsForKpi: [],
+                totalInputTokens: summedInputTokens(from: trend),
+                totalOutputTokens: summedOutputTokens(from: trend),
+                totalCachedTokens: summedCachedTokens(from: trend)
             )
         }
 
@@ -184,11 +231,16 @@ struct TrafficAnalyticsModel {
             trendPoints: trend?.data ?? [],
             alerts: buildAlerts(overview: overview, trend: trend),
             selectedPeriod: selectedPeriod,
-            hasData: overview.totalRequests > 0
+            hasData: overview.totalRequests > 0,
+            gatewayStatsForKpi: overview.byGateway,
+            totalInputTokens: summedInputTokens(from: trend),
+            totalOutputTokens: summedOutputTokens(from: trend),
+            totalCachedTokens: overview.cachedTokens
         )
     }
 
     private static let compactBreakdownLimit = 3
+    private static let kpiGatewayLimit = 2
 }
 
 struct ConnectionsModel {
@@ -282,4 +334,37 @@ private func formatInteger(_ value: Int) -> String {
     let formatter = NumberFormatter()
     formatter.numberStyle = .decimal
     return formatter.string(from: NSNumber(value: value)) ?? String(value)
+}
+
+private func periodMinutes(for selectedPeriod: String) -> Double {
+    switch selectedPeriod {
+    case "1h":
+        return 60
+    case "6h":
+        return 360
+    case "24h":
+        return 1_440
+    default:
+        return 60
+    }
+}
+
+private func requestsPerMinute(for requestCount: Int, selectedPeriod: String) -> Double {
+    let minutes = periodMinutes(for: selectedPeriod)
+    guard minutes > 0 else {
+        return 0
+    }
+    return Double(requestCount) / minutes
+}
+
+private func summedInputTokens(from trend: AdminStatsTrend?) -> Int {
+    trend?.data.map(\.inputTokens).reduce(0, +) ?? 0
+}
+
+private func summedOutputTokens(from trend: AdminStatsTrend?) -> Int {
+    trend?.data.map(\.outputTokens).reduce(0, +) ?? 0
+}
+
+private func summedCachedTokens(from trend: AdminStatsTrend?) -> Int {
+    trend?.data.map(\.cachedTokens).reduce(0, +) ?? 0
 }

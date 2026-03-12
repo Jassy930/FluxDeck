@@ -294,7 +294,7 @@ struct TrafficAnalyticsView: View {
     }
 
     private func kpiStripSegment(_ item: TrafficKpiStripItem) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(item.title)
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(DesignTokens.textSecondary)
@@ -303,9 +303,31 @@ struct TrafficAnalyticsView: View {
                 .foregroundStyle(DesignTokens.textPrimary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
-            Text(item.detail)
-                .font(.caption2)
-                .foregroundStyle(DesignTokens.textSecondary)
+
+            if item.detailRows.isEmpty {
+                Text("No detail in this period")
+                    .font(.caption2)
+                    .foregroundStyle(DesignTokens.textSecondary)
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(item.detailRows, id: \.label) { row in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(row.label)
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(DesignTokens.textSecondary)
+                                .lineLimit(1)
+
+                            Spacer(minLength: 6)
+
+                            Text(row.value)
+                                .font(.caption2)
+                                .foregroundStyle(DesignTokens.textPrimary.opacity(0.94))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -456,6 +456,7 @@ struct StatsOverviewResponse {
     success_rate: f64,
     requests_per_minute: f64,
     total_tokens: i64,
+    cached_tokens: i64,
     by_gateway: Vec<DimensionStats>,
     by_provider: Vec<DimensionStats>,
     by_model: Vec<ModelDimensionStats>,
@@ -471,6 +472,7 @@ struct DimensionStats {
     success_count: i64,
     error_count: i64,
     total_tokens: i64,
+    cached_tokens: i64,
     avg_latency: i64,
 }
 
@@ -481,6 +483,7 @@ struct ModelDimensionStats {
     success_count: i64,
     error_count: i64,
     total_tokens: i64,
+    cached_tokens: i64,
     avg_latency: i64,
 }
 
@@ -499,6 +502,7 @@ struct StatsTrendPoint {
     error_count: i64,
     input_tokens: i64,
     output_tokens: i64,
+    cached_tokens: i64,
 }
 
 async fn start_gateway(
@@ -716,6 +720,7 @@ async fn get_stats_overview(
                     success_rate: 0.0,
                     requests_per_minute: 0.0,
                     total_tokens: 0,
+                    cached_tokens: 0,
                     by_gateway: vec![],
                     by_provider: vec![],
                     by_model: vec![],
@@ -725,12 +730,13 @@ async fn get_stats_overview(
     };
 
     // Get total stats
-    let total_stats = sqlx::query_as::<_, (i64, i64, i64, i64)>(
+    let total_stats = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
         "SELECT
             COUNT(*) as total_requests,
             SUM(CASE WHEN status_code < 400 AND error IS NULL THEN 1 ELSE 0 END) as successful_requests,
             SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_requests,
-            COALESCE(SUM(total_tokens), 0) as total_tokens
+            COALESCE(SUM(total_tokens), 0) as total_tokens,
+            COALESCE(SUM(cached_tokens), 0) as cached_tokens
          FROM request_logs
          WHERE created_at >= ?",
     )
@@ -738,9 +744,9 @@ async fn get_stats_overview(
     .fetch_one(&state.pool)
     .await;
 
-    let (total_requests, successful_requests, error_requests, total_tokens) = match total_stats {
+    let (total_requests, successful_requests, error_requests, total_tokens, cached_tokens) = match total_stats {
         Ok(row) => row,
-        Err(_) => (0, 0, 0, 0),
+        Err(_) => (0, 0, 0, 0, 0),
     };
 
     let success_rate = if total_requests > 0 {
@@ -756,13 +762,14 @@ async fn get_stats_overview(
     };
 
     // Get stats by gateway
-    let by_gateway = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64)>(
+    let by_gateway = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64, i64)>(
         "SELECT
             gateway_id,
             COUNT(*) as request_count,
             SUM(CASE WHEN status_code < 400 AND error IS NULL THEN 1 ELSE 0 END) as success_count,
             SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count,
             COALESCE(SUM(total_tokens), 0) as total_tokens,
+            COALESCE(SUM(cached_tokens), 0) as cached_tokens,
             CAST(ROUND(COALESCE(AVG(latency_ms), 0)) AS INTEGER) as avg_latency
          FROM request_logs
          WHERE created_at >= ?
@@ -775,7 +782,7 @@ async fn get_stats_overview(
     .unwrap_or_default()
     .into_iter()
     .map(
-        |(gateway_id, request_count, success_count, error_count, total_tokens, avg_latency)| {
+        |(gateway_id, request_count, success_count, error_count, total_tokens, cached_tokens, avg_latency)| {
             DimensionStats {
                 _gateway_id: Some(gateway_id),
                 _provider_id: None,
@@ -783,6 +790,7 @@ async fn get_stats_overview(
                 success_count,
                 error_count,
                 total_tokens,
+                cached_tokens,
                 avg_latency,
             }
         },
@@ -790,13 +798,14 @@ async fn get_stats_overview(
     .collect();
 
     // Get stats by provider
-    let by_provider = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64)>(
+    let by_provider = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64, i64)>(
         "SELECT
             provider_id,
             COUNT(*) as request_count,
             SUM(CASE WHEN status_code < 400 AND error IS NULL THEN 1 ELSE 0 END) as success_count,
             SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count,
             COALESCE(SUM(total_tokens), 0) as total_tokens,
+            COALESCE(SUM(cached_tokens), 0) as cached_tokens,
             CAST(ROUND(COALESCE(AVG(latency_ms), 0)) AS INTEGER) as avg_latency
          FROM request_logs
          WHERE created_at >= ?
@@ -809,7 +818,7 @@ async fn get_stats_overview(
     .unwrap_or_default()
     .into_iter()
     .map(
-        |(provider_id, request_count, success_count, error_count, total_tokens, avg_latency)| {
+        |(provider_id, request_count, success_count, error_count, total_tokens, cached_tokens, avg_latency)| {
             DimensionStats {
                 _gateway_id: None,
                 _provider_id: Some(provider_id),
@@ -817,6 +826,7 @@ async fn get_stats_overview(
                 success_count,
                 error_count,
                 total_tokens,
+                cached_tokens,
                 avg_latency,
             }
         },
@@ -824,13 +834,14 @@ async fn get_stats_overview(
     .collect();
 
     // Get stats by model
-    let by_model = sqlx::query_as::<_, (Option<String>, i64, i64, i64, i64, i64)>(
+    let by_model = sqlx::query_as::<_, (Option<String>, i64, i64, i64, i64, i64, i64)>(
         "SELECT
             model_effective,
             COUNT(*) as request_count,
             SUM(CASE WHEN status_code < 400 AND error IS NULL THEN 1 ELSE 0 END) as success_count,
             SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count,
             COALESCE(SUM(total_tokens), 0) as total_tokens,
+            COALESCE(SUM(cached_tokens), 0) as cached_tokens,
             CAST(ROUND(COALESCE(AVG(latency_ms), 0)) AS INTEGER) as avg_latency
          FROM request_logs
          WHERE created_at >= ?
@@ -843,13 +854,14 @@ async fn get_stats_overview(
     .unwrap_or_default()
     .into_iter()
     .filter_map(
-        |(model, request_count, success_count, error_count, total_tokens, avg_latency)| {
+        |(model, request_count, success_count, error_count, total_tokens, cached_tokens, avg_latency)| {
             model.map(|m| ModelDimensionStats {
                 model: m,
                 request_count,
                 success_count,
                 error_count,
                 total_tokens,
+                cached_tokens,
                 avg_latency,
             })
         },
@@ -865,6 +877,7 @@ async fn get_stats_overview(
             success_rate,
             requests_per_minute,
             total_tokens,
+            cached_tokens,
             by_gateway,
             by_provider,
             by_model,
@@ -912,7 +925,7 @@ async fn get_stats_trend(
         interval_seconds, interval_seconds
     );
 
-    let rows = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64)>(
+    let rows = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64, i64)>(
         &format!(
             "SELECT
                 {} as time_bucket,
@@ -920,7 +933,8 @@ async fn get_stats_trend(
                 CAST(ROUND(COALESCE(AVG(latency_ms), 0)) AS INTEGER) as avg_latency,
                 SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count,
                 COALESCE(SUM(input_tokens), 0) as input_tokens,
-                COALESCE(SUM(output_tokens), 0) as output_tokens
+                COALESCE(SUM(output_tokens), 0) as output_tokens,
+                COALESCE(SUM(cached_tokens), 0) as cached_tokens
              FROM request_logs
              WHERE created_at >= ?
              GROUP BY time_bucket
@@ -936,7 +950,7 @@ async fn get_stats_trend(
     let data = rows
         .into_iter()
         .map(
-            |(timestamp, request_count, avg_latency, error_count, input_tokens, output_tokens)| {
+            |(timestamp, request_count, avg_latency, error_count, input_tokens, output_tokens, cached_tokens)| {
                 StatsTrendPoint {
                     timestamp,
                     request_count,
@@ -944,6 +958,7 @@ async fn get_stats_trend(
                     error_count,
                     input_tokens,
                     output_tokens,
+                    cached_tokens,
                 }
             },
         )

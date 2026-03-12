@@ -1648,6 +1648,105 @@ async fn admin_stats_include_recent_logs_even_when_average_latency_is_fractional
     assert!(trend_data[0].get("avg_latency").is_some());
 }
 
+#[tokio::test]
+async fn admin_api_stats_endpoints_return_cached_token_fields() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool.clone()));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_stats_cached",
+            "name": "Stats Cached Provider",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-stats-cached",
+            "models": ["gpt-4o-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider request");
+
+    client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_stats_cached",
+            "name": "Stats Cached Gateway",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "default_provider_id": "provider_stats_cached",
+            "default_model": "gpt-4o-mini",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create gateway request");
+
+    sqlx::query(
+        r#"
+        INSERT INTO request_logs (
+            request_id, gateway_id, provider_id, model, model_effective, status_code, latency_ms,
+            input_tokens, output_tokens, cached_tokens, total_tokens, created_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now', '-4 minutes'))
+        "#,
+    )
+    .bind("req_stats_cached_1")
+    .bind("gateway_stats_cached")
+    .bind("provider_stats_cached")
+    .bind("gpt-4o-mini")
+    .bind("gpt-4o-mini")
+    .bind(200_i64)
+    .bind(180_i64)
+    .bind(120_i64)
+    .bind(80_i64)
+    .bind(40_i64)
+    .bind(200_i64)
+    .execute(&pool)
+    .await
+    .expect("insert cached stats log");
+
+    let overview: serde_json::Value = client
+        .get(format!("{base}/admin/stats/overview?period=1h"))
+        .send()
+        .await
+        .expect("fetch stats overview")
+        .json()
+        .await
+        .expect("decode stats overview");
+
+    assert_eq!(overview.get("cached_tokens"), Some(&json!(40)));
+    assert_eq!(
+        overview["by_gateway"][0].get("cached_tokens"),
+        Some(&json!(40))
+    );
+
+    let trend: serde_json::Value = client
+        .get(format!("{base}/admin/stats/trend?period=1h&interval=5m"))
+        .send()
+        .await
+        .expect("fetch stats trend")
+        .json()
+        .await
+        .expect("decode stats trend");
+
+    let trend_data = trend
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .expect("stats trend data array");
+    assert!(!trend_data.is_empty());
+    assert_eq!(trend_data[0].get("cached_tokens"), Some(&json!(40)));
+}
+
 async fn insert_request_log(
     pool: &sqlx::SqlitePool,
     request_id: &str,

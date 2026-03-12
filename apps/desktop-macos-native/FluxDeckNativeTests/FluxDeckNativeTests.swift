@@ -1009,6 +1009,7 @@ final class FluxDeckNativeTests: XCTestCase {
           "success_rate": 83.3,
           "requests_per_minute": 1.2,
           "total_tokens": 123456,
+          "cached_tokens": 32000,
           "by_gateway": [
             {
               "gateway_id": "gw_alpha",
@@ -1016,6 +1017,7 @@ final class FluxDeckNativeTests: XCTestCase {
               "success_count": 35,
               "error_count": 5,
               "total_tokens": 64000,
+              "cached_tokens": 18000,
               "avg_latency": 420
             }
           ],
@@ -1026,6 +1028,7 @@ final class FluxDeckNativeTests: XCTestCase {
               "success_count": 60,
               "error_count": 12,
               "total_tokens": 123456,
+              "cached_tokens": 32000,
               "avg_latency": 380
             }
           ],
@@ -1036,6 +1039,7 @@ final class FluxDeckNativeTests: XCTestCase {
               "success_count": 46,
               "error_count": 5,
               "total_tokens": 92000,
+              "cached_tokens": 22000,
               "avg_latency": 410
             }
           ]
@@ -1046,9 +1050,13 @@ final class FluxDeckNativeTests: XCTestCase {
 
         XCTAssertEqual(overview.totalRequests, 72)
         XCTAssertEqual(overview.successRate, 83.3, accuracy: 0.001)
+        XCTAssertEqual(overview.cachedTokens, 32_000)
         XCTAssertEqual(overview.byGateway.first?.gatewayID, "gw_alpha")
+        XCTAssertEqual(overview.byGateway.first?.cachedTokens, 18_000)
         XCTAssertEqual(overview.byProvider.first?.providerID, "pv_main")
+        XCTAssertEqual(overview.byProvider.first?.cachedTokens, 32_000)
         XCTAssertEqual(overview.byModel.first?.model, "gpt-4.1-mini")
+        XCTAssertEqual(overview.byModel.first?.cachedTokens, 22_000)
     }
 
     func testAdminStatsTrendDecodingUsesAdminContract() throws {
@@ -1063,7 +1071,8 @@ final class FluxDeckNativeTests: XCTestCase {
               "avg_latency": 180,
               "error_count": 1,
               "input_tokens": 800,
-              "output_tokens": 1200
+              "output_tokens": 1200,
+              "cached_tokens": 300
             },
             {
               "timestamp": "2026-03-11 10:05:00",
@@ -1071,7 +1080,8 @@ final class FluxDeckNativeTests: XCTestCase {
               "avg_latency": 240,
               "error_count": 3,
               "input_tokens": 1000,
-              "output_tokens": 1800
+              "output_tokens": 1800,
+              "cached_tokens": 500
             }
           ]
         }
@@ -1083,6 +1093,8 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(trend.interval, "5m")
         XCTAssertEqual(trend.data.count, 2)
         XCTAssertEqual(trend.data.last?.avgLatency, 240)
+        XCTAssertEqual(trend.data.first?.cachedTokens, 300)
+        XCTAssertEqual(trend.data.last?.cachedTokens, 500)
     }
 
     func testTrafficMonitorModelBuildsKpisAlertsAndBreakdowns() {
@@ -1194,7 +1206,11 @@ final class FluxDeckNativeTests: XCTestCase {
             trendPoints: [],
             alerts: [],
             selectedPeriod: "1h",
-            hasData: false
+            hasData: false,
+            gatewayStatsForKpi: [],
+            totalInputTokens: 0,
+            totalOutputTokens: 0,
+            totalCachedTokens: 0
         )
 
         XCTAssertEqual(model.compactGatewayBreakdown.count, 3)
@@ -1228,6 +1244,185 @@ final class FluxDeckNativeTests: XCTestCase {
             ["Requests / min", "Success Rate", "Avg Latency", "Total Tokens"]
         )
         XCTAssertEqual(model.kpiStripItems.first?.value, "0.1")
+    }
+
+    func testTrafficMonitorModelExposesKpiSupplementRows() {
+        let overview = AdminStatsOverview(
+            totalRequests: 120,
+            successfulRequests: 100,
+            errorRequests: 20,
+            successRate: 83.3,
+            requestsPerMinute: 2.0,
+            totalTokens: 9_500,
+            cachedTokens: 900,
+            byGateway: [
+                AdminGatewayStats(
+                    gatewayID: "gw_alpha",
+                    requestCount: 72,
+                    successCount: 65,
+                    errorCount: 7,
+                    totalTokens: 4_800,
+                    cachedTokens: 500,
+                    avgLatency: 420
+                ),
+                AdminGatewayStats(
+                    gatewayID: "gw_beta",
+                    requestCount: 36,
+                    successCount: 29,
+                    errorCount: 7,
+                    totalTokens: 3_400,
+                    cachedTokens: 300,
+                    avgLatency: 780
+                ),
+                AdminGatewayStats(
+                    gatewayID: "gw_gamma",
+                    requestCount: 12,
+                    successCount: 6,
+                    errorCount: 6,
+                    totalTokens: 1_300,
+                    cachedTokens: 100,
+                    avgLatency: 1_600
+                )
+            ],
+            byProvider: [],
+            byModel: []
+        )
+        let trend = AdminStatsTrend(
+            period: "1h",
+            interval: "5m",
+            data: [
+                AdminStatsTrendPoint(
+                    timestamp: "2026-03-11 10:00:00",
+                    requestCount: 40,
+                    avgLatency: 300,
+                    errorCount: 4,
+                    inputTokens: 1_000,
+                    outputTokens: 1_500,
+                    cachedTokens: 400
+                ),
+                AdminStatsTrendPoint(
+                    timestamp: "2026-03-11 10:05:00",
+                    requestCount: 50,
+                    avgLatency: 450,
+                    errorCount: 7,
+                    inputTokens: 1_200,
+                    outputTokens: 1_800,
+                    cachedTokens: 500
+                )
+            ]
+        )
+
+        let model = TrafficAnalyticsModel.make(
+            overview: overview,
+            trend: trend,
+            selectedPeriod: "1h"
+        )
+
+        XCTAssertEqual(
+            model.kpiStripItems.map(\.title),
+            ["Requests / min", "Success Rate", "Avg Latency", "Total Tokens"]
+        )
+        XCTAssertEqual(
+            model.kpiStripItems[0].detailRows,
+            [
+                TrafficKpiSupplementRow(label: "gw_alpha", value: "1.2 rpm"),
+                TrafficKpiSupplementRow(label: "gw_beta", value: "0.6 rpm")
+            ]
+        )
+        XCTAssertEqual(
+            model.kpiStripItems[1].detailRows,
+            [
+                TrafficKpiSupplementRow(label: "gw_alpha", value: "65 ok / 7 err"),
+                TrafficKpiSupplementRow(label: "gw_beta", value: "29 ok / 7 err")
+            ]
+        )
+        XCTAssertEqual(
+            model.kpiStripItems[2].detailRows,
+            [
+                TrafficKpiSupplementRow(label: "gw_alpha", value: "420 ms"),
+                TrafficKpiSupplementRow(label: "gw_beta", value: "780 ms")
+            ]
+        )
+        XCTAssertEqual(
+            model.kpiStripItems[3].detailRows,
+            [
+                TrafficKpiSupplementRow(label: "Input", value: "2,200"),
+                TrafficKpiSupplementRow(label: "Output", value: "3,300"),
+                TrafficKpiSupplementRow(label: "Cached", value: "900")
+            ]
+        )
+    }
+
+    func testAdminStatsOverviewAndTrendDecodeCachedTokens() throws {
+        let overviewData = """
+        {
+          "total_requests": 72,
+          "successful_requests": 60,
+          "error_requests": 12,
+          "success_rate": 83.3,
+          "requests_per_minute": 1.2,
+          "total_tokens": 123456,
+          "cached_tokens": 32000,
+          "by_gateway": [
+            {
+              "gateway_id": "gw_alpha",
+              "request_count": 40,
+              "success_count": 35,
+              "error_count": 5,
+              "total_tokens": 64000,
+              "cached_tokens": 18000,
+              "avg_latency": 420
+            }
+          ],
+          "by_provider": [
+            {
+              "provider_id": "pv_main",
+              "request_count": 72,
+              "success_count": 60,
+              "error_count": 12,
+              "total_tokens": 123456,
+              "cached_tokens": 32000,
+              "avg_latency": 380
+            }
+          ],
+          "by_model": [
+            {
+              "model": "gpt-4.1-mini",
+              "request_count": 51,
+              "success_count": 46,
+              "error_count": 5,
+              "total_tokens": 92000,
+              "cached_tokens": 22000,
+              "avg_latency": 410
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        let trendData = """
+        {
+          "period": "1h",
+          "interval": "5m",
+          "data": [
+            {
+              "timestamp": "2026-03-11 10:00:00",
+              "request_count": 12,
+              "avg_latency": 180,
+              "error_count": 1,
+              "input_tokens": 800,
+              "output_tokens": 1200,
+              "cached_tokens": 300
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        let overview = try AdminApiClient.decodeStatsOverview(from: overviewData)
+        let trend = try AdminApiClient.decodeStatsTrend(from: trendData)
+
+        XCTAssertEqual(overview.cachedTokens, 32_000)
+        XCTAssertEqual(overview.byGateway.first?.cachedTokens, 18_000)
+        XCTAssertEqual(trend.data.first?.cachedTokens, 300)
     }
 
     func testTrafficMonitorModelKeepsRenderableScaffoldWhenStatsAreEmpty() {

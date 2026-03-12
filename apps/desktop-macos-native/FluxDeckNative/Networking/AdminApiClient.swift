@@ -628,6 +628,7 @@ struct AdminGatewayStats: Decodable, Equatable {
     let successCount: Int
     let errorCount: Int
     let totalTokens: Int
+    let cachedTokens: Int
     let avgLatency: Int
 
     enum CodingKeys: String, CodingKey {
@@ -636,7 +637,26 @@ struct AdminGatewayStats: Decodable, Equatable {
         case successCount = "success_count"
         case errorCount = "error_count"
         case totalTokens = "total_tokens"
+        case cachedTokens = "cached_tokens"
         case avgLatency = "avg_latency"
+    }
+
+    init(
+        gatewayID: String,
+        requestCount: Int,
+        successCount: Int,
+        errorCount: Int,
+        totalTokens: Int,
+        cachedTokens: Int = 0,
+        avgLatency: Int
+    ) {
+        self.gatewayID = gatewayID
+        self.requestCount = requestCount
+        self.successCount = successCount
+        self.errorCount = errorCount
+        self.totalTokens = totalTokens
+        self.cachedTokens = cachedTokens
+        self.avgLatency = avgLatency
     }
 }
 
@@ -646,6 +666,7 @@ struct AdminProviderStats: Decodable, Equatable {
     let successCount: Int
     let errorCount: Int
     let totalTokens: Int
+    let cachedTokens: Int
     let avgLatency: Int
 
     enum CodingKeys: String, CodingKey {
@@ -654,7 +675,26 @@ struct AdminProviderStats: Decodable, Equatable {
         case successCount = "success_count"
         case errorCount = "error_count"
         case totalTokens = "total_tokens"
+        case cachedTokens = "cached_tokens"
         case avgLatency = "avg_latency"
+    }
+
+    init(
+        providerID: String,
+        requestCount: Int,
+        successCount: Int,
+        errorCount: Int,
+        totalTokens: Int,
+        cachedTokens: Int = 0,
+        avgLatency: Int
+    ) {
+        self.providerID = providerID
+        self.requestCount = requestCount
+        self.successCount = successCount
+        self.errorCount = errorCount
+        self.totalTokens = totalTokens
+        self.cachedTokens = cachedTokens
+        self.avgLatency = avgLatency
     }
 }
 
@@ -664,6 +704,7 @@ struct AdminModelStats: Decodable, Equatable {
     let successCount: Int
     let errorCount: Int
     let totalTokens: Int
+    let cachedTokens: Int
     let avgLatency: Int
 
     enum CodingKeys: String, CodingKey {
@@ -672,7 +713,26 @@ struct AdminModelStats: Decodable, Equatable {
         case successCount = "success_count"
         case errorCount = "error_count"
         case totalTokens = "total_tokens"
+        case cachedTokens = "cached_tokens"
         case avgLatency = "avg_latency"
+    }
+
+    init(
+        model: String,
+        requestCount: Int,
+        successCount: Int,
+        errorCount: Int,
+        totalTokens: Int,
+        cachedTokens: Int = 0,
+        avgLatency: Int
+    ) {
+        self.model = model
+        self.requestCount = requestCount
+        self.successCount = successCount
+        self.errorCount = errorCount
+        self.totalTokens = totalTokens
+        self.cachedTokens = cachedTokens
+        self.avgLatency = avgLatency
     }
 }
 
@@ -683,6 +743,7 @@ struct AdminStatsOverview: Decodable, Equatable {
     let successRate: Double
     let requestsPerMinute: Double
     let totalTokens: Int
+    let cachedTokens: Int
     let byGateway: [AdminGatewayStats]
     let byProvider: [AdminProviderStats]
     let byModel: [AdminModelStats]
@@ -694,9 +755,34 @@ struct AdminStatsOverview: Decodable, Equatable {
         case successRate = "success_rate"
         case requestsPerMinute = "requests_per_minute"
         case totalTokens = "total_tokens"
+        case cachedTokens = "cached_tokens"
         case byGateway = "by_gateway"
         case byProvider = "by_provider"
         case byModel = "by_model"
+    }
+
+    init(
+        totalRequests: Int,
+        successfulRequests: Int,
+        errorRequests: Int,
+        successRate: Double,
+        requestsPerMinute: Double,
+        totalTokens: Int,
+        cachedTokens: Int = 0,
+        byGateway: [AdminGatewayStats],
+        byProvider: [AdminProviderStats],
+        byModel: [AdminModelStats]
+    ) {
+        self.totalRequests = totalRequests
+        self.successfulRequests = successfulRequests
+        self.errorRequests = errorRequests
+        self.successRate = successRate
+        self.requestsPerMinute = requestsPerMinute
+        self.totalTokens = totalTokens
+        self.cachedTokens = cachedTokens
+        self.byGateway = byGateway
+        self.byProvider = byProvider
+        self.byModel = byModel
     }
 }
 
@@ -707,6 +793,7 @@ struct AdminStatsTrendPoint: Decodable, Equatable {
     let errorCount: Int
     let inputTokens: Int
     let outputTokens: Int
+    let cachedTokens: Int
 
     enum CodingKeys: String, CodingKey {
         case timestamp
@@ -715,6 +802,25 @@ struct AdminStatsTrendPoint: Decodable, Equatable {
         case errorCount = "error_count"
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
+        case cachedTokens = "cached_tokens"
+    }
+
+    init(
+        timestamp: String,
+        requestCount: Int,
+        avgLatency: Int,
+        errorCount: Int,
+        inputTokens: Int,
+        outputTokens: Int,
+        cachedTokens: Int = 0
+    ) {
+        self.timestamp = timestamp
+        self.requestCount = requestCount
+        self.avgLatency = avgLatency
+        self.errorCount = errorCount
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cachedTokens = cachedTokens
     }
 }
 
