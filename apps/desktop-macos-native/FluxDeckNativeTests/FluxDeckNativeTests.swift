@@ -324,6 +324,96 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(gateways.first?.autoStart, true)
     }
 
+    func testDecodesGatewayUpdateResultPayload() throws {
+        let updateData = """
+        {
+          "gateway": {
+            "id": "gateway_main",
+            "name": "Gateway Main",
+            "listen_host": "0.0.0.0",
+            "listen_port": 18080,
+            "inbound_protocol": "openai",
+            "upstream_protocol": "provider_default",
+            "protocol_config_json": {},
+            "default_provider_id": "provider_main",
+            "default_model": "gpt-4o-mini",
+            "enabled": true,
+            "auto_start": true,
+            "runtime_status": "running",
+            "last_error": null
+          },
+          "runtime_status": "running",
+          "last_error": null,
+          "restart_performed": true,
+          "config_changed": true,
+          "user_notice": "Gateway 配置已保存，运行中的实例已自动重启。"
+        }
+        """.data(using: .utf8)!
+
+        let result = try JSONDecoder().decode(AdminGatewayUpdateResult.self, from: updateData)
+
+        XCTAssertEqual(result.gateway.id, "gateway_main")
+        XCTAssertEqual(result.gateway.listenHost, "0.0.0.0")
+        XCTAssertEqual(result.runtimeStatus, "running")
+        XCTAssertEqual(result.restartPerformed, true)
+        XCTAssertEqual(result.configChanged, true)
+        XCTAssertEqual(result.userNotice, "Gateway 配置已保存，运行中的实例已自动重启。")
+    }
+
+    func testGatewayUpdateNoticeTextPrefersServerNoticeAndFallsBackLocally() {
+        let gateway = AdminGateway(
+            id: "gw_update",
+            name: "Gateway Update",
+            listenHost: "127.0.0.1",
+            listenPort: 18080,
+            inboundProtocol: "openai",
+            defaultProviderId: "provider_main",
+            enabled: true,
+            autoStart: true,
+            runtimeStatus: "running",
+            lastError: nil
+        )
+
+        let serverNotice = AdminGatewayUpdateResult(
+            gateway: gateway,
+            runtimeStatus: "running",
+            lastError: nil,
+            restartPerformed: true,
+            configChanged: true,
+            userNotice: "Gateway 配置已保存，运行中的实例已自动重启。"
+        )
+        XCTAssertEqual(
+            gatewayUpdateNoticeText(for: serverNotice),
+            "Gateway 配置已保存，运行中的实例已自动重启。"
+        )
+
+        let failedRestart = AdminGatewayUpdateResult(
+            gateway: gateway,
+            runtimeStatus: "stopped",
+            lastError: "address already in use",
+            restartPerformed: true,
+            configChanged: true,
+            userNotice: nil
+        )
+        XCTAssertEqual(
+            gatewayUpdateNoticeText(for: failedRestart),
+            "Gateway 配置已保存，但自动重启失败：address already in use"
+        )
+
+        let unchanged = AdminGatewayUpdateResult(
+            gateway: gateway,
+            runtimeStatus: "running",
+            lastError: nil,
+            restartPerformed: false,
+            configChanged: false,
+            userNotice: nil
+        )
+        XCTAssertEqual(
+            gatewayUpdateNoticeText(for: unchanged),
+            "Gateway 配置已保存。"
+        )
+    }
+
     func testRuntimeCategoryAndOverviewMetrics() {
         let providers = [
             AdminProvider(

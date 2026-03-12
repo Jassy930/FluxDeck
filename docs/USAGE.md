@@ -185,12 +185,15 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway update gateway
 
 - `Runtime` 摘要卡，展示当前 `Status`、`Startup`、`Endpoint`、`Routing`
 - `Routing Targets` 辅助卡，快速确认当前 `default_provider_id` 指向的 Provider
-- 如果 Gateway 正在运行，修改保存后仍需手动 `stop/start` 才会让新的运行时配置生效
+- 如果 Gateway 正在运行且配置确实发生变化，保存后会由 `fluxd` 自动执行 `stop -> start`
+- 原生前端会展示自动重启成功或失败提示
 
 说明：
 
-- `gateway update` 只保存配置，不会热更新当前运行中的实例
-- 如果该 Gateway 当前已在运行，请手动执行 `gateway stop` 后再 `gateway start`，让新配置生效
+- `gateway update` 会先保存配置，再根据运行态决定是否自动重启
+- 只有当“更新前实例处于运行中”且“新旧配置确实不同”时，才会自动重启
+- 如果实例未运行，则只保存配置，不会自动启动
+- `fluxctl gateway update` 会在 JSON 输出后追加一行 `Notice: ...` 提示，说明是否触发了自动重启
 
 启动 Gateway：
 

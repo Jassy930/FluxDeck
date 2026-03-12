@@ -101,6 +101,9 @@ async fn main() -> Result<()> {
                 let path = format!("/admin/gateways/{id}");
                 let result = client.put_json(&path, payload).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
+                if let Some(notice) = gateway_update_notice(&result) {
+                    eprintln!("Notice: {notice}");
+                }
             }
             GatewayCmd::List => {
                 let result = client.get_json("/admin/gateways").await?;
@@ -133,4 +136,40 @@ fn split_models(models: &str) -> Vec<String> {
         .filter(|s| !s.is_empty())
         .map(ToOwned::to_owned)
         .collect()
+}
+
+fn gateway_update_notice(result: &serde_json::Value) -> Option<&str> {
+    result.get("user_notice").and_then(serde_json::Value::as_str)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gateway_update_notice;
+    use serde_json::json;
+
+    #[test]
+    fn extracts_gateway_update_notice_from_result() {
+        let value = json!({
+            "gateway": {"id": "gw_1"},
+            "restart_performed": true,
+            "config_changed": true,
+            "user_notice": "Gateway 配置已保存，运行中的实例已自动重启。"
+        });
+
+        assert_eq!(
+            gateway_update_notice(&value),
+            Some("Gateway 配置已保存，运行中的实例已自动重启。")
+        );
+    }
+
+    #[test]
+    fn returns_none_when_gateway_update_notice_missing() {
+        let value = json!({
+            "gateway": {"id": "gw_1"},
+            "restart_performed": false,
+            "config_changed": false
+        });
+
+        assert_eq!(gateway_update_notice(&value), None);
+    }
 }

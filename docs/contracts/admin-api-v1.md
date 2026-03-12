@@ -104,7 +104,13 @@
 
 响应：
 
-- 成功：`200`，返回更新后的 Gateway（字段同 `GET /admin/gateways`，其中运行态字段仍由运行时决定）
+- 成功：`200`，返回对象：
+  - `gateway: Gateway`
+  - `runtime_status: "running" | "stopped" | string`
+  - `last_error: string | null`
+  - `restart_performed: boolean`
+  - `config_changed: boolean`
+  - `user_notice: string | null`
 - 不存在：`404`
 
 说明：
@@ -112,7 +118,10 @@
 - `auto_start=true` 表示 `fluxd` 进程启动时会自动尝试拉起该 Gateway
 - 自动拉起只对 `enabled=true && auto_start=true` 的 Gateway 生效
 - 若某个 Gateway 自动拉起失败，不会阻塞 `fluxd` 启动；错误会写入该 Gateway 的 `last_error`
-- `PUT /admin/gateways/{id}` 只更新配置，不会热更新当前已运行的 Gateway；如需让新配置生效，请手动 `stop -> start`
+- `PUT /admin/gateways/{id}` 会先持久化配置，再根据运行态决定是否自动重启
+- 只有当“更新前实例处于 `running`”且“新旧配置确实发生变化”时，才会自动执行 `stop -> start`
+- 若实例未运行，则只保存配置，不会自动启动
+- 若自动重启失败，配置仍然会保存成功，错误会通过 `last_error` 与 `user_notice` 返回
 
 `protocol_config_json` 约定（当前已使用字段）：
 

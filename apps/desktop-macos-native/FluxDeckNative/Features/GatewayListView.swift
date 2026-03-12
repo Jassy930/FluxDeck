@@ -5,6 +5,7 @@ struct GatewayListView: View {
     let isLoading: Bool
     let isSubmitting: Bool
     let error: String?
+    let notice: String?
     let onCreate: () -> Void
     let onConfigure: (AdminGateway) -> Void
     let onToggleRuntime: (AdminGateway) -> Void
@@ -30,6 +31,14 @@ struct GatewayListView: View {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(DesignTokens.statusColors.error.fill)
+                }
+            }
+
+            if let notice, !notice.isEmpty {
+                SurfaceCard {
+                    Label(notice, systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(DesignTokens.statusColors.running.fill)
                 }
             }
 

@@ -91,10 +91,23 @@ async fn admin_api_manages_resources() {
         .json()
         .await
         .expect("decode updated gateway");
-    assert_eq!(updated_gateway.get("id"), Some(&json!("gateway_admin_1")));
-    assert_eq!(updated_gateway.get("name"), Some(&json!("Admin Gateway Updated")));
-    assert_eq!(updated_gateway.get("enabled"), Some(&json!(false)));
-    assert_eq!(updated_gateway.get("auto_start"), Some(&json!(false)));
+    assert_eq!(
+        updated_gateway["gateway"].get("id"),
+        Some(&json!("gateway_admin_1"))
+    );
+    assert_eq!(
+        updated_gateway["gateway"].get("name"),
+        Some(&json!("Admin Gateway Updated"))
+    );
+    assert_eq!(updated_gateway["gateway"].get("enabled"), Some(&json!(false)));
+    assert_eq!(updated_gateway["gateway"].get("auto_start"), Some(&json!(false)));
+    assert_eq!(updated_gateway.get("runtime_status"), Some(&json!("stopped")));
+    assert_eq!(updated_gateway.get("restart_performed"), Some(&json!(false)));
+    assert_eq!(updated_gateway.get("config_changed"), Some(&json!(true)));
+    assert!(updated_gateway
+        .get("user_notice")
+        .and_then(serde_json::Value::as_str)
+        .is_some());
 
     let logs_resp = client
         .get(format!("{base}/admin/logs"))
@@ -417,6 +430,199 @@ async fn admin_api_returns_gateway_runtime_status() {
         .and_then(|items| items.first())
         .expect("gateway exists after stop");
     assert_eq!(gateway_after_stop.get("runtime_status"), Some(&json!("stopped")));
+}
+
+#[tokio::test]
+async fn admin_api_restarts_running_gateway_when_config_changes() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    create_test_provider(&client, &base, "provider_restart_1").await;
+    let original_port = next_free_port();
+    create_test_gateway(&client, &base, "gateway_restart_1", "Gateway Restart", original_port).await;
+
+    client
+        .post(format!("{base}/admin/gateways/gateway_restart_1/start"))
+        .send()
+        .await
+        .expect("start gateway request");
+
+    let updated_port = next_free_port();
+    let update_resp = client
+        .put(format!("{base}/admin/gateways/gateway_restart_1"))
+        .json(&json!({
+            "name": "Gateway Restart Updated",
+            "listen_host": "127.0.0.1",
+            "listen_port": updated_port,
+            "inbound_protocol": "openai",
+            "upstream_protocol": "provider_default",
+            "protocol_config_json": {},
+            "default_provider_id": "provider_restart_1",
+            "default_model": "gpt-4.1-mini",
+            "enabled": true,
+            "auto_start": false
+        }))
+        .send()
+        .await
+        .expect("update gateway request");
+    assert_eq!(update_resp.status(), reqwest::StatusCode::OK);
+
+    let updated: serde_json::Value = update_resp.json().await.expect("decode update response");
+    assert_eq!(updated.get("restart_performed"), Some(&json!(true)));
+    assert_eq!(updated.get("config_changed"), Some(&json!(true)));
+    assert_eq!(updated.get("runtime_status"), Some(&json!("running")));
+    assert!(updated.get("user_notice").and_then(serde_json::Value::as_str).is_some());
+    assert_eq!(updated["gateway"].get("listen_port"), Some(&json!(updated_port)));
+
+    let old_addr = format!("127.0.0.1:{original_port}");
+    let new_addr = format!("127.0.0.1:{updated_port}");
+    assert!(reqwest::get(format!("http://{old_addr}/health")).await.is_err());
+    let new_resp = reqwest::get(format!("http://{new_addr}/health"))
+        .await
+        .expect("new port should accept tcp");
+    assert_eq!(new_resp.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn admin_api_marks_any_running_gateway_field_change_as_restart_worthy() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    create_test_provider(&client, &base, "provider_restart_2").await;
+    let listen_port = next_free_port();
+    create_test_gateway(&client, &base, "gateway_restart_2", "Gateway Restart", listen_port).await;
+
+    client
+        .post(format!("{base}/admin/gateways/gateway_restart_2/start"))
+        .send()
+        .await
+        .expect("start gateway request");
+
+    let update_resp = client
+        .put(format!("{base}/admin/gateways/gateway_restart_2"))
+        .json(&json!({
+            "name": "Gateway Restart Renamed",
+            "listen_host": "127.0.0.1",
+            "listen_port": listen_port,
+            "inbound_protocol": "openai",
+            "upstream_protocol": "provider_default",
+            "protocol_config_json": {},
+            "default_provider_id": "provider_restart_2",
+            "default_model": "gpt-4o-mini",
+            "enabled": true,
+            "auto_start": false
+        }))
+        .send()
+        .await
+        .expect("update gateway request");
+    assert_eq!(update_resp.status(), reqwest::StatusCode::OK);
+
+    let updated: serde_json::Value = update_resp.json().await.expect("decode update response");
+    assert_eq!(updated.get("restart_performed"), Some(&json!(true)));
+    assert_eq!(updated.get("config_changed"), Some(&json!(true)));
+    assert_eq!(updated["gateway"].get("name"), Some(&json!("Gateway Restart Renamed")));
+}
+
+#[tokio::test]
+async fn admin_api_does_not_restart_running_gateway_when_config_is_unchanged() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    create_test_provider(&client, &base, "provider_restart_3").await;
+    let listen_port = next_free_port();
+    create_test_gateway(&client, &base, "gateway_restart_3", "Gateway Same", listen_port).await;
+
+    client
+        .post(format!("{base}/admin/gateways/gateway_restart_3/start"))
+        .send()
+        .await
+        .expect("start gateway request");
+
+    let update_resp = client
+        .put(format!("{base}/admin/gateways/gateway_restart_3"))
+        .json(&json!({
+            "name": "Gateway Same",
+            "listen_host": "127.0.0.1",
+            "listen_port": listen_port,
+            "inbound_protocol": "openai",
+            "upstream_protocol": "provider_default",
+            "protocol_config_json": {},
+            "default_provider_id": "provider_restart_3",
+            "default_model": "gpt-4o-mini",
+            "enabled": true,
+            "auto_start": false
+        }))
+        .send()
+        .await
+        .expect("update gateway request");
+    assert_eq!(update_resp.status(), reqwest::StatusCode::OK);
+
+    let updated: serde_json::Value = update_resp.json().await.expect("decode update response");
+    assert_eq!(updated.get("restart_performed"), Some(&json!(false)));
+    assert_eq!(updated.get("config_changed"), Some(&json!(false)));
+    assert_eq!(updated.get("runtime_status"), Some(&json!("running")));
+}
+
+#[tokio::test]
+async fn admin_api_does_not_restart_stopped_gateway_even_when_config_changes() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    create_test_provider(&client, &base, "provider_restart_4").await;
+    let listen_port = next_free_port();
+    create_test_gateway(&client, &base, "gateway_restart_4", "Gateway Stopped", listen_port).await;
+
+    let update_resp = client
+        .put(format!("{base}/admin/gateways/gateway_restart_4"))
+        .json(&json!({
+            "name": "Gateway Stopped Updated",
+            "listen_host": "0.0.0.0",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "upstream_protocol": "provider_default",
+            "protocol_config_json": {"compatibility_mode": "compatible"},
+            "default_provider_id": "provider_restart_4",
+            "default_model": "gpt-4.1-mini",
+            "enabled": true,
+            "auto_start": false
+        }))
+        .send()
+        .await
+        .expect("update gateway request");
+    assert_eq!(update_resp.status(), reqwest::StatusCode::OK);
+
+    let updated: serde_json::Value = update_resp.json().await.expect("decode update response");
+    assert_eq!(updated.get("restart_performed"), Some(&json!(false)));
+    assert_eq!(updated.get("config_changed"), Some(&json!(true)));
+    assert_eq!(updated.get("runtime_status"), Some(&json!("stopped")));
 }
 
 #[tokio::test]
@@ -1085,4 +1291,50 @@ fn next_free_port() -> i64 {
     let port = listener.local_addr().expect("read local addr").port() as i64;
     drop(listener);
     port
+}
+
+async fn create_test_provider(client: &reqwest::Client, base: &str, provider_id: &str) {
+    let response = client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": provider_id,
+            "name": format!("Provider {provider_id}"),
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-test",
+            "models": ["gpt-4o-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider request");
+    assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+}
+
+async fn create_test_gateway(
+    client: &reqwest::Client,
+    base: &str,
+    gateway_id: &str,
+    name: &str,
+    listen_port: i64,
+) {
+    let response = client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": gateway_id,
+            "name": name,
+            "listen_host": "127.0.0.1",
+            "listen_port": listen_port,
+            "inbound_protocol": "openai",
+            "upstream_protocol": "provider_default",
+            "protocol_config_json": {},
+            "default_provider_id": gateway_id.replacen("gateway", "provider", 1),
+            "default_model": "gpt-4o-mini",
+            "enabled": true,
+            "auto_start": false
+        }))
+        .send()
+        .await
+        .expect("create gateway request");
+    assert_eq!(response.status(), reqwest::StatusCode::CREATED);
 }

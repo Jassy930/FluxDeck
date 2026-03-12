@@ -55,7 +55,9 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
 
 - `New Gateway` 与 `Edit Gateway` 已统一为工作台式编辑界面
 - `Default Provider`、`Inbound Protocol`、`Upstream Protocol` 优先通过受控选择填写
-- `Routing JSON` 会在保存前做 JSON object 校验；若 Gateway 已运行，仍需手动 stop/start 才会生效
+- `Routing JSON` 会在保存前做 JSON object 校验
+- 若 Gateway 当前处于运行中，且保存内容相对旧配置确实有变化，fluxd 会自动执行 `stop -> start`
+- 原生桌面端与 `fluxctl gateway update` 都会展示自动重启结果提示
 
 更新网关配置：
 
@@ -73,7 +75,11 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway update gateway
   --auto-start false
 ```
 
-注意：更新只保存配置，不会热更新当前运行中的 Gateway；如需生效，请手动 stop/start。
+注意：
+
+- 若 Gateway 当前未运行，`gateway update` 只保存配置，不会自动启动
+- 若 Gateway 当前正在运行且配置发生变化，fluxd 会自动重启该实例以应用新配置
+- `fluxctl` 会先输出完整 JSON，再额外输出一行 `Notice: ...` 提示
 
 手动启动/停止网关：
 

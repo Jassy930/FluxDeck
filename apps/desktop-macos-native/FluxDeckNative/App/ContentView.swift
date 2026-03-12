@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var isLoading = false
     @State private var isSubmitting = false
     @State private var loadError: String?
+    @State private var operationNotice: String?
     @State private var lastRefreshedAt: Date?
     @State private var isProviderSheetPresented = false
     @State private var editingProvider: AdminProvider?
@@ -209,6 +210,7 @@ struct ContentView: View {
                 isLoading: isLoading,
                 isSubmitting: isSubmitting,
                 error: loadError,
+                notice: operationNotice,
                 onCreate: { isGatewaySheetPresented = true },
                 onConfigure: { gateway in
                     editingGateway = gateway
@@ -419,6 +421,7 @@ struct ContentView: View {
     @MainActor
     private func createProvider(_ input: CreateProviderInput) async {
         isSubmitting = true
+        operationNotice = nil
 
         do {
             _ = try await client.createProvider(input)
@@ -435,6 +438,7 @@ struct ContentView: View {
     @MainActor
     private func updateProvider(id: String, input: UpdateProviderInput) async {
         isSubmitting = true
+        operationNotice = nil
 
         do {
             _ = try await client.updateProvider(id: id, input: input)
@@ -451,6 +455,7 @@ struct ContentView: View {
     @MainActor
     private func createGateway(_ input: CreateGatewayInput) async {
         isSubmitting = true
+        operationNotice = nil
 
         do {
             _ = try await client.createGateway(input)
@@ -458,6 +463,7 @@ struct ContentView: View {
             loadError = nil
             await refreshAll()
         } catch {
+            operationNotice = nil
             loadError = error.localizedDescription
         }
 
@@ -469,11 +475,13 @@ struct ContentView: View {
         isSubmitting = true
 
         do {
-            _ = try await client.updateGateway(id: id, input: input)
+            let result = try await client.updateGateway(id: id, input: input)
             editingGateway = nil
             loadError = nil
+            operationNotice = gatewayUpdateNoticeText(for: result)
             await refreshAll()
         } catch {
+            operationNotice = nil
             loadError = error.localizedDescription
         }
 
@@ -483,6 +491,7 @@ struct ContentView: View {
     @MainActor
     private func toggleGatewayRuntime(_ gateway: AdminGateway) async {
         isSubmitting = true
+        operationNotice = nil
 
         do {
             if runtimeCategory(for: gateway) == .running {
@@ -1994,7 +2003,7 @@ private struct GatewayFormSheet: View {
                     HStack(alignment: .top, spacing: 14) {
                         SurfaceCard(title: "Routing JSON") {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text("Protocol compatibility and routing overrides are saved to configuration only. If this gateway is running, stop and start it manually to apply runtime changes.")
+                                Text("Protocol compatibility and routing overrides are stored with the gateway profile. If this instance is currently running and the configuration changes, FluxDeck will restart it automatically after save.")
                                     .font(.caption)
                                     .foregroundStyle(DesignTokens.textSecondary)
 

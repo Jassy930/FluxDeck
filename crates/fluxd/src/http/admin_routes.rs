@@ -129,8 +129,71 @@ async fn update_gateway(
     Path(gateway_id): Path<String>,
     Json(input): Json<UpdateGatewayInput>,
 ) -> (StatusCode, Json<Value>) {
+    let existing_gateway = match state.gateway_repo.get_by_id(&gateway_id).await {
+        Ok(Some(gateway)) => gateway,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "gateway not found",
+                    "id": gateway_id
+                })),
+            )
+        }
+        Err(err) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": err.to_string()
+                })),
+            )
+        }
+    };
+
+    let was_running = state.gateway_manager.status(&gateway_id).await == crate::runtime::gateway_manager::GatewayRuntimeStatus::Running;
+    let config_changed = gateway_differs_from_update(&existing_gateway, &input);
+
     match state.gateway_repo.update(&gateway_id, input).await {
-        Ok(Some(gateway)) => (StatusCode::OK, Json(json!(gateway))),
+        Ok(Some(gateway)) => {
+            let mut restart_performed = false;
+            let user_notice = if was_running && config_changed {
+                restart_performed = true;
+                let restart_result = async {
+                    state.gateway_manager.stop_gateway(&gateway_id).await?;
+                    state.gateway_manager.start_gateway(&gateway_id).await?;
+                    Ok::<(), anyhow::Error>(())
+                }
+                .await;
+
+                match restart_result {
+                    Ok(()) => Some(
+                        "Gateway 配置已保存。检测到该实例正在运行且配置发生变化，系统已自动重启以应用变更。"
+                            .to_string(),
+                    ),
+                    Err(err) => Some(format!(
+                        "Gateway 配置已保存，但自动重启失败：{err}"
+                    )),
+                }
+            } else if config_changed {
+                Some("Gateway 配置已保存。当前实例未运行，因此未触发自动重启。".to_string())
+            } else {
+                Some("Gateway 配置未发生变化，运行时保持不变。".to_string())
+            };
+
+            let runtime_status = state.gateway_manager.status(&gateway_id).await;
+            let last_error = state.gateway_manager.last_error(&gateway_id).await;
+            (
+                StatusCode::OK,
+                Json(json!(GatewayUpdateResult {
+                    gateway,
+                    runtime_status: runtime_status.as_str().to_string(),
+                    last_error,
+                    restart_performed,
+                    config_changed,
+                    user_notice,
+                })),
+            )
+        }
         Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(json!({
@@ -174,6 +237,29 @@ struct GatewayWithRuntime {
     gateway: Gateway,
     runtime_status: String,
     last_error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct GatewayUpdateResult {
+    gateway: Gateway,
+    runtime_status: String,
+    last_error: Option<String>,
+    restart_performed: bool,
+    config_changed: bool,
+    user_notice: Option<String>,
+}
+
+fn gateway_differs_from_update(gateway: &Gateway, input: &UpdateGatewayInput) -> bool {
+    gateway.name != input.name
+        || gateway.listen_host != input.listen_host
+        || gateway.listen_port != input.listen_port
+        || gateway.inbound_protocol != input.inbound_protocol
+        || gateway.upstream_protocol != input.upstream_protocol
+        || gateway.protocol_config_json != input.protocol_config_json
+        || gateway.default_provider_id != input.default_provider_id
+        || gateway.default_model != input.default_model
+        || gateway.enabled != input.enabled
+        || gateway.auto_start != input.auto_start
 }
 
 #[derive(Debug, Deserialize, Default)]

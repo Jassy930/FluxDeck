@@ -309,6 +309,24 @@ struct AdminGateway: Decodable, Identifiable {
     }
 }
 
+struct AdminGatewayUpdateResult: Decodable {
+    let gateway: AdminGateway
+    let runtimeStatus: String
+    let lastError: String?
+    let restartPerformed: Bool
+    let configChanged: Bool
+    let userNotice: String?
+
+    enum CodingKeys: String, CodingKey {
+        case gateway
+        case runtimeStatus = "runtime_status"
+        case lastError = "last_error"
+        case restartPerformed = "restart_performed"
+        case configChanged = "config_changed"
+        case userNotice = "user_notice"
+    }
+}
+
 struct AdminLog: Decodable, Identifiable {
     let requestID: String
     let gatewayID: String
@@ -551,9 +569,9 @@ struct AdminApiClient {
         return try JSONDecoder().decode(AdminGateway.self, from: data)
     }
 
-    func updateGateway(id: String, input: UpdateGatewayInput) async throws -> AdminGateway {
+    func updateGateway(id: String, input: UpdateGatewayInput) async throws -> AdminGatewayUpdateResult {
         let data = try await put(path: "/admin/gateways/\(id)", body: input)
-        return try JSONDecoder().decode(AdminGateway.self, from: data)
+        return try JSONDecoder().decode(AdminGatewayUpdateResult.self, from: data)
     }
 
     func startGateway(id: String) async throws {
@@ -673,6 +691,19 @@ func buildDashboardMetrics(providers: [AdminProvider], gateways: [AdminGateway])
         runningGatewayCount: runningCount,
         errorGatewayCount: errorCount
     )
+}
+
+func gatewayUpdateNoticeText(for result: AdminGatewayUpdateResult) -> String {
+    if let userNotice = result.userNotice, !userNotice.isEmpty {
+        return userNotice
+    }
+    if let lastError = result.lastError, !lastError.isEmpty {
+        return "Gateway 配置已保存，但自动重启失败：\(lastError)"
+    }
+    if result.restartPerformed {
+        return "Gateway 配置已保存，运行中的实例已自动重启。"
+    }
+    return "Gateway 配置已保存。"
 }
 
 func filterLogs(
