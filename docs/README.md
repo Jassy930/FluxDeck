@@ -20,7 +20,9 @@ docs/
 │   └── YYYY-MM-DD-*.md
 │
 ├── testing/              # 测试策略与验收清单
-│   ├── mvp-e2e.md        # MVP E2E 验证
+│   ├── quality-gates.md  # 统一质量门禁定义（权威入口）
+│   ├── mvp-e2e.md        # 旧门禁说明重定向
+│   ├── legacy-web-checks.md
 │   └── anthropic-compat-e2e.md
 │
 ├── references/           # 外部依赖的纯文本化文档（LLM-friendly）
@@ -46,4 +48,5 @@ docs/
 | `contracts/admin-api-v1.md` | Admin API 契约，前端类型定义必须与此一致 |
 | `ops/local-runbook.md` | 本地运行与开发指南 |
 | `USAGE.md` | 面向终端用户的使用说明 |
-| `testing/mvp-e2e.md` | 提交前必跑的验收命令 |
+| `testing/quality-gates.md` | 统一质量门禁定义，所有提交/CI/发布口径都以此为准 |
+| `testing/mvp-e2e.md` | 历史文档，现仅保留为重定向入口 |

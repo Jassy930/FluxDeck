@@ -46,3 +46,9 @@ xcodebuild -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme F
 ```bash
 xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -quiet
 ```
+
+## 质量门禁映射
+
+- `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -quiet` 属于主线 `ci-gate`
+- 发布前至少满足 `release-gate`，即在 `ci-gate` 基础上再完成原生端构建验证
+- 完整定义统一参考 `docs/testing/quality-gates.md`

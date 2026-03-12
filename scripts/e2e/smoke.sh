@@ -76,8 +76,6 @@ RESPONSE="$(curl -fsS -X POST "http://127.0.0.1:${GATEWAY_PORT}/v1/chat/completi
 
 echo "$RESPONSE" | grep -q 'chatcmpl_mock_001'
 
-bun "$ROOT_DIR/scripts/e2e/validate_cli_desktop_consistency.ts" "http://127.0.0.1:${ADMIN_PORT}"
-
 uv run python "$ROOT_DIR/scripts/e2e/anthropic_compat.py" \
   --admin-url "http://127.0.0.1:${ADMIN_PORT}" \
   --upstream-base-url "http://127.0.0.1:${UPSTREAM_PORT}/v1"

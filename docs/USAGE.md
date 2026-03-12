@@ -418,13 +418,24 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway start gateway_
 
 在项目根目录执行：
 
+默认建议执行 `dev-gate`，它覆盖 Rust 测试与主线 smoke：
+
 ```bash
 cargo test -q
-cd apps/desktop && bun run test
 ./scripts/e2e/smoke.sh
 ```
 
-`smoke.sh` 输出 `smoke ok` 表示核心链路正常。
+当你需要执行更高层级门禁时，使用以下口径：
+
+- `dev-gate`：本地快速回归
+- `ci-gate`：主线共享验证，额外包含原生端 `xcodebuild test`
+- `release-gate`：发布前验收，额外包含原生端构建验证
+
+完整命令定义见：
+
+- [docs/testing/quality-gates.md](./testing/quality-gates.md)
+
+`smoke.sh` 输出 `smoke ok` 表示主线核心链路正常。
 
 Anthropic 兼容模式专项验证：
 
