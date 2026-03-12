@@ -1,12 +1,7 @@
 use std::net::SocketAddr;
 
 use axum::{
-    body::Body,
-    extract::Json,
-    http::header,
-    response::IntoResponse,
-    routing::post,
-    Router,
+    body::Body, extract::Json, http::header, response::IntoResponse, routing::post, Router,
 };
 use bytes::Bytes;
 use fluxd::http::anthropic_routes::{build_anthropic_router, AnthropicRouteState};
@@ -129,7 +124,10 @@ async fn setup_anthropic_native_gateway_without_v1() -> SpawnedServer {
 async fn spawn_native_upstream_mock() -> SpawnedServer {
     let app = Router::new()
         .route("/v1/messages", post(native_upstream_messages))
-        .route("/v1/messages/count_tokens", post(native_upstream_count_tokens));
+        .route(
+            "/v1/messages/count_tokens",
+            post(native_upstream_count_tokens),
+        );
     spawn_server(app).await
 }
 

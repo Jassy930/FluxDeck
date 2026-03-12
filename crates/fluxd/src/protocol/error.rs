@@ -4,7 +4,9 @@ use std::fmt::{Display, Formatter};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeErrorKind {
     InvalidPayload,
-    MissingRequiredField { field: String },
+    MissingRequiredField {
+        field: String,
+    },
     InvalidFieldType {
         field: String,
         expected: String,
@@ -14,7 +16,10 @@ pub enum DecodeErrorKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FluxError {
-    CapabilityUnsupported { source: String, target: String },
+    CapabilityUnsupported {
+        source: String,
+        target: String,
+    },
     DecodeError {
         protocol: String,
         kind: DecodeErrorKind,
@@ -32,7 +37,10 @@ impl Display for FluxError {
             }
             Self::DecodeError { protocol, kind } => match kind {
                 DecodeErrorKind::InvalidPayload => {
-                    write!(f, "decode error for {protocol}: payload must be a JSON object")
+                    write!(
+                        f,
+                        "decode error for {protocol}: payload must be a JSON object"
+                    )
                 }
                 DecodeErrorKind::MissingRequiredField { field } => {
                     write!(

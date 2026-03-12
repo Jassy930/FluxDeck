@@ -24,7 +24,8 @@ async fn main() -> Result<()> {
         .with_context(|| format!("connect sqlite db: {db_url}"))?;
     run_migrations(&pool).await.context("run migrations")?;
 
-    let admin_addr = env::var("FLUXDECK_ADMIN_ADDR").unwrap_or_else(|_| "127.0.0.1:7777".to_string());
+    let admin_addr =
+        env::var("FLUXDECK_ADMIN_ADDR").unwrap_or_else(|_| "127.0.0.1:7777".to_string());
     let listener = TcpListener::bind(&admin_addr)
         .await
         .with_context(|| format!("bind admin listener: {admin_addr}"))?;

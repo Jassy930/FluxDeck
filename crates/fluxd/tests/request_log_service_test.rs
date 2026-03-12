@@ -75,7 +75,9 @@ async fn append_test_log(pool: &sqlx::SqlitePool) {
         output_tokens: Some(256),
         cached_tokens: Some(64),
         total_tokens: Some(384),
-        usage_json: Some(json!({"input_tokens": 128, "output_tokens": 256, "cache_read_input_tokens": 64})),
+        usage_json: Some(
+            json!({"input_tokens": 128, "output_tokens": 256, "cache_read_input_tokens": 64}),
+        ),
     };
 
     service

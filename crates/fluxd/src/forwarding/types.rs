@@ -44,27 +44,34 @@ pub struct UsageSnapshot {
     pub usage_json: Option<serde_json::Value>,
 }
 
-pub fn extract_cached_tokens(usage: Option<&serde_json::Map<String, serde_json::Value>>) -> Option<i64> {
+pub fn extract_cached_tokens(
+    usage: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<i64> {
     let usage = usage?;
 
-    usage.get("cached_tokens")
+    usage
+        .get("cached_tokens")
         .and_then(serde_json::Value::as_i64)
         .or_else(|| {
-            usage.get("cache_read_input_tokens")
+            usage
+                .get("cache_read_input_tokens")
                 .and_then(serde_json::Value::as_i64)
         })
         .or_else(|| {
-            usage.get("cache_read_tokens")
+            usage
+                .get("cache_read_tokens")
                 .and_then(serde_json::Value::as_i64)
         })
         .or_else(|| {
-            usage.get("prompt_tokens_details")
+            usage
+                .get("prompt_tokens_details")
                 .and_then(serde_json::Value::as_object)
                 .and_then(|details| details.get("cached_tokens"))
                 .and_then(serde_json::Value::as_i64)
         })
         .or_else(|| {
-            usage.get("input_tokens_details")
+            usage
+                .get("input_tokens_details")
                 .and_then(serde_json::Value::as_object)
                 .and_then(|details| details.get("cached_tokens"))
                 .and_then(serde_json::Value::as_i64)

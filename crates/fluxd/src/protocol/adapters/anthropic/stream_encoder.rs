@@ -165,7 +165,8 @@ impl AnthropicSseEncoder {
                     self.current_content_block_index = None;
                 }
                 // Send message_delta event with stop_reason, stop_sequence, usage
-                let (input_tokens, output_tokens) = usage.as_ref()
+                let (input_tokens, output_tokens) = usage
+                    .as_ref()
                     .map(|u| (u.input_tokens, u.output_tokens))
                     .unwrap_or((0, 0));
                 push_event(

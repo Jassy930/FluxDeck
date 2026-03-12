@@ -67,7 +67,10 @@ fn assert_provider(p: &Provider) {
     assert_eq!(p.kind, "openai");
     assert_eq!(p.base_url, "https://api.openai.com/v1");
     assert_eq!(p.api_key, "sk-test-1");
-    assert_eq!(p.models, vec!["gpt-4o-mini".to_string(), "gpt-4.1".to_string()]);
+    assert_eq!(
+        p.models,
+        vec!["gpt-4o-mini".to_string(), "gpt-4.1".to_string()]
+    );
     assert!(p.enabled);
 }
 

@@ -2,7 +2,9 @@ use std::net::TcpListener as StdTcpListener;
 
 use fluxd::domain::gateway::CreateGatewayInput;
 use fluxd::repo::gateway_repo::GatewayRepo;
-use fluxd::runtime::gateway_manager::{GatewayAutoStartSummary, GatewayManager, GatewayRuntimeStatus};
+use fluxd::runtime::gateway_manager::{
+    GatewayAutoStartSummary, GatewayManager, GatewayRuntimeStatus,
+};
 use fluxd::storage::migrate::run_migrations;
 use serde_json::json;
 
@@ -335,10 +337,22 @@ async fn auto_start_only_starts_enabled_gateways_and_records_failures() {
             failed: 1,
         }
     );
-    assert_eq!(manager.status(&running_gateway.id).await, GatewayRuntimeStatus::Running);
-    assert_eq!(manager.status(&manual_gateway.id).await, GatewayRuntimeStatus::Stopped);
-    assert_eq!(manager.status(&disabled_gateway.id).await, GatewayRuntimeStatus::Stopped);
-    assert_eq!(manager.status(&conflict_gateway.id).await, GatewayRuntimeStatus::Stopped);
+    assert_eq!(
+        manager.status(&running_gateway.id).await,
+        GatewayRuntimeStatus::Running
+    );
+    assert_eq!(
+        manager.status(&manual_gateway.id).await,
+        GatewayRuntimeStatus::Stopped
+    );
+    assert_eq!(
+        manager.status(&disabled_gateway.id).await,
+        GatewayRuntimeStatus::Stopped
+    );
+    assert_eq!(
+        manager.status(&conflict_gateway.id).await,
+        GatewayRuntimeStatus::Stopped
+    );
     assert_eq!(manager.last_error(&running_gateway.id).await, None);
     assert!(manager.last_error(&conflict_gateway.id).await.is_some());
 
@@ -352,10 +366,7 @@ async fn auto_start_only_starts_enabled_gateways_and_records_failures() {
 
 fn next_free_port() -> i64 {
     let listener = StdTcpListener::bind("127.0.0.1:0").expect("bind random port");
-    let port = listener
-        .local_addr()
-        .expect("read local addr")
-        .port() as i64;
+    let port = listener.local_addr().expect("read local addr").port() as i64;
     drop(listener);
     port
 }

@@ -135,10 +135,7 @@ fn map_openai_tool_call_item(item: &Value) -> Option<Value> {
         .and_then(Value::as_object)
         .and_then(|function| function.get("name"))
         .and_then(Value::as_str)?;
-    let raw_id = object
-        .get("id")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let raw_id = object.get("id").and_then(Value::as_str).unwrap_or("");
     let id = if raw_id.is_empty() {
         let count = TOOL_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
         format!("toolu_{count}")

@@ -1,6 +1,8 @@
 use std::net::SocketAddr;
 
-use axum::{body::Body, extract::Json, http::header, response::IntoResponse, routing::post, Router};
+use axum::{
+    body::Body, extract::Json, http::header, response::IntoResponse, routing::post, Router,
+};
 use bytes::Bytes;
 use fluxd::http::anthropic_routes::{build_anthropic_router, AnthropicRouteState};
 use fluxd::storage::migrate::run_migrations;
@@ -83,7 +85,10 @@ async fn setup_anthropic_native_streaming_gateway() -> (SpawnedServer, sqlx::Sql
     .await
     .expect("insert gateway");
 
-    let app = build_anthropic_router(AnthropicRouteState::new(pool.clone(), "gw_anthropic_native"));
+    let app = build_anthropic_router(AnthropicRouteState::new(
+        pool.clone(),
+        "gw_anthropic_native",
+    ));
     let gateway = spawn_server(app).await;
     (gateway, pool)
 }

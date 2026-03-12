@@ -330,10 +330,16 @@ fn converts_tool_use_to_openai_tool_calls() {
     let payload = encode_openai_chat_request(&ir).expect("encode tool_use");
 
     assert_eq!(payload["messages"][0]["role"], "assistant");
-    assert_eq!(payload["messages"][0]["content"], "Let me check the weather.");
+    assert_eq!(
+        payload["messages"][0]["content"],
+        "Let me check the weather."
+    );
     assert_eq!(payload["messages"][0]["tool_calls"][0]["id"], "toolu_123");
     assert_eq!(payload["messages"][0]["tool_calls"][0]["type"], "function");
-    assert_eq!(payload["messages"][0]["tool_calls"][0]["function"]["name"], "get_weather");
+    assert_eq!(
+        payload["messages"][0]["tool_calls"][0]["function"]["name"],
+        "get_weather"
+    );
     assert_eq!(
         payload["messages"][0]["tool_calls"][0]["function"]["arguments"],
         r#"{"city":"Beijing"}"#
@@ -368,7 +374,10 @@ fn converts_tool_result_to_openai_tool_message() {
     // No empty user message with null content
     assert_eq!(payload["messages"][0]["role"], "tool");
     assert_eq!(payload["messages"][0]["tool_call_id"], "toolu_123");
-    assert_eq!(payload["messages"][0]["content"], "The weather in Beijing is sunny.");
+    assert_eq!(
+        payload["messages"][0]["content"],
+        "The weather in Beijing is sunny."
+    );
 }
 
 #[test]
@@ -417,7 +426,10 @@ fn handles_multi_turn_tool_conversation() {
 
     // user: "What's the weather?"
     assert_eq!(payload["messages"][0]["role"], "user");
-    assert_eq!(payload["messages"][0]["content"], "What's the weather in Beijing?");
+    assert_eq!(
+        payload["messages"][0]["content"],
+        "What's the weather in Beijing?"
+    );
 
     // assistant with tool_call
     assert_eq!(payload["messages"][1]["role"], "assistant");
@@ -462,7 +474,13 @@ fn handles_multiple_tool_uses_in_single_message() {
 
     let payload = encode_openai_chat_request(&ir).expect("encode multiple tool_uses");
 
-    assert_eq!(payload["messages"][0]["tool_calls"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        payload["messages"][0]["tool_calls"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
     assert_eq!(payload["messages"][0]["tool_calls"][0]["id"], "toolu_001");
     assert_eq!(payload["messages"][0]["tool_calls"][1]["id"], "toolu_002");
 }
@@ -524,5 +542,8 @@ fn handles_tool_result_with_array_content() {
     // Tool result with array content is converted directly to tool message
     // No empty user message before it
     assert_eq!(payload["messages"][0]["role"], "tool");
-    assert_eq!(payload["messages"][0]["content"], "Result part 1\nResult part 2");
+    assert_eq!(
+        payload["messages"][0]["content"],
+        "Result part 1\nResult part 2"
+    );
 }

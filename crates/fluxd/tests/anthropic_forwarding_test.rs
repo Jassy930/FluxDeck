@@ -9,7 +9,8 @@ use tokio::net::TcpListener;
 #[tokio::test]
 async fn forwards_anthropic_messages_to_openai_upstream() {
     let upstream = spawn_upstream_mock().await;
-    let gateway = setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
+    let gateway =
+        setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
 
     let resp = reqwest::Client::new()
         .post(format!("http://{}/v1/messages", gateway.addr))
@@ -36,8 +37,7 @@ async fn forwards_anthropic_messages_to_openai_upstream() {
 async fn anthropic_forwarding_records_effective_model_and_usage_fields() {
     let upstream = spawn_upstream_mock().await;
     let (gateway, pool) =
-        setup_gateway_with_provider_base_url_and_pool(format!("http://{}/v1", upstream.addr))
-            .await;
+        setup_gateway_with_provider_base_url_and_pool(format!("http://{}/v1", upstream.addr)).await;
 
     let resp = reqwest::Client::new()
         .post(format!("http://{}/v1/messages", gateway.addr))
@@ -62,7 +62,8 @@ async fn anthropic_forwarding_records_effective_model_and_usage_fields() {
 #[tokio::test]
 async fn maps_openai_tool_calls_to_anthropic_tool_use_blocks() {
     let upstream = spawn_upstream_tool_call_mock().await;
-    let gateway = setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
+    let gateway =
+        setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
 
     let resp = reqwest::Client::new()
         .post(format!("http://{}/v1/messages", gateway.addr))
@@ -98,7 +99,8 @@ async fn maps_openai_tool_calls_to_anthropic_tool_use_blocks() {
 #[tokio::test]
 async fn wraps_non_object_tool_call_arguments_into_object_input() {
     let upstream = spawn_upstream_tool_call_array_args_mock().await;
-    let gateway = setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
+    let gateway =
+        setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
 
     let resp = reqwest::Client::new()
         .post(format!("http://{}/v1/messages", gateway.addr))
@@ -155,18 +157,17 @@ async fn returns_bad_request_for_local_openai_encoding_failure() {
     let body: Value = resp.json().await.expect("decode gateway response");
     assert_eq!(body["type"], "error");
     assert_eq!(body["error"]["type"], "invalid_request_error");
-    assert!(
-        body["error"]["message"]
-            .as_str()
-            .expect("error message as string")
-            .contains("tools[0].input_schema")
-    );
+    assert!(body["error"]["message"]
+        .as_str()
+        .expect("error message as string")
+        .contains("tools[0].input_schema"));
 }
 
 #[tokio::test]
 async fn surfaces_upstream_error_message_for_nonstandard_error_shape() {
     let upstream = spawn_upstream_nonstandard_error_mock().await;
-    let gateway = setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
+    let gateway =
+        setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
 
     let resp = reqwest::Client::new()
         .post(format!("http://{}/v1/messages", gateway.addr))
@@ -302,7 +303,10 @@ async fn spawn_upstream_mock() -> SpawnedServer {
 }
 
 async fn spawn_upstream_tool_call_mock() -> SpawnedServer {
-    let app = Router::new().route("/v1/chat/completions", post(upstream_chat_completions_with_tool_calls));
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(upstream_chat_completions_with_tool_calls),
+    );
     spawn_gateway(app).await
 }
 
@@ -331,12 +335,17 @@ async fn spawn_upstream_model_rewrite_mock() -> SpawnedServer {
 }
 
 async fn spawn_upstream_echo_model_mock() -> SpawnedServer {
-    let app = Router::new().route("/v1/chat/completions", post(upstream_chat_completions_echo_model));
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(upstream_chat_completions_echo_model),
+    );
     spawn_gateway(app).await
 }
 
 async fn spawn_gateway(app: Router) -> SpawnedServer {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind random port");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind random port");
     let addr = listener.local_addr().expect("read listener addr");
 
     tokio::spawn(async move {
@@ -395,14 +404,24 @@ async fn setup_gateway_with_provider_base_url_and_protocol_config(
     base_url: String,
     protocol_config_json: Value,
 ) -> SpawnedServer {
-    setup_gateway_with_provider_base_url_and_protocol_config_internal(base_url, protocol_config_json, Some("gpt-4o-mini")).await
+    setup_gateway_with_provider_base_url_and_protocol_config_internal(
+        base_url,
+        protocol_config_json,
+        Some("gpt-4o-mini"),
+    )
+    .await
 }
 
 async fn setup_gateway_with_provider_base_url_and_protocol_config_no_default_model(
     base_url: String,
     protocol_config_json: Value,
 ) -> SpawnedServer {
-    setup_gateway_with_provider_base_url_and_protocol_config_internal(base_url, protocol_config_json, None::<&str>).await
+    setup_gateway_with_provider_base_url_and_protocol_config_internal(
+        base_url,
+        protocol_config_json,
+        None::<&str>,
+    )
+    .await
 }
 
 async fn setup_gateway_with_provider_base_url_and_protocol_config_internal(
@@ -486,7 +505,9 @@ async fn upstream_chat_completions(Json(payload): Json<Value>) -> impl IntoRespo
     }))
 }
 
-async fn upstream_chat_completions_with_tool_calls(Json(payload): Json<Value>) -> impl IntoResponse {
+async fn upstream_chat_completions_with_tool_calls(
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
     assert_eq!(payload["messages"][0]["role"], "user");
     assert_eq!(payload["messages"][0]["content"], "天气如何");
     assert_eq!(payload["tools"][0]["function"]["name"], "lookup_weather");
@@ -572,7 +593,9 @@ async fn upstream_chat_completions_nonstandard_error(_: Json<Value>) -> impl Int
     )
 }
 
-async fn upstream_chat_completions_expect_rewritten_model(Json(payload): Json<Value>) -> impl IntoResponse {
+async fn upstream_chat_completions_expect_rewritten_model(
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
     assert_eq!(payload["model"], "qwen3-coder-plus");
     assert_eq!(payload["messages"][0]["role"], "user");
 
@@ -618,7 +641,8 @@ async fn upstream_chat_completions_echo_model(Json(payload): Json<Value>) -> imp
 #[tokio::test]
 async fn forwards_anthropic_tool_result_to_openai_tool_message() {
     let upstream = spawn_upstream_tool_result_mock().await;
-    let gateway = setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
+    let gateway =
+        setup_gateway_with_provider_base_url(format!("http://{}/v1", upstream.addr)).await;
 
     // Send a request with tool_result content block
     let resp = reqwest::Client::new()
@@ -673,7 +697,9 @@ async fn spawn_upstream_tool_result_mock() -> SpawnedServer {
     spawn_gateway(app).await
 }
 
-async fn upstream_chat_completions_expect_tool_result_format(Json(payload): Json<Value>) -> impl IntoResponse {
+async fn upstream_chat_completions_expect_tool_result_format(
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
     let messages = payload["messages"].as_array().expect("messages array");
 
     // Verify message structure
@@ -683,11 +709,16 @@ async fn upstream_chat_completions_expect_tool_result_format(Json(payload): Json
 
     // Message 1: assistant with tool_calls
     assert_eq!(messages[1]["role"], "assistant");
-    let tool_calls = messages[1]["tool_calls"].as_array().expect("tool_calls array");
+    let tool_calls = messages[1]["tool_calls"]
+        .as_array()
+        .expect("tool_calls array");
     assert_eq!(tool_calls.len(), 1);
     assert_eq!(tool_calls[0]["id"], "toolu_001");
     assert_eq!(tool_calls[0]["function"]["name"], "get_weather");
-    assert_eq!(tool_calls[0]["function"]["arguments"], r#"{"city":"Beijing"}"#);
+    assert_eq!(
+        tool_calls[0]["function"]["arguments"],
+        r#"{"city":"Beijing"}"#
+    );
 
     // Message 2: tool message with result (no empty user message before it)
     // The user message with only tool_result is converted directly to tool message

@@ -1,6 +1,6 @@
 use clap::Parser;
-use fluxctl::cli::{Cli, Commands, GatewayCmd, ProviderCmd};
 use fluxctl::build_logs_path;
+use fluxctl::cli::{Cli, Commands, GatewayCmd, ProviderCmd};
 
 #[test]
 fn parses_provider_create_command() {
@@ -40,13 +40,7 @@ fn parses_provider_create_command() {
 
 #[test]
 fn parses_provider_delete_command_with_yes_flag() {
-    let cli = Cli::parse_from([
-        "fluxctl",
-        "provider",
-        "delete",
-        "provider_1",
-        "--yes",
-    ]);
+    let cli = Cli::parse_from(["fluxctl", "provider", "delete", "provider_1", "--yes"]);
 
     match cli.command {
         Commands::Provider { command } => match command {
@@ -99,7 +93,10 @@ fn parses_gateway_create_with_protocol_graph_fields() {
             } => {
                 assert_eq!(inbound_protocol, "anthropic");
                 assert_eq!(upstream_protocol, "openai");
-                assert_eq!(protocol_config_json, "{\"compatibility_mode\":\"compatible\"}");
+                assert_eq!(
+                    protocol_config_json,
+                    "{\"compatibility_mode\":\"compatible\"}"
+                );
                 assert!(auto_start);
             }
             _ => panic!("expected gateway create command"),
@@ -163,12 +160,7 @@ fn parses_gateway_update_command() {
 
 #[test]
 fn parses_gateway_delete_command_without_yes_flag() {
-    let cli = Cli::parse_from([
-        "fluxctl",
-        "gateway",
-        "delete",
-        "gateway_1",
-    ]);
+    let cli = Cli::parse_from(["fluxctl", "gateway", "delete", "gateway_1"]);
 
     match cli.command {
         Commands::Gateway { command } => match command {
@@ -181,7 +173,6 @@ fn parses_gateway_delete_command_without_yes_flag() {
         _ => panic!("expected gateway command"),
     }
 }
-
 
 #[test]
 fn builds_logs_path_with_limit_query() {

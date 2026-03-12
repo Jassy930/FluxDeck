@@ -71,7 +71,9 @@ async fn spawn_upstream_mock() -> SpawnedServer {
 }
 
 async fn spawn_gateway(app: Router) -> SpawnedServer {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind random port");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind random port");
     let addr = listener.local_addr().expect("read listener addr");
 
     tokio::spawn(async move {

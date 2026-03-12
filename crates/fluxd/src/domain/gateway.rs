@@ -69,7 +69,8 @@ pub fn is_supported_gateway_inbound_protocol(protocol: &str) -> bool {
 }
 
 pub fn is_supported_gateway_upstream_protocol(protocol: &str) -> bool {
-    protocol == PROVIDER_DEFAULT_UPSTREAM_PROTOCOL || is_supported_gateway_inbound_protocol(protocol)
+    protocol == PROVIDER_DEFAULT_UPSTREAM_PROTOCOL
+        || is_supported_gateway_inbound_protocol(protocol)
 }
 
 pub fn validate_gateway_inbound_protocol(protocol: &str) -> Result<()> {

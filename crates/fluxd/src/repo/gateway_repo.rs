@@ -78,8 +78,7 @@ impl GatewayRepo {
             return Ok(None);
         };
 
-        let protocol_config_json: Value =
-            from_str(&row.get::<String, _>("protocol_config_json"))?;
+        let protocol_config_json: Value = from_str(&row.get::<String, _>("protocol_config_json"))?;
 
         Ok(Some(Gateway {
             id: row.get("id"),

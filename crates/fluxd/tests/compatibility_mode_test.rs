@@ -1,12 +1,6 @@
 use std::net::SocketAddr;
 
-use axum::{
-    extract::Json,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::post,
-    Router,
-};
+use axum::{extract::Json, http::StatusCode, response::IntoResponse, routing::post, Router};
 use fluxd::http::anthropic_routes::{build_anthropic_router, AnthropicRouteState};
 use fluxd::storage::migrate::run_migrations;
 use serde_json::{json, Value};
@@ -98,12 +92,10 @@ async fn compatible_mode_downgrades_count_tokens_with_notice() {
 }
 
 async fn permissive_mode_passes_extension_to_upstream() {
-    let upstream = spawn_upstream_router(
-        Router::new().route(
-            "/v1/chat/completions",
-            post(upstream_chat_requires_passthrough),
-        ),
-    )
+    let upstream = spawn_upstream_router(Router::new().route(
+        "/v1/chat/completions",
+        post(upstream_chat_requires_passthrough),
+    ))
     .await;
     let gateway = setup_gateway(upstream.addr, "permissive", "gw_permissive").await;
 

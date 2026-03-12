@@ -14,8 +14,8 @@ use crate::domain::gateway::{CreateGatewayInput, Gateway, UpdateGatewayInput};
 use crate::domain::provider::{CreateProviderInput, Provider, UpdateProviderInput};
 use crate::http::dto::BasicOk;
 use crate::repo::gateway_repo::GatewayRepo;
-use crate::service::provider_service::DeleteProviderResult;
 use crate::runtime::gateway_manager::GatewayManager;
+use crate::service::provider_service::DeleteProviderResult;
 use crate::service::provider_service::ProviderService;
 
 #[derive(Clone)]
@@ -43,10 +43,19 @@ impl AdminApiState {
 
 pub fn build_admin_router(state: AdminApiState) -> Router {
     Router::new()
-        .route("/admin/providers", post(create_provider).get(list_providers))
-        .route("/admin/providers/{id}", put(update_provider).delete(delete_provider))
+        .route(
+            "/admin/providers",
+            post(create_provider).get(list_providers),
+        )
+        .route(
+            "/admin/providers/{id}",
+            put(update_provider).delete(delete_provider),
+        )
         .route("/admin/gateways", post(create_gateway).get(list_gateways))
-        .route("/admin/gateways/{id}", put(update_gateway).delete(delete_gateway))
+        .route(
+            "/admin/gateways/{id}",
+            put(update_gateway).delete(delete_gateway),
+        )
         .route("/admin/gateways/{id}/start", post(start_gateway))
         .route("/admin/gateways/{id}/stop", post(stop_gateway))
         .route("/admin/logs", get(list_logs))
@@ -82,7 +91,11 @@ async fn update_provider(
     Path(provider_id): Path<String>,
     Json(input): Json<UpdateProviderInput>,
 ) -> (StatusCode, Json<Value>) {
-    match state.provider_service.update_provider(&provider_id, input).await {
+    match state
+        .provider_service
+        .update_provider(&provider_id, input)
+        .await
+    {
         Ok(Some(provider)) => (StatusCode::OK, Json(json!(provider))),
         Ok(None) => (
             StatusCode::NOT_FOUND,
@@ -187,7 +200,8 @@ async fn update_gateway(
         }
     };
 
-    let was_running = state.gateway_manager.status(&gateway_id).await == crate::runtime::gateway_manager::GatewayRuntimeStatus::Running;
+    let was_running = state.gateway_manager.status(&gateway_id).await
+        == crate::runtime::gateway_manager::GatewayRuntimeStatus::Running;
     let config_changed = gateway_differs_from_update(&existing_gateway, &input);
 
     match state.gateway_repo.update(&gateway_id, input).await {
@@ -273,8 +287,8 @@ async fn delete_gateway(
     };
 
     let runtime_status_before_delete = state.gateway_manager.status(&gateway_id).await;
-    let stop_performed =
-        runtime_status_before_delete == crate::runtime::gateway_manager::GatewayRuntimeStatus::Running;
+    let stop_performed = runtime_status_before_delete
+        == crate::runtime::gateway_manager::GatewayRuntimeStatus::Running;
     if stop_performed {
         if let Err(err) = state.gateway_manager.stop_gateway(&gateway_id).await {
             return (
@@ -555,7 +569,10 @@ async fn list_logs(
 
     if query.errors_only.unwrap_or(false) {
         builder.push(if has_where { " AND " } else { " WHERE " });
-        builder.push("(status_code >= ").push_bind(400_i64).push(" OR error IS NOT NULL)");
+        builder
+            .push("(status_code >= ")
+            .push_bind(400_i64)
+            .push(" OR error IS NOT NULL)");
     }
 
     builder
@@ -654,8 +671,14 @@ fn parse_interval_to_minutes(interval: &str) -> i64 {
         return 5; // default 5 minutes
     }
 
-    let num_part: String = interval.chars().take_while(|c| c.is_ascii_digit()).collect();
-    let unit_part: String = interval.chars().skip_while(|c| c.is_ascii_digit()).collect();
+    let num_part: String = interval
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    let unit_part: String = interval
+        .chars()
+        .skip_while(|c| c.is_ascii_digit())
+        .collect();
 
     let num: i64 = num_part.parse().unwrap_or(5);
 
@@ -675,12 +698,10 @@ async fn get_stats_overview(
     let hours = parse_period_to_hours(period);
 
     // Calculate time range
-    let since = match sqlx::query_scalar::<_, String>(
-        &format!(
-            "SELECT datetime('now', '-{} hours')",
-            hours
-        ),
-    )
+    let since = match sqlx::query_scalar::<_, String>(&format!(
+        "SELECT datetime('now', '-{} hours')",
+        hours
+    ))
     .fetch_one(&state.pool)
     .await
     {
@@ -717,11 +738,10 @@ async fn get_stats_overview(
     .fetch_one(&state.pool)
     .await;
 
-    let (total_requests, successful_requests, error_requests, total_tokens) =
-        match total_stats {
-            Ok(row) => row,
-            Err(_) => (0, 0, 0, 0),
-        };
+    let (total_requests, successful_requests, error_requests, total_tokens) = match total_stats {
+        Ok(row) => row,
+        Err(_) => (0, 0, 0, 0),
+    };
 
     let success_rate = if total_requests > 0 {
         (successful_requests as f64 / total_requests as f64) * 100.0
@@ -754,17 +774,19 @@ async fn get_stats_overview(
     .await
     .unwrap_or_default()
     .into_iter()
-    .map(|(gateway_id, request_count, success_count, error_count, total_tokens, avg_latency)| {
-        DimensionStats {
-            _gateway_id: Some(gateway_id),
-            _provider_id: None,
-            request_count,
-            success_count,
-            error_count,
-            total_tokens,
-            avg_latency,
-        }
-    })
+    .map(
+        |(gateway_id, request_count, success_count, error_count, total_tokens, avg_latency)| {
+            DimensionStats {
+                _gateway_id: Some(gateway_id),
+                _provider_id: None,
+                request_count,
+                success_count,
+                error_count,
+                total_tokens,
+                avg_latency,
+            }
+        },
+    )
     .collect();
 
     // Get stats by provider
@@ -786,17 +808,19 @@ async fn get_stats_overview(
     .await
     .unwrap_or_default()
     .into_iter()
-    .map(|(provider_id, request_count, success_count, error_count, total_tokens, avg_latency)| {
-        DimensionStats {
-            _gateway_id: None,
-            _provider_id: Some(provider_id),
-            request_count,
-            success_count,
-            error_count,
-            total_tokens,
-            avg_latency,
-        }
-    })
+    .map(
+        |(provider_id, request_count, success_count, error_count, total_tokens, avg_latency)| {
+            DimensionStats {
+                _gateway_id: None,
+                _provider_id: Some(provider_id),
+                request_count,
+                success_count,
+                error_count,
+                total_tokens,
+                avg_latency,
+            }
+        },
+    )
     .collect();
 
     // Get stats by model
@@ -818,16 +842,18 @@ async fn get_stats_overview(
     .await
     .unwrap_or_default()
     .into_iter()
-    .filter_map(|(model, request_count, success_count, error_count, total_tokens, avg_latency)| {
-        model.map(|m| ModelDimensionStats {
-            model: m,
-            request_count,
-            success_count,
-            error_count,
-            total_tokens,
-            avg_latency,
-        })
-    })
+    .filter_map(
+        |(model, request_count, success_count, error_count, total_tokens, avg_latency)| {
+            model.map(|m| ModelDimensionStats {
+                model: m,
+                request_count,
+                success_count,
+                error_count,
+                total_tokens,
+                avg_latency,
+            })
+        },
+    )
     .collect();
 
     (
@@ -859,12 +885,10 @@ async fn get_stats_trend(
     // Generate time buckets
     // SQLite doesn't have a generate_series, so we'll query raw data and aggregate in memory
     // First, get the time range
-    let since = match sqlx::query_scalar::<_, String>(
-        &format!(
-            "SELECT datetime('now', '-{} hours')",
-            hours
-        ),
-    )
+    let since = match sqlx::query_scalar::<_, String>(&format!(
+        "SELECT datetime('now', '-{} hours')",
+        hours
+    ))
     .fetch_one(&state.pool)
     .await
     {
@@ -911,16 +935,18 @@ async fn get_stats_trend(
 
     let data = rows
         .into_iter()
-        .map(|(timestamp, request_count, avg_latency, error_count, input_tokens, output_tokens)| {
-            StatsTrendPoint {
-                timestamp,
-                request_count,
-                avg_latency,
-                error_count,
-                input_tokens,
-                output_tokens,
-            }
-        })
+        .map(
+            |(timestamp, request_count, avg_latency, error_count, input_tokens, output_tokens)| {
+                StatsTrendPoint {
+                    timestamp,
+                    request_count,
+                    avg_latency,
+                    error_count,
+                    input_tokens,
+                    output_tokens,
+                }
+            },
+        )
         .collect();
 
     (

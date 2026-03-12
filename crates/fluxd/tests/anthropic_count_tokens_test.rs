@@ -180,7 +180,10 @@ async fn spawn_upstream_with_count_tokens_mock() -> SpawnedServer {
 }
 
 async fn spawn_upstream_without_count_tokens_mock() -> SpawnedServer {
-    let app = Router::new().route("/v1/chat/completions", post(upstream_chat_completions_placeholder));
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(upstream_chat_completions_placeholder),
+    );
     spawn_server(app).await
 }
 
@@ -217,7 +220,12 @@ async fn setup_gateway_with_provider_base_url_and_protocol_config_no_default_mod
     base_url: String,
     protocol_config_json: Value,
 ) -> SpawnedServer {
-    setup_gateway_with_provider_base_url_and_protocol_config_internal(base_url, protocol_config_json, None::<&str>).await
+    setup_gateway_with_provider_base_url_and_protocol_config_internal(
+        base_url,
+        protocol_config_json,
+        None::<&str>,
+    )
+    .await
 }
 
 async fn setup_gateway_with_provider_base_url_and_protocol_config_no_default_model_with_explicit_default(
@@ -225,7 +233,12 @@ async fn setup_gateway_with_provider_base_url_and_protocol_config_no_default_mod
     protocol_config_json: Value,
     default_model: &str,
 ) -> SpawnedServer {
-    setup_gateway_with_provider_base_url_and_protocol_config_internal(base_url, protocol_config_json, Some(default_model)).await
+    setup_gateway_with_provider_base_url_and_protocol_config_internal(
+        base_url,
+        protocol_config_json,
+        Some(default_model),
+    )
+    .await
 }
 
 async fn setup_gateway_with_provider_base_url_and_protocol_config_internal(
@@ -289,12 +302,16 @@ async fn upstream_chat_completions_placeholder(_: Json<Value>) -> impl IntoRespo
     }))
 }
 
-async fn upstream_count_tokens_expect_rewritten_model(Json(payload): Json<Value>) -> impl IntoResponse {
+async fn upstream_count_tokens_expect_rewritten_model(
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
     assert_eq!(payload["model"], "qwen3-coder-plus");
     Json(json!({ "input_tokens": 777 }))
 }
 
-async fn upstream_count_tokens_expect_default_model(Json(payload): Json<Value>) -> impl IntoResponse {
+async fn upstream_count_tokens_expect_default_model(
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
     // 验证模型被重写为 gateway 的 default_model
     assert_eq!(payload["model"], "gpt-4o-mini");
     Json(json!({ "input_tokens": 888 }))

@@ -14,10 +14,8 @@ use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
 
 use crate::forwarding::anthropic_inbound::{
-    apply_response as apply_anthropic_response,
-    build_observation as build_anthropic_observation,
-    extract_anthropic_usage,
-    extract_openai_usage as extract_anthropic_openai_usage,
+    apply_response as apply_anthropic_response, build_observation as build_anthropic_observation,
+    extract_anthropic_usage, extract_openai_usage as extract_anthropic_openai_usage,
     usage_from_input_tokens,
 };
 use crate::forwarding::types::UsageSnapshot;
@@ -151,7 +149,9 @@ async fn forward_messages(
             }
 
             if let Some(requested_model) = ir.model.as_deref() {
-                let resolved_model = target.model_mapping.resolve(requested_model, target.default_model.as_deref());
+                let resolved_model = target
+                    .model_mapping
+                    .resolve(requested_model, target.default_model.as_deref());
                 if resolved_model != requested_model {
                     ir.model = Some(resolved_model.clone());
                     model = Some(resolved_model);
@@ -289,7 +289,10 @@ async fn forward_messages(
                                 i64::from(status_code.as_u16()),
                                 latency_ms,
                                 latency_ms,
-                                value.get("model").and_then(Value::as_str).map(ToOwned::to_owned),
+                                value
+                                    .get("model")
+                                    .and_then(Value::as_str)
+                                    .map(ToOwned::to_owned),
                             );
                             append_log(
                                 &log_service,
@@ -444,12 +447,11 @@ async fn forward_messages(
 
                             let request_log_service = log_service.clone();
                             let request_log_request_id = request_id.clone();
-                            let anthropic_stream =
-                                map_upstream_to_anthropic_stream_and_track_usage(
-                                    upstream_response.bytes_stream(),
-                                    request_log_service,
-                                    request_log_request_id,
-                                );
+                            let anthropic_stream = map_upstream_to_anthropic_stream_and_track_usage(
+                                upstream_response.bytes_stream(),
+                                request_log_service,
+                                request_log_request_id,
+                            );
                             return (
                                 status_code,
                                 [(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")],
@@ -577,11 +579,7 @@ async fn forward_messages(
                             )
                             .await;
 
-                            return (
-                                status_code,
-                                Json(anthropic_response),
-                            )
-                                .into_response();
+                            return (status_code, Json(anthropic_response)).into_response();
                         }
 
                         append_log(
@@ -730,7 +728,9 @@ async fn count_tokens_handler(
             );
 
             if let Some(requested_model) = ir.model.as_deref() {
-                let resolved_model = target.model_mapping.resolve(requested_model, target.default_model.as_deref());
+                let resolved_model = target
+                    .model_mapping
+                    .resolve(requested_model, target.default_model.as_deref());
                 if resolved_model != requested_model {
                     ir.model = Some(resolved_model.clone());
                     rewrite_payload_model(&mut payload, &resolved_model);
@@ -750,11 +750,14 @@ async fn count_tokens_handler(
                             .unwrap_or(StatusCode::BAD_GATEWAY);
 
                         if status_code.is_success() {
-                            let Some(upstream_tokens) = extract_upstream_input_tokens(body.as_ref()) else {
+                            let Some(upstream_tokens) =
+                                extract_upstream_input_tokens(body.as_ref())
+                            else {
                                 return (
                                     StatusCode::BAD_GATEWAY,
                                     Json(anthropic_error_response(
-                                        "upstream count_tokens response missing `input_tokens`".to_string(),
+                                        "upstream count_tokens response missing `input_tokens`"
+                                            .to_string(),
                                         "api_error",
                                     )),
                                 )
@@ -1173,7 +1176,9 @@ impl AnthropicStreamUsageTracker {
 
 fn extract_anthropic_stream_usage(event: &Value) -> Option<UsageSnapshot> {
     if event.get("type").and_then(Value::as_str) == Some("message_start") {
-        let usage = event.get("message").and_then(|message| message.get("usage"))?;
+        let usage = event
+            .get("message")
+            .and_then(|message| message.get("usage"))?;
         return Some(extract_anthropic_usage(&json!({ "usage": usage })));
     }
 
@@ -1681,12 +1686,7 @@ fn maybe_log_upstream_request_payload(
     );
 }
 
-fn maybe_log_upstream_error(
-    gateway_id: &str,
-    request_id: &str,
-    status: u16,
-    raw_response: &str,
-) {
+fn maybe_log_upstream_error(gateway_id: &str, request_id: &str, status: u16, raw_response: &str) {
     if !env_debug_logging_enabled() {
         return;
     }

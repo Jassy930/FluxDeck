@@ -4,9 +4,9 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use serde_json::json;
 
+use fluxctl::build_logs_path;
 use fluxctl::cli::{Cli, Commands, GatewayCmd, ProviderCmd};
 use fluxctl::client::AdminClient;
-use fluxctl::build_logs_path;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -180,7 +180,9 @@ fn split_models(models: &str) -> Vec<String> {
 }
 
 fn gateway_update_notice(result: &serde_json::Value) -> Option<&str> {
-    result.get("user_notice").and_then(serde_json::Value::as_str)
+    result
+        .get("user_notice")
+        .and_then(serde_json::Value::as_str)
 }
 
 fn confirm_delete(resource_kind: &str, id: &str, yes: bool, detail: &str) -> Result<bool> {

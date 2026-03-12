@@ -8,7 +8,9 @@ fn encodes_text_delta_events() {
             id: "msg_test".to_string(),
             model: Some("test-model".to_string()),
         },
-        StreamEvent::TextDelta { text: "Hello".to_string() },
+        StreamEvent::TextDelta {
+            text: "Hello".to_string(),
+        },
     ];
 
     let output = encode_anthropic_sse(&events);
@@ -82,7 +84,7 @@ fn handles_message_delta_events() {
             stop_sequence: Some("\n\nHuman:".to_string()),
             usage: Some(Usage {
                 input_tokens: 100,
-                output_tokens: 200
+                output_tokens: 200,
             }),
         },
     ];
@@ -130,7 +132,9 @@ fn handles_text_tool_text_interleaving() {
             id: "msg_interleave".to_string(),
             model: Some("test-model".to_string()),
         },
-        StreamEvent::TextDelta { text: "Let me check ".to_string() },
+        StreamEvent::TextDelta {
+            text: "Let me check ".to_string(),
+        },
         StreamEvent::ToolCallStart {
             index: 1,
             id: "toolu_001".to_string(),
@@ -140,7 +144,9 @@ fn handles_text_tool_text_interleaving() {
             index: 1,
             arguments: r#"{"city":"Beijing"}"#.to_string(),
         },
-        StreamEvent::TextDelta { text: "The weather is sunny.".to_string() },
+        StreamEvent::TextDelta {
+            text: "The weather is sunny.".to_string(),
+        },
         StreamEvent::MessageStop,
     ];
 
@@ -163,11 +169,19 @@ fn handles_text_tool_text_interleaving() {
     // After tool, text should resume (content_block_stop for tool, then new text)
     // Count occurrences of content_block_start - should be at least 2 (text + tool, or text + tool + text)
     let block_starts = output.matches("event: content_block_start").count();
-    assert!(block_starts >= 2, "Expected at least 2 content_block_start events, got {}", block_starts);
+    assert!(
+        block_starts >= 2,
+        "Expected at least 2 content_block_start events, got {}",
+        block_starts
+    );
 
     // Count content_block_stop events
     let block_stops = output.matches("event: content_block_stop").count();
-    assert!(block_stops >= 2, "Expected at least 2 content_block_stop events, got {}", block_stops);
+    assert!(
+        block_stops >= 2,
+        "Expected at least 2 content_block_stop events, got {}",
+        block_stops
+    );
 
     // Final text content
     assert!(output.contains("The weather is sunny."));

@@ -132,10 +132,7 @@ impl OpenAiSseDecoder {
             .and_then(Value::as_array)
         {
             for tool_call in tool_calls {
-                let index = tool_call
-                    .get("index")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0) as usize;
+                let index = tool_call.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
 
                 // Check if this is a start chunk (has id and function.name)
                 if let (Some(raw_id), Some(name)) = (

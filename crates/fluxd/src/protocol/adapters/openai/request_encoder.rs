@@ -31,12 +31,11 @@ struct ProcessedMessage {
 }
 
 pub fn encode_openai_chat_request(ir: &IrRequest) -> Result<Value, FluxError> {
-    let model = ir
-        .model
-        .as_ref()
-        .ok_or_else(|| encode_error(DecodeErrorKind::MissingRequiredField {
+    let model = ir.model.as_ref().ok_or_else(|| {
+        encode_error(DecodeErrorKind::MissingRequiredField {
             field: "model".to_string(),
-        }))?;
+        })
+    })?;
 
     let mut messages = Vec::with_capacity(ir.system_parts.len() + ir.messages.len());
     for part in &ir.system_parts {
@@ -224,7 +223,10 @@ fn convert_tool_result_to_openai(block: &Value) -> Option<Value> {
                 .iter()
                 .filter_map(|b| match b {
                     Value::String(s) => Some(s.clone()),
-                    other => other.get("text").and_then(Value::as_str).map(ToOwned::to_owned),
+                    other => other
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned),
                 })
                 .collect();
             parts.join("\n")

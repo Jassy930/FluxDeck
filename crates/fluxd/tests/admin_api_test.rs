@@ -51,7 +51,8 @@ async fn admin_api_manages_resources() {
         .await
         .expect("create gateway request");
     assert_eq!(gateway_resp.status(), reqwest::StatusCode::CREATED);
-    let created_gateway: serde_json::Value = gateway_resp.json().await.expect("decode created gateway");
+    let created_gateway: serde_json::Value =
+        gateway_resp.json().await.expect("decode created gateway");
     assert_eq!(created_gateway.get("auto_start"), Some(&json!(true)));
 
     let start_resp = client
@@ -99,10 +100,22 @@ async fn admin_api_manages_resources() {
         updated_gateway["gateway"].get("name"),
         Some(&json!("Admin Gateway Updated"))
     );
-    assert_eq!(updated_gateway["gateway"].get("enabled"), Some(&json!(false)));
-    assert_eq!(updated_gateway["gateway"].get("auto_start"), Some(&json!(false)));
-    assert_eq!(updated_gateway.get("runtime_status"), Some(&json!("stopped")));
-    assert_eq!(updated_gateway.get("restart_performed"), Some(&json!(false)));
+    assert_eq!(
+        updated_gateway["gateway"].get("enabled"),
+        Some(&json!(false))
+    );
+    assert_eq!(
+        updated_gateway["gateway"].get("auto_start"),
+        Some(&json!(false))
+    );
+    assert_eq!(
+        updated_gateway.get("runtime_status"),
+        Some(&json!("stopped"))
+    );
+    assert_eq!(
+        updated_gateway.get("restart_performed"),
+        Some(&json!(false))
+    );
     assert_eq!(updated_gateway.get("config_changed"), Some(&json!(true)));
     assert!(updated_gateway
         .get("user_notice")
@@ -117,7 +130,10 @@ async fn admin_api_manages_resources() {
     assert_eq!(logs_resp.status(), reqwest::StatusCode::OK);
 
     let logs: serde_json::Value = logs_resp.json().await.expect("decode logs");
-    assert!(logs.get("items").and_then(serde_json::Value::as_array).is_some());
+    assert!(logs
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .is_some());
     assert!(logs.get("has_more").is_some());
 
     let update_provider_resp = client
@@ -140,7 +156,10 @@ async fn admin_api_manages_resources() {
         .await
         .expect("decode updated provider");
     assert_eq!(updated_provider.get("id"), Some(&json!("provider_admin_1")));
-    assert_eq!(updated_provider.get("name"), Some(&json!("Admin Provider Updated")));
+    assert_eq!(
+        updated_provider.get("name"),
+        Some(&json!("Admin Provider Updated"))
+    );
     assert_eq!(updated_provider.get("enabled"), Some(&json!(false)));
 
     let not_found_update_resp = client
@@ -156,7 +175,10 @@ async fn admin_api_manages_resources() {
         .send()
         .await
         .expect("update missing provider request");
-    assert_eq!(not_found_update_resp.status(), reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(
+        not_found_update_resp.status(),
+        reqwest::StatusCode::NOT_FOUND
+    );
 
     let not_found_gateway_update_resp = client
         .put(format!("{base}/admin/gateways/gateway_not_found"))
@@ -287,12 +309,10 @@ async fn admin_api_response_shape_is_stable() {
             .and_then(serde_json::Value::as_str),
         Some("provider_default")
     );
-    assert!(
-        gateway
-            .get("protocol_config_json")
-            .and_then(serde_json::Value::as_object)
-            .is_some()
-    );
+    assert!(gateway
+        .get("protocol_config_json")
+        .and_then(serde_json::Value::as_object)
+        .is_some());
     assert_eq!(gateway.get("protocol_config_json"), Some(&json!({})));
     assert!(gateway.get("default_provider_id").is_some());
     assert!(gateway.get("enabled").is_some());
@@ -391,7 +411,10 @@ async fn admin_api_returns_gateway_runtime_status() {
         .as_array()
         .and_then(|items| items.first())
         .expect("gateway exists before start");
-    assert_eq!(gateway_before.get("runtime_status"), Some(&json!("stopped")));
+    assert_eq!(
+        gateway_before.get("runtime_status"),
+        Some(&json!("stopped"))
+    );
 
     let start_resp = client
         .post(format!("{base}/admin/gateways/gateway_status_1/start"))
@@ -412,7 +435,10 @@ async fn admin_api_returns_gateway_runtime_status() {
         .as_array()
         .and_then(|items| items.first())
         .expect("gateway exists after start");
-    assert_eq!(gateway_after_start.get("runtime_status"), Some(&json!("running")));
+    assert_eq!(
+        gateway_after_start.get("runtime_status"),
+        Some(&json!("running"))
+    );
 
     let stop_resp = client
         .post(format!("{base}/admin/gateways/gateway_status_1/stop"))
@@ -433,7 +459,10 @@ async fn admin_api_returns_gateway_runtime_status() {
         .as_array()
         .and_then(|items| items.first())
         .expect("gateway exists after stop");
-    assert_eq!(gateway_after_stop.get("runtime_status"), Some(&json!("stopped")));
+    assert_eq!(
+        gateway_after_stop.get("runtime_status"),
+        Some(&json!("stopped"))
+    );
 }
 
 #[tokio::test]
@@ -450,7 +479,14 @@ async fn admin_api_restarts_running_gateway_when_config_changes() {
 
     create_test_provider(&client, &base, "provider_restart_1").await;
     let original_port = next_free_port();
-    create_test_gateway(&client, &base, "gateway_restart_1", "Gateway Restart", original_port).await;
+    create_test_gateway(
+        &client,
+        &base,
+        "gateway_restart_1",
+        "Gateway Restart",
+        original_port,
+    )
+    .await;
 
     client
         .post(format!("{base}/admin/gateways/gateway_restart_1/start"))
@@ -482,12 +518,20 @@ async fn admin_api_restarts_running_gateway_when_config_changes() {
     assert_eq!(updated.get("restart_performed"), Some(&json!(true)));
     assert_eq!(updated.get("config_changed"), Some(&json!(true)));
     assert_eq!(updated.get("runtime_status"), Some(&json!("running")));
-    assert!(updated.get("user_notice").and_then(serde_json::Value::as_str).is_some());
-    assert_eq!(updated["gateway"].get("listen_port"), Some(&json!(updated_port)));
+    assert!(updated
+        .get("user_notice")
+        .and_then(serde_json::Value::as_str)
+        .is_some());
+    assert_eq!(
+        updated["gateway"].get("listen_port"),
+        Some(&json!(updated_port))
+    );
 
     let old_addr = format!("127.0.0.1:{original_port}");
     let new_addr = format!("127.0.0.1:{updated_port}");
-    assert!(reqwest::get(format!("http://{old_addr}/health")).await.is_err());
+    assert!(reqwest::get(format!("http://{old_addr}/health"))
+        .await
+        .is_err());
     TcpStream::connect(&new_addr)
         .await
         .expect("new port should accept tcp");
@@ -507,7 +551,14 @@ async fn admin_api_marks_any_running_gateway_field_change_as_restart_worthy() {
 
     create_test_provider(&client, &base, "provider_restart_2").await;
     let listen_port = next_free_port();
-    create_test_gateway(&client, &base, "gateway_restart_2", "Gateway Restart", listen_port).await;
+    create_test_gateway(
+        &client,
+        &base,
+        "gateway_restart_2",
+        "Gateway Restart",
+        listen_port,
+    )
+    .await;
 
     client
         .post(format!("{base}/admin/gateways/gateway_restart_2/start"))
@@ -537,7 +588,10 @@ async fn admin_api_marks_any_running_gateway_field_change_as_restart_worthy() {
     let updated: serde_json::Value = update_resp.json().await.expect("decode update response");
     assert_eq!(updated.get("restart_performed"), Some(&json!(true)));
     assert_eq!(updated.get("config_changed"), Some(&json!(true)));
-    assert_eq!(updated["gateway"].get("name"), Some(&json!("Gateway Restart Renamed")));
+    assert_eq!(
+        updated["gateway"].get("name"),
+        Some(&json!("Gateway Restart Renamed"))
+    );
 }
 
 #[tokio::test]
@@ -554,7 +608,14 @@ async fn admin_api_does_not_restart_running_gateway_when_config_is_unchanged() {
 
     create_test_provider(&client, &base, "provider_restart_3").await;
     let listen_port = next_free_port();
-    create_test_gateway(&client, &base, "gateway_restart_3", "Gateway Same", listen_port).await;
+    create_test_gateway(
+        &client,
+        &base,
+        "gateway_restart_3",
+        "Gateway Same",
+        listen_port,
+    )
+    .await;
 
     client
         .post(format!("{base}/admin/gateways/gateway_restart_3/start"))
@@ -601,7 +662,14 @@ async fn admin_api_does_not_restart_stopped_gateway_even_when_config_changes() {
 
     create_test_provider(&client, &base, "provider_restart_4").await;
     let listen_port = next_free_port();
-    create_test_gateway(&client, &base, "gateway_restart_4", "Gateway Stopped", listen_port).await;
+    create_test_gateway(
+        &client,
+        &base,
+        "gateway_restart_4",
+        "Gateway Stopped",
+        listen_port,
+    )
+    .await;
 
     let update_resp = client
         .put(format!("{base}/admin/gateways/gateway_restart_4"))
@@ -656,7 +724,8 @@ async fn admin_api_rejects_invalid_provider_kind() {
         .expect("create invalid provider request");
 
     assert_eq!(create_resp.status(), reqwest::StatusCode::BAD_REQUEST);
-    let create_body: serde_json::Value = create_resp.json().await.expect("decode create error body");
+    let create_body: serde_json::Value =
+        create_resp.json().await.expect("decode create error body");
     assert!(create_body.get("error").is_some());
 
     let valid_create_resp = client
@@ -690,7 +759,8 @@ async fn admin_api_rejects_invalid_provider_kind() {
         .expect("update invalid provider request");
 
     assert_eq!(update_resp.status(), reqwest::StatusCode::BAD_REQUEST);
-    let update_body: serde_json::Value = update_resp.json().await.expect("decode update error body");
+    let update_body: serde_json::Value =
+        update_resp.json().await.expect("decode update error body");
     let error = update_body
         .get("error")
         .and_then(serde_json::Value::as_str)
@@ -732,13 +802,11 @@ async fn admin_api_deletes_provider_when_not_referenced() {
         .json()
         .await
         .expect("decode providers");
-    assert!(
-        providers
-            .as_array()
-            .expect("providers array")
-            .iter()
-            .all(|provider| provider.get("id") != Some(&json!("provider_delete_free")))
-    );
+    assert!(providers
+        .as_array()
+        .expect("providers array")
+        .iter()
+        .all(|provider| provider.get("id") != Some(&json!("provider_delete_free"))));
 }
 
 #[tokio::test]
@@ -805,7 +873,9 @@ async fn admin_api_deletes_gateway_and_stops_running_instance_first() {
     .await;
 
     let start_resp = client
-        .post(format!("{base}/admin/gateways/gateway_delete_running/start"))
+        .post(format!(
+            "{base}/admin/gateways/gateway_delete_running/start"
+        ))
         .send()
         .await
         .expect("start gateway request");
@@ -839,13 +909,11 @@ async fn admin_api_deletes_gateway_and_stops_running_instance_first() {
         .json()
         .await
         .expect("decode gateways");
-    assert!(
-        gateways
-            .as_array()
-            .expect("gateways array")
-            .iter()
-            .all(|gateway| gateway.get("id") != Some(&json!("gateway_delete_running")))
-    );
+    assert!(gateways
+        .as_array()
+        .expect("gateways array")
+        .iter()
+        .all(|gateway| gateway.get("id") != Some(&json!("gateway_delete_running"))));
 }
 
 #[tokio::test]
@@ -948,7 +1016,10 @@ async fn admin_api_returns_not_found_for_missing_delete_targets() {
         .send()
         .await
         .expect("delete missing provider request");
-    assert_eq!(delete_provider_resp.status(), reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(
+        delete_provider_resp.status(),
+        reqwest::StatusCode::NOT_FOUND
+    );
 
     let delete_gateway_resp = client
         .delete(format!("{base}/admin/gateways/gateway_missing_delete"))
@@ -1058,14 +1129,19 @@ async fn admin_api_accepts_gateway_protocol_config_fields() {
         .json()
         .await
         .expect("decode create gateway response");
-    assert_eq!(created_gateway.get("inbound_protocol"), Some(&json!("anthropic")));
-    assert_eq!(created_gateway.get("upstream_protocol"), Some(&json!("openai")));
+    assert_eq!(
+        created_gateway.get("inbound_protocol"),
+        Some(&json!("anthropic"))
+    );
+    assert_eq!(
+        created_gateway.get("upstream_protocol"),
+        Some(&json!("openai"))
+    );
     assert_eq!(
         created_gateway.get("protocol_config_json"),
         Some(&json!({ "compatibility_mode": "compatible" }))
     );
 }
-
 
 #[tokio::test]
 async fn admin_api_lists_logs_as_paginated_object_with_default_limit() {
@@ -1150,7 +1226,6 @@ async fn admin_api_lists_logs_as_paginated_object_with_default_limit() {
     assert!(logs.get("next_cursor").is_some());
 }
 
-
 #[tokio::test]
 async fn admin_api_logs_support_cursor_and_filters() {
     let pool = sqlx::SqlitePool::connect("sqlite::memory:")
@@ -1225,11 +1300,56 @@ async fn admin_api_logs_support_cursor_and_filters() {
         .await
         .expect("create gateway b request");
 
-    insert_request_log(&pool, "req_filter_005", "gateway_filter_a", "provider_filter_a", 200, None, "2026-03-08T10:05:00Z").await;
-    insert_request_log(&pool, "req_filter_004", "gateway_filter_b", "provider_filter_b", 502, None, "2026-03-08T10:04:00Z").await;
-    insert_request_log(&pool, "req_filter_003", "gateway_filter_a", "provider_filter_a", 200, Some("degraded to estimate"), "2026-03-08T10:03:00Z").await;
-    insert_request_log(&pool, "req_filter_002", "gateway_filter_a", "provider_filter_b", 404, None, "2026-03-08T10:02:00Z").await;
-    insert_request_log(&pool, "req_filter_001", "gateway_filter_b", "provider_filter_a", 200, None, "2026-03-08T10:01:00Z").await;
+    insert_request_log(
+        &pool,
+        "req_filter_005",
+        "gateway_filter_a",
+        "provider_filter_a",
+        200,
+        None,
+        "2026-03-08T10:05:00Z",
+    )
+    .await;
+    insert_request_log(
+        &pool,
+        "req_filter_004",
+        "gateway_filter_b",
+        "provider_filter_b",
+        502,
+        None,
+        "2026-03-08T10:04:00Z",
+    )
+    .await;
+    insert_request_log(
+        &pool,
+        "req_filter_003",
+        "gateway_filter_a",
+        "provider_filter_a",
+        200,
+        Some("degraded to estimate"),
+        "2026-03-08T10:03:00Z",
+    )
+    .await;
+    insert_request_log(
+        &pool,
+        "req_filter_002",
+        "gateway_filter_a",
+        "provider_filter_b",
+        404,
+        None,
+        "2026-03-08T10:02:00Z",
+    )
+    .await;
+    insert_request_log(
+        &pool,
+        "req_filter_001",
+        "gateway_filter_b",
+        "provider_filter_a",
+        200,
+        None,
+        "2026-03-08T10:01:00Z",
+    )
+    .await;
 
     let first_page: serde_json::Value = client
         .get(format!("{base}/admin/logs?limit=2"))
@@ -1244,8 +1364,14 @@ async fn admin_api_logs_support_cursor_and_filters() {
         .and_then(serde_json::Value::as_array)
         .expect("first page items");
     assert_eq!(first_items.len(), 2);
-    assert_eq!(first_items[0].get("request_id"), Some(&json!("req_filter_005")));
-    assert_eq!(first_items[1].get("request_id"), Some(&json!("req_filter_004")));
+    assert_eq!(
+        first_items[0].get("request_id"),
+        Some(&json!("req_filter_005"))
+    );
+    assert_eq!(
+        first_items[1].get("request_id"),
+        Some(&json!("req_filter_004"))
+    );
     assert_eq!(first_page.get("has_more"), Some(&json!(true)));
 
     let cursor = first_page
@@ -1275,11 +1401,19 @@ async fn admin_api_logs_support_cursor_and_filters() {
         .get("items")
         .and_then(serde_json::Value::as_array)
         .expect("second page items");
-    assert_eq!(second_items[0].get("request_id"), Some(&json!("req_filter_003")));
-    assert_eq!(second_items[1].get("request_id"), Some(&json!("req_filter_002")));
+    assert_eq!(
+        second_items[0].get("request_id"),
+        Some(&json!("req_filter_003"))
+    );
+    assert_eq!(
+        second_items[1].get("request_id"),
+        Some(&json!("req_filter_002"))
+    );
 
     let filtered_errors: serde_json::Value = client
-        .get(format!("{base}/admin/logs?gateway_id=gateway_filter_a&errors_only=true"))
+        .get(format!(
+            "{base}/admin/logs?gateway_id=gateway_filter_a&errors_only=true"
+        ))
         .send()
         .await
         .expect("list filtered logs request")
@@ -1291,8 +1425,14 @@ async fn admin_api_logs_support_cursor_and_filters() {
         .and_then(serde_json::Value::as_array)
         .expect("filtered items");
     assert_eq!(filtered_items.len(), 2);
-    assert_eq!(filtered_items[0].get("request_id"), Some(&json!("req_filter_003")));
-    assert_eq!(filtered_items[1].get("request_id"), Some(&json!("req_filter_002")));
+    assert_eq!(
+        filtered_items[0].get("request_id"),
+        Some(&json!("req_filter_003"))
+    );
+    assert_eq!(
+        filtered_items[1].get("request_id"),
+        Some(&json!("req_filter_002"))
+    );
 }
 
 #[tokio::test]
@@ -1498,12 +1638,15 @@ async fn admin_stats_include_recent_logs_even_when_average_latency_is_fractional
     assert!(!trend_data.is_empty());
     let total_trend_requests: i64 = trend_data
         .iter()
-        .filter_map(|point| point.get("request_count").and_then(serde_json::Value::as_i64))
+        .filter_map(|point| {
+            point
+                .get("request_count")
+                .and_then(serde_json::Value::as_i64)
+        })
         .sum();
     assert_eq!(total_trend_requests, 2);
     assert!(trend_data[0].get("avg_latency").is_some());
 }
-
 
 async fn insert_request_log(
     pool: &sqlx::SqlitePool,
@@ -1538,7 +1681,9 @@ struct SpawnedServer {
 }
 
 async fn spawn_server(app: Router) -> SpawnedServer {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind random port");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind random port");
     let addr = listener.local_addr().expect("read listener addr");
 
     tokio::spawn(async move {

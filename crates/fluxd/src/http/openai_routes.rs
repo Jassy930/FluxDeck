@@ -73,17 +73,19 @@ async fn forward_chat_completions(
         let mut upstream_payload = payload.clone();
         ensure_openai_stream_include_usage(&mut upstream_payload);
 
-        match execute_openai_stream(&state.pool, &state.gateway_id, &state.client, &upstream_payload).await {
+        match execute_openai_stream(
+            &state.pool,
+            &state.gateway_id,
+            &state.client,
+            &upstream_payload,
+        )
+        .await
+        {
             Ok((target, status, upstream_response)) => {
                 let status_code =
                     StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-                let mut observation = build_observation(
-                    &request_id,
-                    &state.gateway_id,
-                    &target,
-                    model.clone(),
-                    true,
-                );
+                let mut observation =
+                    build_observation(&request_id, &state.gateway_id, &target, model.clone(), true);
                 let first_byte_ms = started_at.elapsed().as_millis() as i64;
 
                 if status_code.is_success() {
@@ -180,7 +182,8 @@ async fn forward_chat_completions(
 
     match execute_openai_json(&state.pool, &state.gateway_id, &state.client, &payload).await {
         Ok((target, status, value)) => {
-            let status_code = StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+            let status_code =
+                StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             let latency_ms = started_at.elapsed().as_millis() as i64;
             let mut observation = build_observation(
                 &request_id,

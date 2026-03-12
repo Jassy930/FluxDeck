@@ -107,10 +107,9 @@ impl GatewayManager {
 
         let gateway_id = gateway.id.clone();
         let app = match gateway.inbound_protocol.as_str() {
-            "openai" => build_openai_router(OpenAiRouteState::new(
-                self.pool.clone(),
-                gateway_id.clone(),
-            )),
+            "openai" => {
+                build_openai_router(OpenAiRouteState::new(self.pool.clone(), gateway_id.clone()))
+            }
             "anthropic" => build_anthropic_router(AnthropicRouteState::new(
                 self.pool.clone(),
                 gateway_id.clone(),
@@ -139,10 +138,7 @@ impl GatewayManager {
         });
 
         let mut running = self.running.write().await;
-        running.insert(
-            gateway_id.to_string(),
-            RunningGateway { shutdown_tx, task },
-        );
+        running.insert(gateway_id.to_string(), RunningGateway { shutdown_tx, task });
 
         Ok(())
     }

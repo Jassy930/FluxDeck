@@ -13,7 +13,9 @@ pub async fn execute_openai_json(
     client: &OpenAiClient,
     payload: &Value,
 ) -> Result<(ResolvedTarget, StatusCode, Value)> {
-    let target = TargetResolver::new(pool.clone()).resolve(gateway_id).await?;
+    let target = TargetResolver::new(pool.clone())
+        .resolve(gateway_id)
+        .await?;
     let (status, body) = client
         .chat_completions(&target.base_url, &target.api_key, payload)
         .await?;
@@ -26,7 +28,9 @@ pub async fn execute_openai_stream(
     client: &OpenAiClient,
     payload: &Value,
 ) -> Result<(ResolvedTarget, StatusCode, reqwest::Response)> {
-    let target = TargetResolver::new(pool.clone()).resolve(gateway_id).await?;
+    let target = TargetResolver::new(pool.clone())
+        .resolve(gateway_id)
+        .await?;
     let (status, response) = client
         .chat_completions_stream(&target.base_url, &target.api_key, payload)
         .await?;
@@ -39,8 +43,12 @@ pub async fn execute_anthropic_json(
     client: &AnthropicClient,
     payload: &Value,
 ) -> Result<(ResolvedTarget, StatusCode, Value)> {
-    let target = TargetResolver::new(pool.clone()).resolve(gateway_id).await?;
-    let (status, body) = client.messages(&target.base_url, &target.api_key, payload).await?;
+    let target = TargetResolver::new(pool.clone())
+        .resolve(gateway_id)
+        .await?;
+    let (status, body) = client
+        .messages(&target.base_url, &target.api_key, payload)
+        .await?;
     Ok((target, status, body))
 }
 
@@ -50,7 +58,9 @@ pub async fn execute_anthropic_stream(
     client: &AnthropicClient,
     payload: &Value,
 ) -> Result<(ResolvedTarget, StatusCode, reqwest::Response)> {
-    let target = TargetResolver::new(pool.clone()).resolve(gateway_id).await?;
+    let target = TargetResolver::new(pool.clone())
+        .resolve(gateway_id)
+        .await?;
     let (status, response) = client
         .messages_stream(&target.base_url, &target.api_key, payload)
         .await?;
@@ -63,7 +73,9 @@ pub async fn execute_anthropic_count_tokens(
     client: &AnthropicClient,
     payload: &Value,
 ) -> Result<(ResolvedTarget, StatusCode, Option<Value>)> {
-    let target = TargetResolver::new(pool.clone()).resolve(gateway_id).await?;
+    let target = TargetResolver::new(pool.clone())
+        .resolve(gateway_id)
+        .await?;
     let (status, body) = client
         .messages_count_tokens(&target.base_url, &target.api_key, payload)
         .await?;

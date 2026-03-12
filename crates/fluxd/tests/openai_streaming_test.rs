@@ -105,7 +105,10 @@ async fn setup_openai_gateway_with_streaming_upstream() -> (SpawnedServer, sqlx:
 }
 
 async fn spawn_upstream_stream_mock() -> SpawnedServer {
-    let app = Router::new().route("/v1/chat/completions", post(upstream_stream_chat_completions));
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(upstream_stream_chat_completions),
+    );
     spawn_server(app).await
 }
 
@@ -141,7 +144,10 @@ async fn upstream_stream_chat_completions(Json(payload): Json<Value>) -> impl In
 
     (
         StatusCode::OK,
-        [(header::CONTENT_TYPE, HeaderValue::from_static("text/event-stream; charset=utf-8"))],
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/event-stream; charset=utf-8"),
+        )],
         Body::from_stream(stream::iter(chunks)),
     )
 }
