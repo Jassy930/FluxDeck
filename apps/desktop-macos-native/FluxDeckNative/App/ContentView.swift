@@ -43,6 +43,16 @@ struct ContentView: View {
         )
     }
 
+    private var shellToolbarModel: ShellToolbarModel {
+        ShellToolbarModel.make(
+            title: selectedSection?.rawValue ?? SidebarSection.overview.rawValue,
+            adminBaseURL: client.displayBaseURL,
+            lastRefreshText: lastRefreshedAt.map { Self.refreshFormatter.string(from: $0) },
+            isRefreshing: isLoading || isSubmitting,
+            statusSummary: shellStatusSummary
+        )
+    }
+
     private var client: AdminApiClient {
         let url = normalizedAdminBaseURL(persistedAdminBaseURL) ?? URL(string: defaultAdminBaseURL)!
         return AdminApiClient(baseURL: url)
@@ -69,16 +79,22 @@ struct ContentView: View {
 
     var body: some View {
         AppShellView(
-            title: selectedSection?.rawValue ?? SidebarSection.overview.rawValue,
             groups: SidebarGroup.defaultGroups,
             selectedSection: $selectedSection,
             selectedMode: $selectedMode,
-            statusSummary: shellStatusSummary
+            toolbarModel: shellToolbarModel,
+            onRefresh: {
+                Task {
+                    await refreshAll()
+                }
+            }
         ) {
             VStack(spacing: 0) {
-                headerBar
-                Divider()
-                    .overlay(DesignTokens.borderSubtle)
+                if let loadError {
+                    shellErrorBanner(loadError)
+                    Divider()
+                        .overlay(DesignTokens.borderSubtle)
+                }
                 detailView(for: selectedSection ?? .overview)
                     .frame(maxWidth: 1280, maxHeight: .infinity, alignment: .topLeading)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -366,89 +382,27 @@ struct ContentView: View {
         }
     }
 
-    private var headerBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                HStack(spacing: 8) {
-                    Text("Admin")
-                        .font(.caption2.weight(.semibold))
-                        .textCase(.uppercase)
-                        .foregroundStyle(DesignTokens.textSecondary)
-
-                    Text(client.displayBaseURL)
-                        .font(.caption)
-                        .foregroundStyle(DesignTokens.textPrimary.opacity(0.92))
-                        .lineLimit(1)
+    @ViewBuilder
+    private func shellErrorBanner(_ loadError: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            Text(loadError)
+                .font(.caption)
+                .lineLimit(2)
+            Spacer()
+            Button("Retry") {
+                Task {
+                    await refreshAll()
                 }
-
-                Spacer()
-
-                if let lastRefreshedAt {
-                    Text("Last refresh: \(Self.refreshFormatter.string(from: lastRefreshedAt))")
-                        .font(.caption2)
-                        .foregroundStyle(DesignTokens.textSecondary)
-                }
-
-                ConnectionBadge(isLoading: isLoading, hasError: loadError != nil, hasSuccessfulSync: lastRefreshedAt != nil)
-
-                Button {
-                    Task {
-                        await refreshAll()
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        if isLoading || isSubmitting {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.caption.weight(.semibold))
-                        }
-
-                        Text("Refresh")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(DesignTokens.textPrimary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(DesignTokens.surfaceSecondary.opacity(0.9))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(DesignTokens.borderSubtle.opacity(0.45), lineWidth: 1)
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .focusable(false)
-                .disabled(isLoading || isSubmitting)
-                .keyboardShortcut("r", modifiers: .command)
             }
-
-            if let loadError {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                    Text(loadError)
-                        .font(.caption)
-                        .lineLimit(2)
-                    Spacer()
-                    Button("Retry") {
-                        Task {
-                            await refreshAll()
-                        }
-                    }
-                    .buttonStyle(.link)
-                    .focusable(false)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Refresh error: \(loadError)")
-            }
+            .buttonStyle(.link)
+            .focusable(false)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Refresh error: \(loadError)")
     }
 
     @MainActor
@@ -1142,53 +1096,6 @@ private struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
-    }
-}
-
-private struct ConnectionBadge: View {
-    let isLoading: Bool
-    let hasError: Bool
-    let hasSuccessfulSync: Bool
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 8, height: 8)
-            Text(statusText)
-                .font(.caption2)
-                .fontWeight(.medium)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(.ultraThinMaterial)
-        .clipShape(Capsule())
-    }
-
-    private var statusText: String {
-        if isLoading {
-            return "Syncing"
-        }
-        if hasError {
-            return "Degraded"
-        }
-        if hasSuccessfulSync {
-            return "Connected"
-        }
-        return "Idle"
-    }
-
-    private var statusColor: Color {
-        if isLoading {
-            return .yellow
-        }
-        if hasError {
-            return .red
-        }
-        if hasSuccessfulSync {
-            return .green
-        }
-        return .gray
     }
 }
 

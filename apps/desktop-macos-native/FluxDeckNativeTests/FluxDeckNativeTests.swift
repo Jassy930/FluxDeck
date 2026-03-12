@@ -109,6 +109,41 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(gatewayCard.autoStartText, "ON")
     }
 
+    func testShellToolbarModelBuildsEndpointAndRefreshMetadata() {
+        let status = ShellStatusSummary.make(
+            isLoading: false,
+            loadError: nil,
+            gateways: [
+                AdminGateway(
+                    id: "gw",
+                    name: "Gateway",
+                    listenHost: "127.0.0.1",
+                    listenPort: 18080,
+                    inboundProtocol: "openai",
+                    defaultProviderId: "pv",
+                    enabled: true,
+                    autoStart: true,
+                    runtimeStatus: "running",
+                    lastError: nil
+                )
+            ]
+        )
+
+        let model = ShellToolbarModel.make(
+            title: "Traffic",
+            adminBaseURL: "http://127.0.0.1:7777",
+            lastRefreshText: "19:14:53",
+            isRefreshing: true,
+            statusSummary: status
+        )
+
+        XCTAssertEqual(model.endpointLabel, "Admin")
+        XCTAssertEqual(model.endpointValue, "http://127.0.0.1:7777")
+        XCTAssertEqual(model.lastRefreshLabel, "Last refresh 19:14:53")
+        XCTAssertTrue(model.isRefreshing)
+        XCTAssertEqual(model.statusSummary.gatewayLabel, "1 running")
+    }
+
     func testTrafficAndConnectionsModelsAggregateLogs() {
         let logs = [
             AdminLog(

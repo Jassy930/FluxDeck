@@ -41,26 +41,26 @@ struct ShellStatusSummary {
 }
 
 struct AppShellView<Content: View>: View {
-    let title: String
     let groups: [SidebarGroup]
     @Binding var selectedSection: SidebarSection?
     @Binding var selectedMode: AppMode
-    let statusSummary: ShellStatusSummary
+    let toolbarModel: ShellToolbarModel
+    let onRefresh: () -> Void
     let content: Content
 
     init(
-        title: String,
         groups: [SidebarGroup],
         selectedSection: Binding<SidebarSection?>,
         selectedMode: Binding<AppMode>,
-        statusSummary: ShellStatusSummary,
+        toolbarModel: ShellToolbarModel,
+        onRefresh: @escaping () -> Void,
         @ViewBuilder content: () -> Content
     ) {
-        self.title = title
         self.groups = groups
         self._selectedSection = selectedSection
         self._selectedMode = selectedMode
-        self.statusSummary = statusSummary
+        self.toolbarModel = toolbarModel
+        self.onRefresh = onRefresh
         self.content = content()
     }
 
@@ -100,9 +100,9 @@ struct AppShellView<Content: View>: View {
 
                 VStack(spacing: 0) {
                     TopModeBar(
-                        title: title,
+                        model: toolbarModel,
                         selectedMode: $selectedMode,
-                        statusSummary: statusSummary
+                        onRefresh: onRefresh
                     )
                     Divider()
                         .overlay(DesignTokens.borderSubtle)
