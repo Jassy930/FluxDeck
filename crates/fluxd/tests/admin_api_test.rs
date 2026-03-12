@@ -227,8 +227,10 @@ async fn admin_api_response_shape_is_stable() {
 
     sqlx::query(
         r#"
-        INSERT INTO request_logs (request_id, gateway_id, provider_id, model, status_code, latency_ms, error)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        INSERT INTO request_logs (
+            request_id, gateway_id, provider_id, model, status_code, latency_ms, error, cached_tokens
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
         "#,
     )
     .bind("req_contract_1")
@@ -238,6 +240,7 @@ async fn admin_api_response_shape_is_stable() {
     .bind(200_i64)
     .bind(12_i64)
     .bind(Option::<String>::None)
+    .bind(24_i64)
     .execute(&pool)
     .await
     .expect("insert test log");
@@ -324,6 +327,7 @@ async fn admin_api_response_shape_is_stable() {
     assert!(log_item.get("first_byte_ms").is_some());
     assert!(log_item.get("input_tokens").is_some());
     assert!(log_item.get("output_tokens").is_some());
+    assert!(log_item.get("cached_tokens").is_some());
     assert!(log_item.get("total_tokens").is_some());
     assert!(log_item.get("usage_json").is_some());
     assert!(log_item.get("error_stage").is_some());

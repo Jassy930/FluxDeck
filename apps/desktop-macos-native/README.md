@@ -15,6 +15,7 @@
 - `Connections` 活跃连接页
 - `Topology` 路由拓扑骨架页
 - `Providers / Gateways / Logs / Settings` 统一深色工作台风格
+- `Logs` 已重构为单列可展开日志卡片流，折叠态优先显示状态、路由、模型映射、错误摘要与延迟
 
 说明：
 

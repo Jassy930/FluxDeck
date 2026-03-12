@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::forwarding::types::{ForwardObservation, UsageSnapshot};
+use crate::forwarding::types::{extract_cached_tokens, ForwardObservation, UsageSnapshot};
 
 pub fn build_observation(
     request_id: &str,
@@ -44,6 +44,7 @@ pub fn extract_openai_usage(response: &Value) -> UsageSnapshot {
     let output_tokens = usage
         .and_then(|item| item.get("completion_tokens"))
         .and_then(Value::as_i64);
+    let cached_tokens = extract_cached_tokens(usage);
     let total_tokens = usage
         .and_then(|item| item.get("total_tokens"))
         .and_then(Value::as_i64)
@@ -55,6 +56,7 @@ pub fn extract_openai_usage(response: &Value) -> UsageSnapshot {
     UsageSnapshot {
         input_tokens,
         output_tokens,
+        cached_tokens,
         total_tokens,
         usage_json: usage.map(|_| response["usage"].clone()),
     }
@@ -68,6 +70,7 @@ pub fn extract_anthropic_usage(response: &Value) -> UsageSnapshot {
     let output_tokens = usage
         .and_then(|item| item.get("output_tokens"))
         .and_then(Value::as_i64);
+    let cached_tokens = extract_cached_tokens(usage);
     let total_tokens = match (input_tokens, output_tokens) {
         (Some(input), Some(output)) => Some(input + output),
         _ => None,
@@ -76,6 +79,7 @@ pub fn extract_anthropic_usage(response: &Value) -> UsageSnapshot {
     UsageSnapshot {
         input_tokens,
         output_tokens,
+        cached_tokens,
         total_tokens,
         usage_json: usage.map(|_| response["usage"].clone()),
     }
@@ -85,6 +89,7 @@ pub fn usage_from_input_tokens(input_tokens: i64) -> UsageSnapshot {
     UsageSnapshot {
         input_tokens: Some(input_tokens),
         output_tokens: None,
+        cached_tokens: None,
         total_tokens: Some(input_tokens),
         usage_json: Some(serde_json::json!({ "input_tokens": input_tokens })),
     }

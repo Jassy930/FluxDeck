@@ -9,4 +9,5 @@ fn observation_and_usage_default_to_empty_optional_metrics() {
     assert_eq!(observation.gateway_id, "gw_1");
     assert_eq!(usage.input_tokens, None);
     assert_eq!(usage.output_tokens, None);
+    assert_eq!(usage.cached_tokens, None);
 }

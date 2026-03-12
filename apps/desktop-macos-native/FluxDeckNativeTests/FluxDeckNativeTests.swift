@@ -731,6 +731,190 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(page.nextCursor?.requestID, "req_000")
     }
 
+    func testDecodesPaginatedLogsPayloadWithFullAdminLogContract() throws {
+        let logsData = """
+        {
+          "items": [
+            {
+              "request_id": "req_full_001",
+              "gateway_id": "gateway_main",
+              "provider_id": "provider_main",
+              "model": "gpt-5",
+              "inbound_protocol": "openai",
+              "upstream_protocol": "openai",
+              "model_requested": "gpt-5-codex",
+              "model_effective": "gpt-5",
+              "status_code": 502,
+              "latency_ms": 1320,
+              "stream": true,
+              "first_byte_ms": 420,
+              "input_tokens": 800,
+              "output_tokens": 120,
+              "cached_tokens": 240,
+              "total_tokens": 1160,
+              "usage_json": "{\\"prompt_tokens\\":800,\\"completion_tokens\\":120}",
+              "error_stage": "upstream_response",
+              "error_type": "upstream_error",
+              "error": "provider timeout",
+              "created_at": "2026-03-03T10:00:00Z"
+            }
+          ],
+          "next_cursor": null,
+          "has_more": false
+        }
+        """.data(using: .utf8)!
+
+        let page = try AdminApiClient.decodeLogPage(from: logsData)
+        let log = try XCTUnwrap(page.items.first)
+
+        XCTAssertEqual(log.inboundProtocol, "openai")
+        XCTAssertEqual(log.upstreamProtocol, "openai")
+        XCTAssertEqual(log.modelRequested, "gpt-5-codex")
+        XCTAssertEqual(log.modelEffective, "gpt-5")
+        XCTAssertEqual(log.stream, true)
+        XCTAssertEqual(log.firstByteMs, 420)
+        XCTAssertEqual(log.inputTokens, 800)
+        XCTAssertEqual(log.outputTokens, 120)
+        XCTAssertEqual(log.cachedTokens, 240)
+        XCTAssertEqual(log.totalTokens, 1160)
+        XCTAssertEqual(log.usageJSON, "{\"prompt_tokens\":800,\"completion_tokens\":120}")
+        XCTAssertEqual(log.errorStage, "upstream_response")
+        XCTAssertEqual(log.errorType, "upstream_error")
+    }
+
+    func testAdminLogModelDisplayTextUsesRequestedAndEffectiveModels() {
+        let remapped = AdminLog(
+            requestID: "req_model_map",
+            gatewayID: "gw",
+            providerID: "pv",
+            model: "gpt-5",
+            inboundProtocol: "openai",
+            upstreamProtocol: "openai",
+            modelRequested: "gpt-5-codex",
+            modelEffective: "gpt-5",
+            statusCode: 200,
+            latencyMs: 120,
+            error: nil,
+            createdAt: "2026-03-03T10:00:00Z"
+        )
+        let stable = AdminLog(
+            requestID: "req_model_same",
+            gatewayID: "gw",
+            providerID: "pv",
+            model: "gpt-5",
+            inboundProtocol: "openai",
+            upstreamProtocol: "openai",
+            modelRequested: "gpt-5",
+            modelEffective: "gpt-5",
+            statusCode: 200,
+            latencyMs: 120,
+            error: nil,
+            createdAt: "2026-03-03T10:01:00Z"
+        )
+
+        XCTAssertEqual(remapped.modelDisplayText, "gpt-5-codex -> gpt-5")
+        XCTAssertEqual(stable.modelDisplayText, "gpt-5")
+    }
+
+    func testAdminLogTokenBreakdownTextIncludesAllTokenDimensions() {
+        let log = AdminLog(
+            requestID: "req_tokens",
+            gatewayID: "gw",
+            providerID: "pv",
+            model: "gpt-5",
+            statusCode: 200,
+            latencyMs: 120,
+            inputTokens: 800,
+            outputTokens: 120,
+            cachedTokens: 240,
+            totalTokens: 1160,
+            error: nil,
+            createdAt: "2026-03-03T10:00:00Z"
+        )
+
+        XCTAssertEqual(log.tokenBreakdownText, "In 800 · Out 120 · Cached 240 · Total 1160")
+    }
+
+    func testLogStreamCardModelPrefersErrorSummaryForFailedLog() {
+        let log = AdminLog(
+            requestID: "req_failed",
+            gatewayID: "gw",
+            providerID: "pv",
+            model: "gpt-5",
+            modelRequested: "gpt-5-codex",
+            modelEffective: "gpt-5",
+            statusCode: 502,
+            latencyMs: 1820,
+            errorStage: "upstream_response",
+            errorType: "upstream_error",
+            error: "provider timeout",
+            createdAt: "2026-03-03T10:00:00Z"
+        )
+
+        let model = LogStreamCardModel.make(log: log)
+
+        XCTAssertEqual(model.summaryText, "provider timeout")
+        XCTAssertEqual(model.modelText, "gpt-5-codex -> gpt-5")
+        XCTAssertEqual(model.routeText, "gw -> pv")
+        XCTAssertEqual(model.statusText, "502")
+    }
+
+    func testLogStreamCardModelKeepsRouteModelLatencyAndTimeForSuccessfulLog() {
+        let log = AdminLog(
+            requestID: "req_success",
+            gatewayID: "gw",
+            providerID: "pv",
+            model: "gpt-5",
+            statusCode: 200,
+            latencyMs: 140,
+            createdAt: "2026-03-03T10:00:00Z"
+        )
+
+        let model = LogStreamCardModel.make(log: log)
+
+        XCTAssertEqual(model.summaryText, "gpt-5")
+        XCTAssertEqual(model.routeText, "gw -> pv")
+        XCTAssertEqual(model.latencyText, "140 ms")
+        XCTAssertEqual(model.createdAtText, "2026-03-03T10:00:00Z")
+    }
+
+    func testLogsWorkbenchExpansionStateAllowsOnlySingleExpandedLog() {
+        var state = LogsWorkbenchExpansionState()
+
+        state.toggle(requestID: "req_a")
+        XCTAssertEqual(state.expandedRequestID, "req_a")
+
+        state.toggle(requestID: "req_b")
+        XCTAssertEqual(state.expandedRequestID, "req_b")
+
+        state.toggle(requestID: "req_b")
+        XCTAssertNil(state.expandedRequestID)
+    }
+
+    func testLogsWorkbenchExpansionStateResetsWhenExpandedLogBecomesInvalid() {
+        var state = LogsWorkbenchExpansionState(expandedRequestID: "req_b")
+        let logs = [
+            AdminLog(
+                requestID: "req_a",
+                gatewayID: "gw",
+                providerID: "pv",
+                model: "gpt-5",
+                statusCode: 200,
+                latencyMs: 100,
+                createdAt: "2026-03-03T10:00:00Z"
+            )
+        ]
+
+        state.reconcileVisibleLogs(logs)
+        XCTAssertNil(state.expandedRequestID)
+
+        state.toggle(requestID: "req_a")
+        XCTAssertEqual(state.expandedRequestID, "req_a")
+
+        state.resetForFilterChange()
+        XCTAssertNil(state.expandedRequestID)
+    }
+
     func testFiltersLogsByGatewayProviderAndStatus() {
         let logs = [
             AdminLog(

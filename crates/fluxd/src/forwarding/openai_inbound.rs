@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::forwarding::target_resolver::ResolvedTarget;
-use crate::forwarding::types::{ForwardObservation, UsageSnapshot};
+use crate::forwarding::types::{extract_cached_tokens, ForwardObservation, UsageSnapshot};
 
 pub fn requested_model(payload: &Value) -> Option<String> {
     payload
@@ -57,6 +57,7 @@ pub fn extract_usage(response: &Value) -> UsageSnapshot {
     let output_tokens = usage
         .and_then(|item| item.get("completion_tokens"))
         .and_then(Value::as_i64);
+    let cached_tokens = extract_cached_tokens(usage);
     let total_tokens = usage
         .and_then(|item| item.get("total_tokens"))
         .and_then(Value::as_i64)
@@ -68,6 +69,7 @@ pub fn extract_usage(response: &Value) -> UsageSnapshot {
     UsageSnapshot {
         input_tokens,
         output_tokens,
+        cached_tokens,
         total_tokens,
         usage_json: usage.map(|_| response["usage"].clone()),
     }

@@ -43,10 +43,10 @@ struct LogDetailCardModel {
         LogDetailCardModel(
             requestID: log.requestID,
             routeText: "\(log.gatewayID) → \(log.providerID)",
-            modelText: log.model ?? "-",
+            modelText: log.modelDisplayText,
             statusText: "\(log.statusCode)",
             latencyText: "\(log.latencyMs) ms",
-            errorText: log.error ?? "-",
+            errorText: log.errorSummaryText,
             createdAtText: log.createdAt
         )
     }

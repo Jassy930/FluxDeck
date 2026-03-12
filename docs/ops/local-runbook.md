@@ -188,5 +188,10 @@ curl 'http://127.0.0.1:7777/admin/logs?limit=5'
 - 同协议 passthrough fallback 目前也会记录最小日志维度：协议、状态码、延迟、错误文本
 - `model_requested`：客户端请求模型
 - `model_effective`：实际发往上游的模型
-- `input_tokens/output_tokens/total_tokens`：usage 统计
+- `input_tokens/output_tokens/cached_tokens/total_tokens`：usage 统计
 - `stream` 与 `first_byte_ms`：流式请求与首包耗时
+
+补充说明：
+
+- 原生端 `Logs` 页面现在是“单列可展开日志卡片流”，不再是旧的左右分栏详情模式
+- `fluxctl logs` 仍然只打印 `/admin/logs` 的分页 JSON；若需要人类可读摘要，请以原生端工作台为主

@@ -391,22 +391,176 @@ struct AdminLog: Decodable, Identifiable {
     let gatewayID: String
     let providerID: String
     let model: String?
+    let inboundProtocol: String?
+    let upstreamProtocol: String?
+    let modelRequested: String?
+    let modelEffective: String?
     let statusCode: Int
     let latencyMs: Int
+    let stream: Bool
+    let firstByteMs: Int?
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let cachedTokens: Int?
+    let totalTokens: Int?
+    let usageJSON: String?
+    let errorStage: String?
+    let errorType: String?
     let error: String?
     let createdAt: String
 
     var id: String { requestID }
+
+    var modelDisplayText: String {
+        let requested = modelRequested?.nilIfEmpty
+        let effective = modelEffective?.nilIfEmpty
+
+        switch (requested, effective) {
+        case let (requested?, effective?) where requested != effective:
+            return "\(requested) -> \(effective)"
+        case let (requested?, effective?) where requested == effective:
+            return requested
+        case let (requested?, nil):
+            return requested
+        case let (nil, effective?):
+            return effective
+        default:
+            return model?.nilIfEmpty ?? "-"
+        }
+    }
+
+    var tokenBreakdownText: String {
+        var parts: [String] = []
+
+        if let inputTokens {
+            parts.append("In \(inputTokens)")
+        }
+        if let outputTokens {
+            parts.append("Out \(outputTokens)")
+        }
+        if let cachedTokens {
+            parts.append("Cached \(cachedTokens)")
+        }
+        if let totalTokens {
+            parts.append("Total \(totalTokens)")
+        }
+
+        return parts.isEmpty ? "-" : parts.joined(separator: " · ")
+    }
+
+    var errorSummaryText: String {
+        if let error = error?.nilIfEmpty {
+            return error
+        }
+
+        let stage = errorStage?.nilIfEmpty
+        let type = errorType?.nilIfEmpty
+
+        switch (stage, type) {
+        case let (stage?, type?):
+            return "\(stage) · \(type)"
+        case let (stage?, nil):
+            return stage
+        case let (nil, type?):
+            return type
+        default:
+            return "-"
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
         case requestID = "request_id"
         case gatewayID = "gateway_id"
         case providerID = "provider_id"
         case model
+        case inboundProtocol = "inbound_protocol"
+        case upstreamProtocol = "upstream_protocol"
+        case modelRequested = "model_requested"
+        case modelEffective = "model_effective"
         case statusCode = "status_code"
         case latencyMs = "latency_ms"
+        case stream
+        case firstByteMs = "first_byte_ms"
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case cachedTokens = "cached_tokens"
+        case totalTokens = "total_tokens"
+        case usageJSON = "usage_json"
+        case errorStage = "error_stage"
+        case errorType = "error_type"
         case error
         case createdAt = "created_at"
+    }
+
+    init(
+        requestID: String,
+        gatewayID: String,
+        providerID: String,
+        model: String?,
+        inboundProtocol: String? = nil,
+        upstreamProtocol: String? = nil,
+        modelRequested: String? = nil,
+        modelEffective: String? = nil,
+        statusCode: Int,
+        latencyMs: Int,
+        stream: Bool = false,
+        firstByteMs: Int? = nil,
+        inputTokens: Int? = nil,
+        outputTokens: Int? = nil,
+        cachedTokens: Int? = nil,
+        totalTokens: Int? = nil,
+        usageJSON: String? = nil,
+        errorStage: String? = nil,
+        errorType: String? = nil,
+        error: String? = nil,
+        createdAt: String
+    ) {
+        self.requestID = requestID
+        self.gatewayID = gatewayID
+        self.providerID = providerID
+        self.model = model
+        self.inboundProtocol = inboundProtocol
+        self.upstreamProtocol = upstreamProtocol
+        self.modelRequested = modelRequested
+        self.modelEffective = modelEffective
+        self.statusCode = statusCode
+        self.latencyMs = latencyMs
+        self.stream = stream
+        self.firstByteMs = firstByteMs
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cachedTokens = cachedTokens
+        self.totalTokens = totalTokens
+        self.usageJSON = usageJSON
+        self.errorStage = errorStage
+        self.errorType = errorType
+        self.error = error
+        self.createdAt = createdAt
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        requestID = try container.decode(String.self, forKey: .requestID)
+        gatewayID = try container.decode(String.self, forKey: .gatewayID)
+        providerID = try container.decode(String.self, forKey: .providerID)
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        inboundProtocol = try container.decodeIfPresent(String.self, forKey: .inboundProtocol)
+        upstreamProtocol = try container.decodeIfPresent(String.self, forKey: .upstreamProtocol)
+        modelRequested = try container.decodeIfPresent(String.self, forKey: .modelRequested)
+        modelEffective = try container.decodeIfPresent(String.self, forKey: .modelEffective)
+        statusCode = try container.decode(Int.self, forKey: .statusCode)
+        latencyMs = try container.decode(Int.self, forKey: .latencyMs)
+        stream = try container.decodeIfPresent(Bool.self, forKey: .stream) ?? false
+        firstByteMs = try container.decodeIfPresent(Int.self, forKey: .firstByteMs)
+        inputTokens = try container.decodeIfPresent(Int.self, forKey: .inputTokens)
+        outputTokens = try container.decodeIfPresent(Int.self, forKey: .outputTokens)
+        cachedTokens = try container.decodeIfPresent(Int.self, forKey: .cachedTokens)
+        totalTokens = try container.decodeIfPresent(Int.self, forKey: .totalTokens)
+        usageJSON = try container.decodeIfPresent(String.self, forKey: .usageJSON)
+        errorStage = try container.decodeIfPresent(String.self, forKey: .errorStage)
+        errorType = try container.decodeIfPresent(String.self, forKey: .errorType)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        createdAt = try container.decode(String.self, forKey: .createdAt)
     }
 }
 
@@ -897,3 +1051,9 @@ private let adminLogDateWithoutFractional: ISO8601DateFormatter = {
     formatter.formatOptions = [.withInternetDateTime]
     return formatter
 }()
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+}

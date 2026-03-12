@@ -406,6 +406,7 @@ struct LogListItem {
     first_byte_ms: Option<i64>,
     input_tokens: Option<i64>,
     output_tokens: Option<i64>,
+    cached_tokens: Option<i64>,
     total_tokens: Option<i64>,
     usage_json: Option<String>,
     error_stage: Option<String>,
@@ -513,7 +514,7 @@ async fn list_logs(
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
 
     let mut builder = QueryBuilder::<Sqlite>::new(
-        "SELECT request_id, gateway_id, provider_id, model, inbound_protocol, upstream_protocol, model_requested, model_effective, status_code, latency_ms, stream, first_byte_ms, input_tokens, output_tokens, total_tokens, usage_json, error_stage, error_type, error, created_at FROM request_logs",
+        "SELECT request_id, gateway_id, provider_id, model, inbound_protocol, upstream_protocol, model_requested, model_effective, status_code, latency_ms, stream, first_byte_ms, input_tokens, output_tokens, cached_tokens, total_tokens, usage_json, error_stage, error_type, error, created_at FROM request_logs",
     );
 
     let mut has_where = false;
@@ -591,6 +592,7 @@ async fn list_logs(
             first_byte_ms: row.get::<Option<i64>, _>("first_byte_ms"),
             input_tokens: row.get::<Option<i64>, _>("input_tokens"),
             output_tokens: row.get::<Option<i64>, _>("output_tokens"),
+            cached_tokens: row.get::<Option<i64>, _>("cached_tokens"),
             total_tokens: row.get::<Option<i64>, _>("total_tokens"),
             usage_json: row.get::<Option<String>, _>("usage_json"),
             error_stage: row.get::<Option<String>, _>("error_stage"),

@@ -54,10 +54,10 @@ impl RequestLogService {
             INSERT INTO request_logs (
                 request_id, gateway_id, provider_id, model, status_code, latency_ms, error,
                 inbound_protocol, upstream_protocol, model_requested, model_effective,
-                stream, first_byte_ms, input_tokens, output_tokens, total_tokens,
-                usage_json, error_stage, error_type
+                stream, first_byte_ms, input_tokens, output_tokens, cached_tokens,
+                total_tokens, usage_json, error_stage, error_type
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
             "#,
         )
         .bind(&entry.request_id)
@@ -75,6 +75,7 @@ impl RequestLogService {
         .bind(entry.observation.first_byte_ms)
         .bind(entry.usage.input_tokens)
         .bind(entry.usage.output_tokens)
+        .bind(entry.usage.cached_tokens)
         .bind(entry.usage.total_tokens)
         .bind(entry.usage.usage_json.as_ref().map(Value::to_string))
         .bind(&entry.observation.error_stage)
@@ -107,14 +108,16 @@ impl RequestLogService {
             UPDATE request_logs
             SET input_tokens = ?2,
                 output_tokens = ?3,
-                total_tokens = ?4,
-                usage_json = ?5
+                cached_tokens = ?4,
+                total_tokens = ?5,
+                usage_json = ?6
             WHERE request_id = ?1
             "#,
         )
         .bind(request_id)
         .bind(usage.input_tokens)
         .bind(usage.output_tokens)
+        .bind(usage.cached_tokens)
         .bind(usage.total_tokens)
         .bind(usage.usage_json.as_ref().map(Value::to_string))
         .execute(&self.pool)

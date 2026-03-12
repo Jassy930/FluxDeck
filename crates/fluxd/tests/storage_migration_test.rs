@@ -119,6 +119,7 @@ async fn migration_adds_request_log_forwarding_columns() {
         "first_byte_ms",
         "input_tokens",
         "output_tokens",
+        "cached_tokens",
         "total_tokens",
         "usage_json",
         "error_stage",

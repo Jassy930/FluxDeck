@@ -243,6 +243,7 @@
 - `first_byte_ms: number | null`
 - `input_tokens: number | null`
 - `output_tokens: number | null`
+- `cached_tokens: number | null`
 - `total_tokens: number | null`
 - `usage_json: string | null`
 - `error_stage: string | null`
@@ -255,7 +256,7 @@
 - 服务端按 `created_at DESC, request_id DESC` 排序
 - `cursor_created_at + cursor_request_id` 共同保证翻页稳定
 - Native 监控页消费“最近样本窗口”
-- Logs 工作台消费“可继续分页的请求明细”
+- Logs 工作台消费“可继续分页的单列可展开日志卡片流”
 
 说明：
 
@@ -263,6 +264,7 @@
   - `dimensions={"compatibility_mode":"compatible","event":"degraded_to_estimate"}`
 - `inbound_protocol / upstream_protocol` 用于区分真实转发链路，例如 `anthropic -> openai`、`anthropic -> anthropic`
 - `model_requested / model_effective` 用于区分入站请求模型与最终发往上游的模型（例如发生了模型映射）
+- `cached_tokens` 是稳定聚合字段，用于表达缓存命中的 token；原始 provider usage 明细仍保留在 `usage_json`
 - `usage_json` 当前以字符串形式返回原始 usage JSON，便于前端先稳定消费；后续如改为对象需升级契约版本
 
 ## 4) Stats

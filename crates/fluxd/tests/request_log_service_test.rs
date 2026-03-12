@@ -12,12 +12,14 @@ async fn request_logs_persist_forwarding_observation_fields() {
     assert_eq!(row.model_requested.as_deref(), Some("claude-3-7-sonnet"));
     assert_eq!(row.model_effective.as_deref(), Some("claude-sonnet-4-5"));
     assert_eq!(row.input_tokens, Some(128));
+    assert_eq!(row.cached_tokens, Some(64));
 }
 
 struct StoredRequestLogRow {
     model_requested: Option<String>,
     model_effective: Option<String>,
     input_tokens: Option<i64>,
+    cached_tokens: Option<i64>,
 }
 
 async fn setup_db() -> sqlx::SqlitePool {
@@ -71,8 +73,9 @@ async fn append_test_log(pool: &sqlx::SqlitePool) {
     let usage = UsageSnapshot {
         input_tokens: Some(128),
         output_tokens: Some(256),
+        cached_tokens: Some(64),
         total_tokens: Some(384),
-        usage_json: Some(json!({"input_tokens": 128, "output_tokens": 256})),
+        usage_json: Some(json!({"input_tokens": 128, "output_tokens": 256, "cache_read_input_tokens": 64})),
     };
 
     service
@@ -95,8 +98,8 @@ async fn append_test_log(pool: &sqlx::SqlitePool) {
 }
 
 async fn fetch_latest_log(pool: &sqlx::SqlitePool) -> StoredRequestLogRow {
-    let row = sqlx::query_as::<_, (Option<String>, Option<String>, Option<i64>)>(
-        "SELECT model_requested, model_effective, input_tokens FROM request_logs WHERE request_id = ?1",
+    let row = sqlx::query_as::<_, (Option<String>, Option<String>, Option<i64>, Option<i64>)>(
+        "SELECT model_requested, model_effective, input_tokens, cached_tokens FROM request_logs WHERE request_id = ?1",
     )
     .bind("req_forward_obs")
     .fetch_one(pool)
@@ -107,5 +110,6 @@ async fn fetch_latest_log(pool: &sqlx::SqlitePool) -> StoredRequestLogRow {
         model_requested: row.0,
         model_effective: row.1,
         input_tokens: row.2,
+        cached_tokens: row.3,
     }
 }

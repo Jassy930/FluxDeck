@@ -363,10 +363,14 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 logs --limit 20
 - 日志来自 `request_logs` 表
 - `GET /admin/logs` 默认返回分页对象，`items` 为当前页日志，`next_cursor` 用于继续翻页
 - 每条日志现在会额外暴露转发维度：`inbound_protocol`、`upstream_protocol`、`model_requested`、`model_effective`
-- 若请求带有 usage 数据，还会暴露：`input_tokens`、`output_tokens`、`total_tokens`、`usage_json`
+- 若请求带有 usage 数据，还会暴露：`input_tokens`、`output_tokens`、`cached_tokens`、`total_tokens`、`usage_json`
 - 流式请求会额外记录：`stream`、`first_byte_ms`
 - Native 首页只加载最近样本窗口；Logs 页面进入时默认拉第一页，再通过 `Load More` 继续请求下一页
+- 原生端 `Logs` 页面会把每条请求渲染为单列可展开卡片：
+  - 折叠态优先显示状态、路由、模型映射、错误摘要、延迟和时间
+  - 展开态补充协议、stream、首包耗时、四类 token、错误阶段/类型、完整错误与原始 `usage_json`
 - `fluxctl logs --limit N` 会把 `limit=N` 传给 Admin API
+- `fluxctl logs` 当前仍然原样打印分页 JSON，不会在 CLI 侧额外格式化日志字段
 - 系统会按条数自动滚动清理（当前保留最近 10,000 条）
 
 也可以直接查看 Admin API：
@@ -387,7 +391,9 @@ curl 'http://127.0.0.1:7777/admin/logs?limit=5'
   "model_requested": "claude-3-7-sonnet",
   "model_effective": "qwen3-coder-plus",
   "input_tokens": 128,
-  "output_tokens": 64
+  "output_tokens": 64,
+  "cached_tokens": 32,
+  "total_tokens": 224
 }
 ```
 
@@ -477,7 +483,7 @@ cargo clean
 - `Connections`：活跃 Gateway / Provider / Model 摘要
 - `Topology`：`Entrypoints -> Gateways -> Providers` 三列拓扑骨架
 - `Providers / Gateways`：卡片化资源工作台
-- `Logs`：筛选 + 请求列表 + 详情面板
+- `Logs`：筛选 + 单列可展开日志卡片流
 - `Settings`：`Admin API / Refresh & Sync / Diagnostics` 三段式设置面板
 
 原生端仍通过 `fluxd` Admin API 拉取与提交数据，不复制后端业务逻辑。
