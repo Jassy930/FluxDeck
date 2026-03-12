@@ -20,3 +20,7 @@
 - `admin-api-error-contract`
 - `native-root-store-split`
 - `quality-gate-realignment`
+
+## 后续进展
+
+- `quality-gate-realignment` 已在 `docs/progress/2026-03-12-quality-gate-realignment.md` 中记录实施结果

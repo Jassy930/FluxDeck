@@ -1,24 +1,15 @@
-# MVP E2E 验证
+# MVP E2E 验证（历史入口）
 
-## 前置要求
+`docs/testing/mvp-e2e.md` 已不再维护独立门禁定义。
 
-- Rust 工具链可用
-- `uv` 可用
-- `bun` 可用（桌面端测试）
+当前 FluxDeck 的唯一权威质量门禁文档是：
 
-## 执行命令
+- [docs/testing/quality-gates.md](./quality-gates.md)
 
-```bash
-cargo test -q
-cd apps/desktop && bun run test
-cd ../..
-./scripts/e2e/smoke.sh
-```
+迁移说明：
 
-> 说明：`bun run test --cwd apps/desktop` 在当前 bun 版本下会被解析为脚本参数，建议使用上面的等价写法。
+- 原先混合 Rust、Web 桌面与 smoke 的旧口径已废弃
+- `apps/desktop` 不再属于主线默认门禁
+- 原生端测试已提升到 `ci-gate` / `release-gate`
 
-## 通过标准
-
-- `cargo test -q` 全部通过
-- 桌面端测试通过
-- `smoke.sh` 输出 `smoke ok`
+如果你是从旧文档跳转过来，请直接以 `quality-gates.md` 为准。

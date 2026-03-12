@@ -129,11 +129,15 @@ FluxDeck 现在会自动处理运行中实例的配置应用问题：
 
 ## 提交前验证
 
-```bash
-cargo test -q
-cd apps/desktop && bun run test
-./scripts/e2e/smoke.sh
-```
+当前质量门禁分为三层：
+
+- `dev-gate`：本地默认自检，执行 `cargo test -q` 与 `./scripts/e2e/smoke.sh`
+- `ci-gate`：在 `dev-gate` 基础上强制加入原生端 `xcodebuild test`
+- `release-gate`：在 `ci-gate` 基础上增加原生端构建验证
+
+完整定义见：
+
+- [docs/testing/quality-gates.md](./docs/testing/quality-gates.md)
 
 如果遇到工具链切换后 `cargo test` 出现 `E0463 can't find crate`，先执行：
 
