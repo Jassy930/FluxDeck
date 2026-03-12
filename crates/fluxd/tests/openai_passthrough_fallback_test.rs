@@ -117,6 +117,35 @@ async fn persists_usage_for_non_stream_openai_responses_fallback() {
 }
 
 #[tokio::test]
+async fn persists_model_dimensions_for_non_stream_openai_responses_fallback() {
+    let upstream = spawn_upstream_mock().await;
+    let gateway = spawn_openai_gateway(format!("http://{}/v1", upstream.addr)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/responses", gateway.addr))
+        .json(&json!({
+            "model": "gpt-5-codex",
+            "input": "ping"
+        }))
+        .send()
+        .await
+        .expect("call gateway /responses");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let row = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
+        "SELECT model, model_requested, model_effective FROM request_logs ORDER BY rowid DESC LIMIT 1",
+    )
+    .fetch_one(&gateway.pool)
+    .await
+    .expect("fetch fallback model dimensions log");
+
+    assert_eq!(row.0.as_deref(), Some("gpt-5-codex"));
+    assert_eq!(row.1.as_deref(), Some("gpt-5-codex"));
+    assert_eq!(row.2.as_deref(), Some("gpt-5-codex"));
+}
+
+#[tokio::test]
 async fn persists_usage_for_streaming_openai_responses_fallback_after_stream_finishes() {
     let upstream = spawn_upstream_mock().await;
     let gateway = spawn_openai_gateway(format!("http://{}/v1", upstream.addr)).await;

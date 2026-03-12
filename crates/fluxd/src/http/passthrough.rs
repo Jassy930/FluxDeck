@@ -20,6 +20,13 @@ use crate::service::request_log_service::{RequestLogEntry, RequestLogService};
 
 const REQUEST_LOG_KEEP: i64 = 10_000;
 
+#[derive(Clone, Debug, Default)]
+struct PassthroughLogDimensions {
+    model: Option<String>,
+    model_requested: Option<String>,
+    model_effective: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct PassthroughRouteState {
     pool: SqlitePool,
@@ -75,6 +82,7 @@ pub async fn handle_passthrough_request(
                 Some(format!("resolve gateway target failed: {err}")),
                 Some(("resolve_target", "config_error")),
                 Default::default(),
+                Default::default(),
                 false,
             )
             .await;
@@ -106,6 +114,7 @@ pub async fn handle_passthrough_request(
                 target.upstream_protocol
             )),
             Some(("protocol_match", "unsupported_protocol_bridge")),
+            Default::default(),
             Default::default(),
             false,
         )
@@ -144,6 +153,7 @@ pub async fn handle_passthrough_request(
                 Some(format!("read request body failed: {err}")),
                 Some(("read_body", "invalid_request_body")),
                 Default::default(),
+                Default::default(),
                 false,
             )
             .await;
@@ -159,6 +169,7 @@ pub async fn handle_passthrough_request(
                 .into_response();
         }
     };
+    let request_model = extract_passthrough_requested_model(inbound_protocol, &body);
 
     let mut upstream = client.request(parts.method, url);
 
@@ -194,6 +205,7 @@ pub async fn handle_passthrough_request(
                 Some(format!("passthrough upstream request failed: {err}")),
                 Some(("upstream_request", "upstream_error")),
                 Default::default(),
+                Default::default(),
                 false,
             )
             .await;
@@ -218,6 +230,11 @@ pub async fn handle_passthrough_request(
         .is_some_and(|value| value.starts_with("text/event-stream"));
 
     if is_stream {
+        let stream_dimensions = PassthroughLogDimensions {
+            model: request_model.clone(),
+            model_requested: request_model.clone(),
+            model_effective: request_model.clone(),
+        };
         append_passthrough_log(
             &log_service,
             request_id.clone(),
@@ -229,6 +246,7 @@ pub async fn handle_passthrough_request(
             started_at,
             None,
             None,
+            stream_dimensions,
             Default::default(),
             true,
         )
@@ -279,6 +297,7 @@ pub async fn handle_passthrough_request(
                 Some(format!("read passthrough upstream response failed: {err}")),
                 Some(("read_upstream_response", "upstream_response_error")),
                 Default::default(),
+                Default::default(),
                 false,
             )
             .await;
@@ -300,6 +319,8 @@ pub async fn handle_passthrough_request(
     } else {
         Default::default()
     };
+    let response_model =
+        extract_passthrough_response_model(&target.upstream_protocol, &response_body);
     append_passthrough_log(
         &log_service,
         request_id,
@@ -311,6 +332,11 @@ pub async fn handle_passthrough_request(
         started_at,
         None,
         None,
+        PassthroughLogDimensions {
+            model: request_model.clone(),
+            model_requested: request_model.clone(),
+            model_effective: response_model.or(request_model),
+        },
         usage,
         false,
     )
@@ -364,6 +390,7 @@ async fn append_passthrough_log(
     started_at: Instant,
     error: Option<String>,
     error_details: Option<(&str, &str)>,
+    dimensions: PassthroughLogDimensions,
     usage: crate::forwarding::types::UsageSnapshot,
     is_stream: bool,
 ) {
@@ -372,6 +399,8 @@ async fn append_passthrough_log(
     observation.provider_id = Some(provider_id.to_string());
     observation.inbound_protocol = Some(inbound_protocol.to_string());
     observation.upstream_protocol = Some(upstream_protocol.to_string());
+    observation.model_requested = dimensions.model_requested.clone();
+    observation.model_effective = dimensions.model_effective.clone();
     observation.is_stream = is_stream;
     observation.status_code = Some(i64::from(status_code.as_u16()));
     observation.latency_ms = Some(latency_ms);
@@ -386,7 +415,7 @@ async fn append_passthrough_log(
                 request_id,
                 gateway_id: gateway_id.to_string(),
                 provider_id: provider_id.to_string(),
-                model: None,
+                model: dimensions.model,
                 status_code: i64::from(status_code.as_u16()),
                 latency_ms,
                 error,
@@ -410,6 +439,47 @@ fn extract_passthrough_usage(
         "openai" | "openai-response" => extract_openai_usage(&response),
         "anthropic" => extract_anthropic_usage(&response),
         _ => Default::default(),
+    }
+}
+
+fn extract_passthrough_requested_model(
+    inbound_protocol: &str,
+    request_body: &[u8],
+) -> Option<String> {
+    let Ok(payload) = serde_json::from_slice::<serde_json::Value>(request_body) else {
+        return None;
+    };
+
+    match inbound_protocol {
+        "openai" | "openai-response" | "anthropic" => payload
+            .get("model")
+            .and_then(serde_json::Value::as_str)
+            .map(ToOwned::to_owned),
+        _ => None,
+    }
+}
+
+fn extract_passthrough_response_model(
+    upstream_protocol: &str,
+    response_body: &[u8],
+) -> Option<String> {
+    let Ok(response) = serde_json::from_slice::<serde_json::Value>(response_body) else {
+        return None;
+    };
+
+    match upstream_protocol {
+        "openai" | "openai-response" | "anthropic" => response
+            .get("model")
+            .and_then(serde_json::Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                response
+                    .get("response")
+                    .and_then(|item| item.get("model"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToOwned::to_owned)
+            }),
+        _ => None,
     }
 }
 
