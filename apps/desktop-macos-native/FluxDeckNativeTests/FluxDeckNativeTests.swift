@@ -913,6 +913,69 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(model.createdAtText, "2026-03-03T10:00:00Z")
     }
 
+    func testCompactLogRowSummaryFormatting() {
+        let log = AdminLog(
+            requestID: "req_compact",
+            gatewayID: "gw",
+            providerID: "pv",
+            model: "gpt-5",
+            inboundProtocol: "openai",
+            upstreamProtocol: "anthropic",
+            modelRequested: "gpt-5-codex",
+            modelEffective: "gpt-5",
+            statusCode: 502,
+            latencyMs: 1820,
+            stream: true,
+            firstByteMs: 420,
+            inputTokens: 1200,
+            outputTokens: 640,
+            cachedTokens: 300,
+            totalTokens: 2140,
+            errorStage: "upstream_response",
+            errorType: "upstream_error",
+            error: "provider timeout",
+            createdAt: "2026-03-03T10:00:00Z"
+        )
+
+        let model = LogStreamCardModel.make(log: log)
+
+        XCTAssertEqual(model.summaryText, "provider timeout")
+        XCTAssertEqual(model.secondaryMetaText, "Tok 1.2k in / 640 out / 300 c")
+        XCTAssertEqual(model.metaBadges, ["1820 ms", "10:00:00", "openai -> anthropic", "Streaming"])
+    }
+
+    func testExpandedDiagnosticsGrouping() {
+        let log = AdminLog(
+            requestID: "req_expand",
+            gatewayID: "gw",
+            providerID: "pv",
+            model: "gpt-5",
+            inboundProtocol: "openai",
+            upstreamProtocol: "openai",
+            statusCode: 500,
+            latencyMs: 980,
+            stream: false,
+            firstByteMs: 210,
+            inputTokens: 880,
+            outputTokens: 140,
+            cachedTokens: 320,
+            totalTokens: 1340,
+            usageJSON: "",
+            errorStage: "upstream_response",
+            errorType: "provider_error",
+            error: "bad gateway",
+            createdAt: "2026-03-03T10:00:00Z"
+        )
+
+        let model = LogStreamCardModel.make(log: log)
+
+        XCTAssertEqual(model.executionDetails.map(\.label), ["Request ID", "Protocol", "Stream", "First Byte"])
+        XCTAssertEqual(model.executionDetails.map(\.value), ["req_expand", "openai -> openai", "Non-stream", "210 ms"])
+        XCTAssertEqual(model.diagnosticsDetails.map(\.label), ["Tokens", "Error Stage", "Error Type", "Error"])
+        XCTAssertEqual(model.diagnosticsDetails.first?.value, "In 880 · Out 140 · Cached 320 · Total 1340")
+        XCTAssertNil(model.usageText)
+    }
+
     func testLogsWorkbenchExpansionStateAllowsOnlySingleExpandedLog() {
         var state = LogsWorkbenchExpansionState()
 

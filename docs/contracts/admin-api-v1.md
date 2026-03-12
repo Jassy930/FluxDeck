@@ -256,7 +256,7 @@
 - 服务端按 `created_at DESC, request_id DESC` 排序
 - `cursor_created_at + cursor_request_id` 共同保证翻页稳定
 - Native 监控页消费“最近样本窗口”
-- Logs 工作台消费“可继续分页的单列可展开日志卡片流”
+- Logs 工作台消费“可继续分页的单列可展开紧凑日志行”
 
 说明：
 
