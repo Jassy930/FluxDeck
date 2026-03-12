@@ -1,14 +1,17 @@
 use std::net::SocketAddr;
 
 use axum::{
-    body::to_bytes,
+    body::{to_bytes, Body},
     extract::Request,
+    http::header,
     response::IntoResponse,
     routing::{get, post},
     Router,
 };
+use bytes::Bytes;
 use fluxd::http::openai_routes::{build_openai_router, OpenAiRouteState};
 use fluxd::storage::migrate::run_migrations;
+use futures_util::stream;
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 
@@ -83,6 +86,70 @@ async fn persists_minimal_request_log_for_openai_fallback() {
     assert_eq!(row.2, 200);
 }
 
+#[tokio::test]
+async fn persists_usage_for_non_stream_openai_responses_fallback() {
+    let upstream = spawn_upstream_mock().await;
+    let gateway = spawn_openai_gateway(format!("http://{}/v1", upstream.addr)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/responses", gateway.addr))
+        .json(&json!({
+            "model": "gpt-5-codex",
+            "input": "ping"
+        }))
+        .send()
+        .await
+        .expect("call gateway /responses");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let row = sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>, Option<i64>)>(
+        "SELECT input_tokens, output_tokens, cached_tokens, total_tokens FROM request_logs ORDER BY rowid DESC LIMIT 1",
+    )
+    .fetch_one(&gateway.pool)
+    .await
+    .expect("fetch fallback usage log");
+
+    assert_eq!(row.0, Some(11));
+    assert_eq!(row.1, Some(7));
+    assert_eq!(row.2, Some(5));
+    assert_eq!(row.3, Some(18));
+}
+
+#[tokio::test]
+async fn persists_usage_for_streaming_openai_responses_fallback_after_stream_finishes() {
+    let upstream = spawn_upstream_mock().await;
+    let gateway = spawn_openai_gateway(format!("http://{}/v1", upstream.addr)).await;
+
+    let body = reqwest::Client::new()
+        .post(format!("http://{}/responses", gateway.addr))
+        .json(&json!({
+            "model": "gpt-5-codex",
+            "input": "ping",
+            "stream": true
+        }))
+        .send()
+        .await
+        .expect("call gateway /responses")
+        .text()
+        .await
+        .expect("read streaming fallback body");
+
+    assert!(body.contains("response.completed"));
+
+    let row = sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>, Option<i64>)>(
+        "SELECT input_tokens, output_tokens, cached_tokens, total_tokens FROM request_logs ORDER BY rowid DESC LIMIT 1",
+    )
+    .fetch_one(&gateway.pool)
+    .await
+    .expect("fetch fallback streaming usage log");
+
+    assert_eq!(row.0, Some(21));
+    assert_eq!(row.1, Some(13));
+    assert_eq!(row.2, Some(8));
+    assert_eq!(row.3, Some(34));
+}
+
 struct SpawnedServer {
     addr: SocketAddr,
 }
@@ -141,7 +208,9 @@ async fn spawn_upstream_mock() -> SpawnedServer {
 }
 
 async fn spawn_server(app: Router) -> SpawnedServer {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind random port");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind random port");
     let addr = listener.local_addr().expect("read listener addr");
 
     tokio::spawn(async move {
@@ -159,10 +228,40 @@ async fn upstream_responses(request: Request) -> impl IntoResponse {
 
     let payload: Value = serde_json::from_slice::<Value>(&body).expect("decode upstream payload");
 
+    if payload.get("stream").and_then(Value::as_bool) == Some(true) {
+        let chunks = vec![
+            Ok::<Bytes, std::convert::Infallible>(Bytes::from(
+                "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_mock_stream_001\",\"object\":\"response\",\"model\":\"gpt-5-codex\"}}\n\n",
+            )),
+            Ok(Bytes::from(
+                "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"pong\"}\n\n",
+            )),
+            Ok(Bytes::from(
+                "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_mock_stream_001\",\"object\":\"response\",\"model\":\"gpt-5-codex\",\"usage\":{\"input_tokens\":21,\"output_tokens\":13,\"total_tokens\":34,\"input_tokens_details\":{\"cached_tokens\":8}}}}\n\n",
+            )),
+            Ok(Bytes::from("data: [DONE]\n\n")),
+        ];
+
+        return (
+            [(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")],
+            Body::from_stream(stream::iter(chunks)),
+        )
+            .into_response();
+    }
+
     axum::Json(json!({
         "id": "resp_mock_001",
         "object": "response",
         "path": path,
-        "input_echo": payload.get("input").cloned().unwrap_or(Value::Null)
+        "input_echo": payload.get("input").cloned().unwrap_or(Value::Null),
+        "usage": {
+            "input_tokens": 11,
+            "output_tokens": 7,
+            "total_tokens": 18,
+            "input_tokens_details": {
+                "cached_tokens": 5
+            }
+        }
     }))
+    .into_response()
 }

@@ -52,3 +52,44 @@
 
 - passthrough 当前只做最小观测，不做 usage 深度提取
 - 方案 C 仍保留为后续架构讨论 issue
+
+## 2026-03-12 补充：passthrough token 监测修复
+
+### 现象
+
+- 用户反馈最近日志中的 `input_tokens / output_tokens / total_tokens` 持续为空
+- 监测页 `Total Tokens` 也因此聚合为 `0`
+
+### 根因
+
+- 3 月 12 日早些时候引入的同协议 passthrough fallback 只记录了最小请求日志
+- `/responses` 等 fallback 请求虽然已经能被成功转发，但没有解析 upstream response 的 `usage`
+- 对于流式 SSE，请求在流开始时就已落库，后续也没有在 `response.completed` 后回写 usage
+
+### 本次修复
+
+- `crates/fluxd/src/forwarding/openai_inbound.rs`
+  - `extract_usage()` 兼容 OpenAI Responses API 的 `usage.input_tokens / output_tokens`
+  - 继续兼容 Chat Completions 的 `prompt_tokens / completion_tokens`
+- `crates/fluxd/src/http/passthrough.rs`
+  - 非流式 JSON 成功响应：在返回客户端前解析 usage 并直接写入 `request_logs`
+  - 流式 SSE 成功响应：保留透传，额外跟踪 `data:` 事件；当收到 `response.completed.response.usage` 后，在流结束时回写 usage
+  - passthrough 日志会正确标记 `stream`
+- `crates/fluxd/tests/openai_passthrough_fallback_test.rs`
+  - 新增 `/responses` 非流式 usage 落库回归
+  - 新增 `/responses` SSE `response.completed` usage 回写回归
+
+### 验证
+
+- `cargo test -q -p fluxd --test openai_passthrough_fallback_test`
+- `cargo test -q -p fluxd --test openai_streaming_test`
+- `cargo test -q -p fluxd --test request_log_service_test`
+
+结果：
+
+- 全部通过
+
+### 当前口径
+
+- OpenAI `/responses` passthrough 现在会把 token usage 写入 `request_logs`
+- 因为 `/admin/stats/overview` 直接聚合 `request_logs.total_tokens`，所以同类请求的监测面板 token 统计会恢复

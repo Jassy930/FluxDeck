@@ -53,9 +53,11 @@ pub fn extract_usage(response: &Value) -> UsageSnapshot {
     let usage = response.get("usage").and_then(Value::as_object);
     let input_tokens = usage
         .and_then(|item| item.get("prompt_tokens"))
+        .or_else(|| usage.and_then(|item| item.get("input_tokens")))
         .and_then(Value::as_i64);
     let output_tokens = usage
         .and_then(|item| item.get("completion_tokens"))
+        .or_else(|| usage.and_then(|item| item.get("output_tokens")))
         .and_then(Value::as_i64);
     let cached_tokens = extract_cached_tokens(usage);
     let total_tokens = usage
