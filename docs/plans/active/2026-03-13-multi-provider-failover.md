@@ -511,3 +511,109 @@ Expected:
 git add docs/progress/2026-03-13-multi-provider-failover.md docs/plans/active/2026-03-13-multi-provider-failover-design.md docs/plans/active/2026-03-13-multi-provider-failover.md
 git commit -m "docs: close multi-provider failover rollout"
 ```
+
+---
+
+## Phase 2 跟进计划
+
+> 说明：以下任务不阻塞当前阶段提交，但需要持续追踪，直到“多 Provider 故障切流”具备完整可观测性和原生端闭环。
+
+### Task 11: 补齐 Anthropic `count_tokens` 请求级 failover
+
+**Files:**
+- Modify: `crates/fluxd/src/http/anthropic_routes.rs`
+- Test: `crates/fluxd/tests/anthropic_forwarding_test.rs`
+- Modify: `docs/progress/2026-03-13-multi-provider-failover.md`
+
+**Step 1: 写失败测试，覆盖首个 Provider `5xx` 时 `count_tokens` 切到第二个 Provider**
+
+**Step 2: 运行测试确认失败**
+
+Run: `cargo test -q -p fluxd --test anthropic_forwarding_test anthropic_count_tokens_fail_over_to_next_provider_on_upstream_5xx`
+
+Expected:
+
+- FAIL，当前仍按单 target 处理
+
+**Step 3: 实现最小 failover**
+
+- 让 `count_tokens_handler` 使用 ordered candidates
+- 对网络错误、`429`、`5xx` 执行顺序切流
+- 回写 `ProviderHealthService`
+
+**Step 4: 再次运行测试确认通过**
+
+Run: `cargo test -q -p fluxd --test anthropic_forwarding_test`
+
+Expected:
+
+- PASS
+
+### Task 12: 补 failover 观测字段与日志维度
+
+**Files:**
+- Modify: `crates/fluxd/migrations/*`
+- Modify: `crates/fluxd/src/service/request_log_service.rs`
+- Modify: `crates/fluxd/src/http/anthropic_routes.rs`
+- Modify: `crates/fluxd/src/http/passthrough.rs`
+- Modify: `crates/fluxd/src/forwarding/executor.rs`
+- Modify: `docs/contracts/admin-api-v1.md`
+- Modify: `docs/progress/2026-03-13-multi-provider-failover.md`
+
+**目标：**
+
+- 新增 `failover_performed`
+- 新增 `route_attempt_count`
+- 新增 `provider_id_initial`
+
+### Task 13: 强化 `HealthMonitor` 主动探测
+
+**Files:**
+- Modify: `crates/fluxd/src/runtime/health_monitor.rs`
+- Modify: `crates/fluxd/src/service/provider_health_service.rs`
+- Test: `crates/fluxd/tests/gateway_manager_test.rs`
+- Modify: `docs/ops/local-runbook.md`
+- Modify: `docs/progress/2026-03-13-multi-provider-failover.md`
+
+**目标：**
+
+- 引入真实上游轻量探测
+- 引入冷却窗口后的 probe 调度
+- 引入最小退避策略
+
+### Task 14: 健康状态细化到 `gateway + provider (+ model)` 维度
+
+**Files:**
+- Modify: `crates/fluxd/migrations/*`
+- Modify: `crates/fluxd/src/domain/provider_health.rs`
+- Modify: `crates/fluxd/src/repo/provider_health_repo.rs`
+- Modify: `crates/fluxd/src/service/provider_health_service.rs`
+- Modify: `crates/fluxd/src/forwarding/route_selector.rs`
+- Modify: `docs/plans/active/2026-03-13-multi-provider-failover-design.md`
+- Modify: `docs/progress/2026-03-13-multi-provider-failover.md`
+
+**目标：**
+
+- 避免单个异常模型拖累整个 Provider
+- 为更细粒度回切策略打基础
+
+### Task 15: 原生 macOS 端补齐链路与健康视图
+
+**Files:**
+- Modify: `apps/desktop-macos-native/**`
+- Modify: `docs/USAGE.md`
+- Modify: `docs/progress/2026-03-13-multi-provider-failover.md`
+
+**目标：**
+
+- 展示 route targets 顺序
+- 展示 active provider / unhealthy 数量 / 最近 probe 状态
+- 支持手动 probe
+- 支持原生端编辑有序链路
+
+### Phase 2 完成条件
+
+- Anthropic `messages` 与 `count_tokens` 都具备请求级 failover
+- Request logs 能明确表达切流过程
+- 后台主动探测不再只是骨架
+- 原生端能展示并操作多 Provider 链路与健康状态

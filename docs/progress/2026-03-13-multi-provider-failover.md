@@ -30,8 +30,12 @@
 
 ## 下一步
 
-- 按实施计划先落 migration 与数据兼容层
-- 然后逐步推进 Admin API、runtime、`fluxctl`、原生端
+- 当前阶段性提交已完成，后续按 Phase 2 计划继续补齐：
+  - Task 11：Anthropic `count_tokens` 请求级 failover
+  - Task 12：failover 观测字段与日志维度
+  - Task 13：真实主动探测、冷却窗口、退避策略
+  - Task 14：健康状态细化到更小粒度
+  - Task 15：原生端链路与健康视图闭环
 
 ## 实施进展
 
@@ -132,3 +136,23 @@
   - 还没有真实上游网络探测
   - 还没有独立冷却窗口调度与探测退避
   - 还没有按 Gateway / 模型维度维护健康状态
+
+## Phase 2 跟踪
+
+| Task | 内容 | 状态 | 最近说明 |
+|------|------|------|----------|
+| 11 | Anthropic `count_tokens` 请求级 failover | 未开始 | `messages` 已完成，`count_tokens` 仍按单 target |
+| 12 | failover 观测字段与日志维度 | 未开始 | 尚未记录 `failover_performed / route_attempt_count / provider_id_initial` |
+| 13 | `HealthMonitor` 真实主动探测 | 未开始 | 当前仍为保守骨架，只做快照补齐和 `probing` 推进 |
+| 14 | 健康状态粒度细化 | 未开始 | 当前仍为 Provider 全局维度 |
+| 15 | 原生端链路与健康视图 | 未开始 | 需要在 macOS 原生端补 route targets / health / probe UI |
+
+### 跟踪更新规则
+
+- 每完成一个 Task，先更新本文件的“状态”和“最近说明”
+- 若实现偏离设计稿，需要同步回填：
+  - `docs/plans/active/2026-03-13-multi-provider-failover-design.md`
+  - `docs/plans/active/2026-03-13-multi-provider-failover.md`
+- 每个阶段结束后必须重新记录：
+  - 最新验证命令
+  - 是否仍存在兼容字段或技术债

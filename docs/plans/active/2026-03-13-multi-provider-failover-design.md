@@ -533,6 +533,19 @@
 - 原生端一阶段使用“上下移动按钮”维护优先级，不做拖拽排序
 - `Routing JSON` 与可视化链路编辑器并存，但 route target 主配置不再允许通过 JSON 自由编辑
 
+## Phase 2 明确补完项
+
+以下内容明确归入后续阶段追踪，不计入当前阶段性提交完成范围：
+
+- Anthropic `count_tokens` 请求级 failover
+- failover 观测字段：
+  - `failover_performed`
+  - `route_attempt_count`
+  - `provider_id_initial`
+- `HealthMonitor` 真实主动探测、冷却窗口调度与退避
+- 健康状态从 Provider 全局维度细化到更小作用域
+- 原生 macOS 端的链路编辑、健康状态展示与手动 probe 闭环
+
 ## 推荐实施顺序
 
 1. migration 与 repo
