@@ -108,4 +108,4 @@
 - 是否在后续版本演进到“通用代理优先 + 协议增强附加”的方案 C
 - 当前结论：不作为本轮实现方向，但已正式记录到设计文档
 - 参考文档：
-  - `docs/plans/active/2026-03-12-gateway-protocol-fallback-design.md`
+  - `docs/plans/completed/2026-03-12-gateway-protocol-fallback-design.md`

@@ -29,8 +29,8 @@
 - `crates/fluxd/src/http/admin_routes.rs`
 - `crates/fluxd/tests/admin_api_test.rs`
 - `docs/contracts/admin-api-v1.md`
-- `docs/plans/2026-03-12-native-traffic-kpi-supplement-design.md`
-- `docs/plans/2026-03-12-native-traffic-kpi-supplement.md`
+- `docs/plans/completed/2026-03-12-native-traffic-kpi-supplement-design.md`
+- `docs/plans/completed/2026-03-12-native-traffic-kpi-supplement.md`
 
 ## 验证
 

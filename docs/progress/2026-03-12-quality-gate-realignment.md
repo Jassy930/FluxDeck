@@ -17,8 +17,8 @@
 
 ## 新增文档
 
-- `docs/plans/active/2026-03-12-quality-gate-realignment-design.md`
-- `docs/plans/active/2026-03-12-quality-gate-realignment.md`
+- `docs/plans/completed/2026-03-12-quality-gate-realignment-design.md`
+- `docs/plans/completed/2026-03-12-quality-gate-realignment.md`
 
 ## 后续实施重点
 
@@ -40,7 +40,7 @@
 - 将 `scripts/e2e/validate_cli_desktop_consistency.ts` 从主线 `scripts/e2e/smoke.sh` 中迁出，改由 `scripts/e2e/legacy_web_consistency.sh` 承接
 - 新增 `docs/testing/legacy-web-checks.md`，明确 `apps/desktop` 仅作为遗留兼容消费者存在
 - 在 `apps/desktop-macos-native/README.md` 中固化原生端与 `ci-gate` / `release-gate` 的映射关系
-- 将执行依据计划 `docs/plans/active/2026-03-12-quality-gate-realignment.md` 补入版本化文档
+- 将执行依据计划 `docs/plans/completed/2026-03-12-quality-gate-realignment.md` 补入版本化文档
 
 ## 实施结果
 

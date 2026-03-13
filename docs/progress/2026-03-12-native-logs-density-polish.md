@@ -21,8 +21,8 @@
 
 ### 文档产出
 
-- 新增设计文档：`docs/plans/2026-03-12-native-logs-density-polish-design.md`
-- 新增实施计划：`docs/plans/2026-03-12-native-logs-density-polish.md`
+- 新增设计文档：`docs/plans/completed/2026-03-12-native-logs-density-polish-design.md`
+- 新增实施计划：`docs/plans/completed/2026-03-12-native-logs-density-polish.md`
 
 ### 当前 git 状态
 
@@ -91,4 +91,4 @@ cargo test -q
 - 已修改：`apps/desktop-macos-native/FluxDeckNative/Features/LogsWorkbenchView.swift`
 - 已修改测试：`apps/desktop-macos-native/FluxDeckNativeTests/FluxDeckNativeTests.swift`
 - 已更新文档：`README.md`、`apps/desktop-macos-native/README.md`、`docs/USAGE.md`、`docs/contracts/admin-api-v1.md`、`docs/ops/local-runbook.md`
-- 已新增：`docs/plans/2026-03-12-native-logs-density-polish-design.md`、`docs/plans/2026-03-12-native-logs-density-polish.md`、`docs/progress/2026-03-12-native-logs-density-polish.md`
+- 已新增：`docs/plans/completed/2026-03-12-native-logs-density-polish-design.md`、`docs/plans/completed/2026-03-12-native-logs-density-polish.md`、`docs/progress/2026-03-12-native-logs-density-polish.md`

@@ -229,6 +229,7 @@
 - 名称：`quality-gate-realignment`
 - 级别：高
 - 影响面：开发流程、CI、架构调整优先级
+- 状态：已于 2026-03-12 完成第一轮收敛；见 `docs/testing/quality-gates.md` 与 `docs/progress/2026-03-12-quality-gate-realignment.md`
 
 简要支撑：
 
@@ -246,6 +247,7 @@
 - 名称：`smoke-vs-legacy-web-coupling`
 - 级别：高
 - 影响面：后端演进、契约复用、E2E 稳定性
+- 状态：主 `smoke.sh` 已完成解耦；遗留 Web 一致性检查已迁出到 `scripts/e2e/legacy_web_consistency.sh`
 
 简要支撑：
 
@@ -263,6 +265,7 @@
 - 名称：`native-release-verification-gap`
 - 级别：高
 - 影响面：发布质量、回归风险、主产品可信度
+- 状态：`ci-gate` / `release-gate` 已纳入原生端测试；仍缺少平台级自动化与 native + running fluxd 集成验证
 
 简要支撑：
 
@@ -330,14 +333,18 @@
 
 建议优先顺序：
 
-1. `quality-gate-realignment`
-2. `smoke-vs-legacy-web-coupling`
+1. `native-release-verification-gap`
+2. `docs-information-architecture-cleanup`
 3. `admin-api-error-contract`
 4. `admin-api-application-layer`
 5. `runtime-config-snapshot`
 6. `native-admin-client-decomposition`
 7. `native-root-store-split`
 8. `protocol-extension-surface`
+
+说明：
+
+- `quality-gate-realignment` 与 `smoke-vs-legacy-web-coupling` 已完成第一轮治理，不再作为当前最高优先级待办
 
 ## 备注
 

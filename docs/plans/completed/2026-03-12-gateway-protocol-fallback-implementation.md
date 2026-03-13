@@ -40,7 +40,7 @@
 ### Task 1: 固化设计与待讨论 Issue
 
 **Files:**
-- Create: `docs/plans/active/2026-03-12-gateway-protocol-fallback-design.md`
+- Create: `docs/plans/completed/2026-03-12-gateway-protocol-fallback-design.md`
 - Modify: `docs/plans/active/2026-03-12-codex-gateway-responses-investigation.md`
 
 **Step 1: 更新设计稿**
@@ -172,7 +172,7 @@ Expected: PASS。
 - Modify: `docs/USAGE.md`
 - Modify: `docs/ops/local-runbook.md`
 - Modify: `README.md`
-- Modify: `docs/plans/active/2026-03-12-gateway-protocol-fallback-implementation.md`
+- Modify: `docs/plans/completed/2026-03-12-gateway-protocol-fallback-implementation.md`
 
 **Step 1: 更新说明文档**
 

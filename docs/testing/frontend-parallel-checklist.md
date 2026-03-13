@@ -1,6 +1,12 @@
-# 前端并行交付验收清单
+# 历史：前端并行交付验收清单
 
-本文档用于验收「Tauri 主线 + macOS 原生壳支线」并行交付结果。
+本文档记录的是 2026-03-02 前后「Tauri 主线 + macOS 原生壳支线」并行交付阶段的验收口径。
+
+当前状态：
+
+- 它不是 FluxDeck 现行主线验收标准
+- 当前权威门禁统一以 `docs/testing/quality-gates.md` 为准
+- `apps/desktop` 现仅作为遗留兼容消费者，相关检查请看 `docs/testing/legacy-web-checks.md`
 
 ## 一、前置条件
 

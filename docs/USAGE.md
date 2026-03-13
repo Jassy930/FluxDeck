@@ -1,24 +1,25 @@
-# FluxDeck 使用文档（MVP）
+# FluxDeck 使用说明
 
 本文档面向本地使用者，目标是让你在几分钟内跑通：
 
 1. 启动本地管理服务 `fluxd`
 2. 用 `fluxctl` 配置 Provider 与 Gateway
-3. 通过 Gateway 调用 OpenAI 兼容接口
+3. 通过 Gateway 调用 OpenAI / Anthropic 兼容接口
 
 ## 1. 前置要求
 
 - macOS（当前优先支持）
 - Rust 工具链（`cargo` 可用）
-- `uv`（用于脚本与 e2e）
-- `bun`（用于桌面端测试）
+- `uv`（用于脚本与 E2E）
+- 如需执行原生端验证：Xcode / `xcodebuild`
+- 如需执行遗留 Web 兼容检查：`bun`
 
 可选检查：
 
 ```bash
 cargo --version
 uv --version
-bun --version
+xcodebuild -version
 ```
 
 ## 2. 启动服务
@@ -42,33 +43,21 @@ cargo run -p fluxd
 curl http://127.0.0.1:7777/admin/providers
 ```
 
-## 2.1 启动桌面前端（开发模式）
+## 2.1 打开桌面工作台
 
-在另一个终端进入前端目录：
+当前桌面主线是 `apps/desktop-macos-native` 原生工作台，`apps/desktop` 已降级为遗留兼容消费者。
 
-```bash
-cd apps/desktop
-bun install
-bun run dev
-```
+原生工作台已覆盖：
 
-说明：
+- `Overview`：运行摘要、最近请求、关键状态
+- `Traffic`：统计概览、趋势、分布与异常摘要
+- `Connections`：活跃 Gateway / Provider / Model 视图
+- `Topology`：`Entrypoints -> Gateways -> Providers` 路由骨架
+- `Providers / Gateways / Logs / Settings`：统一工作台式资源与诊断页面
 
-- 开发服务器默认地址：`http://127.0.0.1:5173`
-- 已配置 Vite 代理：`/admin -> http://127.0.0.1:7777`
-- 因此前端会通过同源路径 `/admin/*` 访问 Admin API，避免浏览器跨域拦截
+如需查看原生端构建、测试和门禁映射，请参考：
 
-### 2.2 桌面端工作区结构
-
-当前桌面端正在演进为更偏 macOS 原生风格的多页面工作区，主要包含：
-
-- `Monitor`：默认首页，展示实时运行状态、趋势、告警与运行摘要
-- `Topology`：独立路由拓扑页面，用于查看 Gateway / Provider / Model 链路
-- `Providers`：查看与创建 Provider 配置
-- `Gateways`：查看与创建 Gateway 配置与运行状态
-- `Logs`：查看最近请求状态、延迟与错误
-
-左侧导航用于切换工作区页面，顶部提供统一刷新入口。
+- [apps/desktop-macos-native/README.md](../apps/desktop-macos-native/README.md)
 
 ## 3. 配置 Provider
 
@@ -449,9 +438,9 @@ uv run python scripts/e2e/anthropic_compat.py \
 
 - [docs/testing/anthropic-compat-e2e.md](./testing/anthropic-compat-e2e.md)
 
-并行交付验收清单见：
+遗留 Web 消费者只在兼容性专项检查中出现，入口见：
 
-- [docs/testing/frontend-parallel-checklist.md](./testing/frontend-parallel-checklist.md)
+- [docs/testing/legacy-web-checks.md](./testing/legacy-web-checks.md)
 
 ## 9. 常见问题
 
@@ -478,23 +467,8 @@ cargo clean
 
 ## 10. Admin API 契约
 
-前端（Tauri 与 macOS 原生壳）统一依赖以下稳定契约：
+CLI、macOS 原生端与遗留 Web 消费者统一依赖以下稳定契约：
 
 - [docs/contracts/admin-api-v1.md](./contracts/admin-api-v1.md)
 
 如需调整 `provider / gateway / logs` 返回字段，请先更新契约文档并补齐对应测试。
-# FluxDeck 使用说明
-
-## macOS Native 工作台
-
-`apps/desktop-macos-native` 当前提供统一深色原生工作台界面，已覆盖：
-
-- `Overview`：运行摘要、网络状态、流量摘要、最近请求
-- `Traffic`：请求量、错误量、平均延迟、Top Gateway / Provider
-- `Connections`：活跃 Gateway / Provider / Model 摘要
-- `Topology`：`Entrypoints -> Gateways -> Providers` 三列拓扑骨架
-- `Providers / Gateways`：卡片化资源工作台
-- `Logs`：筛选工具栏 + 单列可展开紧凑日志行
-- `Settings`：`Admin API / Refresh & Sync / Diagnostics` 三段式设置面板
-
-原生端仍通过 `fluxd` Admin API 拉取与提交数据，不复制后端业务逻辑。
