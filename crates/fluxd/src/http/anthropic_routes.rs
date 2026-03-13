@@ -827,10 +827,10 @@ async fn forward_messages(
 
 async fn count_tokens_handler(
     State(state): State<AnthropicRouteState>,
-    Json(mut payload): Json<Value>,
+    Json(payload): Json<Value>,
 ) -> Response {
     let request_id = next_request_id();
-    let mut model = payload
+    let model = payload
         .get("model")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
@@ -838,7 +838,7 @@ async fn count_tokens_handler(
     let started_at = Instant::now();
     let log_service = RequestLogService::new(state.pool.clone());
 
-    let mut ir = match decode_anthropic_request(&payload) {
+    let ir = match decode_anthropic_request(&payload) {
         Ok(ir) => ir,
         Err(err) => {
             append_log(
@@ -868,31 +868,156 @@ async fn count_tokens_handler(
         }
     };
 
-    match fetch_provider_target(&state).await {
-        Ok(target) => {
-            maybe_log_request_payload(
-                "/v1/messages/count_tokens",
-                &state.gateway_id,
-                &request_id,
-                &payload,
-                &target.request_debug,
-            );
+    match fetch_provider_targets(&state).await {
+        Ok(targets) => {
+            let health_service = ProviderHealthService::new(state.pool.clone());
+            for (index, target) in targets.iter().enumerate() {
+                let is_last_target = index + 1 == targets.len();
+                let mut ir = ir.clone();
+                let mut payload = payload.clone();
+                let mut model = requested_model.clone();
 
-            if let Some(requested_model) = ir.model.as_deref() {
-                let resolved_model = target
-                    .model_mapping
-                    .resolve(requested_model, target.default_model.as_deref());
-                if resolved_model != requested_model {
-                    ir.model = Some(resolved_model.clone());
-                    rewrite_payload_model(&mut payload, &resolved_model);
-                    model = Some(resolved_model);
+                maybe_log_request_payload(
+                    "/v1/messages/count_tokens",
+                    &state.gateway_id,
+                    &request_id,
+                    &payload,
+                    &target.request_debug,
+                );
+
+                if let Some(requested_model) = ir.model.as_deref() {
+                    let resolved_model = target
+                        .model_mapping
+                        .resolve(requested_model, target.default_model.as_deref());
+                    if resolved_model != requested_model {
+                        ir.model = Some(resolved_model.clone());
+                        rewrite_payload_model(&mut payload, &resolved_model);
+                        model = Some(resolved_model);
+                    }
                 }
-            }
 
-            if target.upstream_protocol == "anthropic" {
+                if target.upstream_protocol == "anthropic" {
+                    let response = state
+                        .anthropic_client
+                        .messages_count_tokens(&target.base_url, &target.api_key, &payload)
+                        .await;
+
+                    match response {
+                        Ok((status, body)) => {
+                            let status_code = StatusCode::from_u16(status.as_u16())
+                                .unwrap_or(StatusCode::BAD_GATEWAY);
+
+                            if should_failover_status(status_code) && !is_last_target {
+                                let _ = health_service
+                                    .record_failure(
+                                        &target.provider_id,
+                                        &format!("status {}", status_code.as_u16()),
+                                    )
+                                    .await;
+                                continue;
+                            }
+
+                            if status_code.is_success() {
+                                let _ = health_service.record_success(&target.provider_id).await;
+                                let Some(upstream_tokens) =
+                                    extract_upstream_input_tokens(body.as_ref())
+                                else {
+                                    return (
+                                        StatusCode::BAD_GATEWAY,
+                                        Json(anthropic_error_response(
+                                            "upstream count_tokens response missing `input_tokens`"
+                                                .to_string(),
+                                            "api_error",
+                                        )),
+                                    )
+                                        .into_response();
+                                };
+
+                                let latency_ms = started_at.elapsed().as_millis() as i64;
+                                let mut observation = build_anthropic_observation(
+                                    &request_id,
+                                    &state.gateway_id,
+                                    &target.provider_id,
+                                    &target.upstream_protocol,
+                                    requested_model.clone(),
+                                    model.clone(),
+                                    false,
+                                );
+                                apply_anthropic_response(
+                                    &mut observation,
+                                    i64::from(StatusCode::OK.as_u16()),
+                                    latency_ms,
+                                    latency_ms,
+                                    model.clone(),
+                                );
+                                append_log(
+                                    &log_service,
+                                    RequestLogEntry {
+                                        request_id: request_id.clone(),
+                                        gateway_id: state.gateway_id.clone(),
+                                        provider_id: target.provider_id.clone(),
+                                        model: model.clone(),
+                                        status_code: i64::from(StatusCode::OK.as_u16()),
+                                        latency_ms,
+                                        error: None,
+                                        observation,
+                                        usage: usage_from_input_tokens(upstream_tokens as i64),
+                                    },
+                                )
+                                .await;
+
+                                return (
+                                    StatusCode::OK,
+                                    Json(json!({
+                                        "input_tokens": upstream_tokens,
+                                        "estimated": false
+                                    })),
+                                )
+                                    .into_response();
+                            }
+
+                            if should_failover_status(status_code) {
+                                let _ = health_service
+                                    .record_failure(
+                                        &target.provider_id,
+                                        &format!("status {}", status_code.as_u16()),
+                                    )
+                                    .await;
+                            }
+
+                            let message = body
+                                .as_ref()
+                                .and_then(extract_error_message_from_json)
+                                .unwrap_or_else(|| "upstream returned an error".to_string());
+                            return (
+                                status_code,
+                                Json(anthropic_error_response(message, "api_error")),
+                            )
+                                .into_response();
+                        }
+                        Err(err) => {
+                            let message = err.to_string();
+                            let _ = health_service
+                                .record_failure(&target.provider_id, &message)
+                                .await;
+                            if !is_last_target {
+                                continue;
+                            }
+                            return (
+                                StatusCode::BAD_GATEWAY,
+                                Json(anthropic_error_response(
+                                    format!("upstream forward failed: {message}"),
+                                    "api_error",
+                                )),
+                            )
+                                .into_response();
+                        }
+                    }
+                }
+
                 let response = state
-                    .anthropic_client
-                    .messages_count_tokens(&target.base_url, &target.api_key, &payload)
+                    .client
+                    .anthropic_messages_count_tokens(&target.base_url, &target.api_key, &payload)
                     .await;
 
                 match response {
@@ -900,10 +1025,40 @@ async fn count_tokens_handler(
                         let status_code = StatusCode::from_u16(status.as_u16())
                             .unwrap_or(StatusCode::BAD_GATEWAY);
 
+                        if should_failover_status(status_code) && !is_last_target {
+                            let _ = health_service
+                                .record_failure(
+                                    &target.provider_id,
+                                    &format!("status {}", status_code.as_u16()),
+                                )
+                                .await;
+                            continue;
+                        }
+
                         if status_code.is_success() {
+                            let _ = health_service.record_success(&target.provider_id).await;
                             let Some(upstream_tokens) =
                                 extract_upstream_input_tokens(body.as_ref())
                             else {
+                                append_log(
+                                    &log_service,
+                                    RequestLogEntry {
+                                        request_id: request_id.clone(),
+                                        gateway_id: state.gateway_id.clone(),
+                                        provider_id: target.provider_id.clone(),
+                                        model: model.clone(),
+                                        status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
+                                        latency_ms: started_at.elapsed().as_millis() as i64,
+                                        error: Some(
+                                            "upstream count_tokens response missing input_tokens"
+                                                .to_string(),
+                                        ),
+                                        observation: Default::default(),
+                                        usage: Default::default(),
+                                    },
+                                )
+                                .await;
+
                                 return (
                                     StatusCode::BAD_GATEWAY,
                                     Json(anthropic_error_response(
@@ -915,35 +1070,19 @@ async fn count_tokens_handler(
                                     .into_response();
                             };
 
-                            let latency_ms = started_at.elapsed().as_millis() as i64;
-                            let mut observation = build_anthropic_observation(
-                                &request_id,
-                                &state.gateway_id,
-                                &target.provider_id,
-                                &target.upstream_protocol,
-                                requested_model.clone(),
-                                model.clone(),
-                                false,
-                            );
-                            apply_anthropic_response(
-                                &mut observation,
-                                i64::from(StatusCode::OK.as_u16()),
-                                latency_ms,
-                                latency_ms,
-                                model.clone(),
-                            );
+                            let counted = count_tokens_with_fallback(&ir, Some(upstream_tokens));
                             append_log(
                                 &log_service,
                                 RequestLogEntry {
                                     request_id: request_id.clone(),
                                     gateway_id: state.gateway_id.clone(),
-                                    provider_id: target.provider_id,
+                                    provider_id: target.provider_id.clone(),
                                     model: model.clone(),
                                     status_code: i64::from(StatusCode::OK.as_u16()),
-                                    latency_ms,
+                                    latency_ms: started_at.elapsed().as_millis() as i64,
                                     error: None,
-                                    observation,
-                                    usage: usage_from_input_tokens(upstream_tokens as i64),
+                                    observation: Default::default(),
+                                    usage: Default::default(),
                                 },
                             )
                             .await;
@@ -951,17 +1090,112 @@ async fn count_tokens_handler(
                             return (
                                 StatusCode::OK,
                                 Json(json!({
-                                    "input_tokens": upstream_tokens,
-                                    "estimated": false
+                                    "input_tokens": counted.input_tokens,
+                                    "estimated": counted.estimated
                                 })),
                             )
                                 .into_response();
+                        }
+
+                        if is_count_tokens_unsupported(status_code) {
+                            if target.compatibility_mode == CompatibilityMode::Strict {
+                                let message =
+                                    "upstream does not support count_tokens in strict mode"
+                                        .to_string();
+                                append_log_with_dimensions(
+                                    &log_service,
+                                    RequestLogEntry {
+                                        request_id: request_id.clone(),
+                                        gateway_id: state.gateway_id.clone(),
+                                        provider_id: target.provider_id.clone(),
+                                        model: model.clone(),
+                                        status_code: i64::from(
+                                            StatusCode::UNPROCESSABLE_ENTITY.as_u16(),
+                                        ),
+                                        latency_ms: started_at.elapsed().as_millis() as i64,
+                                        error: Some(message.clone()),
+                                        observation: Default::default(),
+                                        usage: Default::default(),
+                                    },
+                                    &json!({
+                                        "compatibility_mode": "strict",
+                                        "event": "count_tokens_unsupported"
+                                    }),
+                                )
+                                .await;
+
+                                return (
+                                    StatusCode::UNPROCESSABLE_ENTITY,
+                                    Json(anthropic_error_response(message, "capability_error")),
+                                )
+                                    .into_response();
+                            }
+
+                            let counted = count_tokens_with_fallback(&ir, None);
+                            append_log_with_dimensions(
+                                &log_service,
+                                RequestLogEntry {
+                                    request_id: request_id.clone(),
+                                    gateway_id: state.gateway_id.clone(),
+                                    provider_id: target.provider_id.clone(),
+                                    model: model.clone(),
+                                    status_code: i64::from(StatusCode::OK.as_u16()),
+                                    latency_ms: started_at.elapsed().as_millis() as i64,
+                                    error: None,
+                                    observation: Default::default(),
+                                    usage: Default::default(),
+                                },
+                                &json!({
+                                    "compatibility_mode": match target.compatibility_mode {
+                                        CompatibilityMode::Permissive => "permissive",
+                                        _ => "compatible"
+                                    },
+                                    "event": "degraded_to_estimate"
+                                }),
+                            )
+                            .await;
+
+                            return (
+                                StatusCode::OK,
+                                Json(json!({
+                                    "input_tokens": counted.input_tokens,
+                                    "estimated": counted.estimated,
+                                    "notice": "degraded_to_estimate"
+                                })),
+                            )
+                                .into_response();
+                        }
+
+                        if should_failover_status(status_code) {
+                            let _ = health_service
+                                .record_failure(
+                                    &target.provider_id,
+                                    &format!("status {}", status_code.as_u16()),
+                                )
+                                .await;
                         }
 
                         let message = body
                             .as_ref()
                             .and_then(extract_error_message_from_json)
                             .unwrap_or_else(|| "upstream returned an error".to_string());
+
+                        append_log(
+                            &log_service,
+                            RequestLogEntry {
+                                request_id: request_id.clone(),
+                                gateway_id: state.gateway_id.clone(),
+                                provider_id: target.provider_id.clone(),
+                                model: model.clone(),
+                                status_code: i64::from(status_code.as_u16()),
+                                latency_ms: started_at.elapsed().as_millis() as i64,
+                                error: None,
+                                observation: Default::default(),
+                                usage: Default::default(),
+                            },
+                        )
+                        .await;
+
                         return (
                             status_code,
                             Json(anthropic_error_response(message, "api_error")),
@@ -969,10 +1203,33 @@ async fn count_tokens_handler(
                             .into_response();
                     }
                     Err(err) => {
+                        let message = err.to_string();
+                        let _ = health_service
+                            .record_failure(&target.provider_id, &message)
+                            .await;
+                        if !is_last_target {
+                            continue;
+                        }
+                        append_log(
+                            &log_service,
+                            RequestLogEntry {
+                                request_id: request_id.clone(),
+                                gateway_id: state.gateway_id.clone(),
+                                provider_id: target.provider_id.clone(),
+                                model: model.clone(),
+                                status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
+                                latency_ms: started_at.elapsed().as_millis() as i64,
+                                error: Some(message.clone()),
+                                observation: Default::default(),
+                                usage: Default::default(),
+                            },
+                        )
+                        .await;
+
                         return (
                             StatusCode::BAD_GATEWAY,
                             Json(anthropic_error_response(
-                                format!("upstream forward failed: {err}"),
+                                format!("upstream forward failed: {message}"),
                                 "api_error",
                             )),
                         )
@@ -981,198 +1238,30 @@ async fn count_tokens_handler(
                 }
             }
 
-            let response = state
-                .client
-                .anthropic_messages_count_tokens(&target.base_url, &target.api_key, &payload)
-                .await;
+            append_log(
+                &log_service,
+                RequestLogEntry {
+                    request_id: request_id.clone(),
+                    gateway_id: state.gateway_id.clone(),
+                    provider_id: "unknown".to_string(),
+                    model: requested_model.clone(),
+                    status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
+                    latency_ms: started_at.elapsed().as_millis() as i64,
+                    error: Some("no available anthropic route targets".to_string()),
+                    observation: Default::default(),
+                    usage: Default::default(),
+                },
+            )
+            .await;
 
-            match response {
-                Ok((status, body)) => {
-                    let status_code =
-                        StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-
-                    if status_code.is_success() {
-                        let Some(upstream_tokens) = extract_upstream_input_tokens(body.as_ref())
-                        else {
-                            append_log(
-                                &log_service,
-                                RequestLogEntry {
-                                    request_id: request_id.clone(),
-                                    gateway_id: state.gateway_id.clone(),
-                                    provider_id: target.provider_id.clone(),
-                                    model: model.clone(),
-                                    status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
-                                    latency_ms: started_at.elapsed().as_millis() as i64,
-                                    error: Some(
-                                        "upstream count_tokens response missing input_tokens"
-                                            .to_string(),
-                                    ),
-                                    observation: Default::default(),
-                                    usage: Default::default(),
-                                },
-                            )
-                            .await;
-
-                            return (
-                                StatusCode::BAD_GATEWAY,
-                                Json(anthropic_error_response(
-                                    "upstream count_tokens response missing `input_tokens`"
-                                        .to_string(),
-                                    "api_error",
-                                )),
-                            )
-                                .into_response();
-                        };
-
-                        let counted = count_tokens_with_fallback(&ir, Some(upstream_tokens));
-                        append_log(
-                            &log_service,
-                            RequestLogEntry {
-                                request_id: request_id.clone(),
-                                gateway_id: state.gateway_id.clone(),
-                                provider_id: target.provider_id.clone(),
-                                model: model.clone(),
-                                status_code: i64::from(StatusCode::OK.as_u16()),
-                                latency_ms: started_at.elapsed().as_millis() as i64,
-                                error: None,
-                                observation: Default::default(),
-                                usage: Default::default(),
-                            },
-                        )
-                        .await;
-
-                        return (
-                            StatusCode::OK,
-                            Json(json!({
-                                "input_tokens": counted.input_tokens,
-                                "estimated": counted.estimated
-                            })),
-                        )
-                            .into_response();
-                    }
-
-                    if is_count_tokens_unsupported(status_code) {
-                        if target.compatibility_mode == CompatibilityMode::Strict {
-                            let message =
-                                "upstream does not support count_tokens in strict mode".to_string();
-                            append_log_with_dimensions(
-                                &log_service,
-                                RequestLogEntry {
-                                    request_id: request_id.clone(),
-                                    gateway_id: state.gateway_id.clone(),
-                                    provider_id: target.provider_id.clone(),
-                                    model: model.clone(),
-                                    status_code: i64::from(
-                                        StatusCode::UNPROCESSABLE_ENTITY.as_u16(),
-                                    ),
-                                    latency_ms: started_at.elapsed().as_millis() as i64,
-                                    error: Some(message.clone()),
-                                    observation: Default::default(),
-                                    usage: Default::default(),
-                                },
-                                &json!({
-                                    "compatibility_mode": "strict",
-                                    "event": "count_tokens_unsupported"
-                                }),
-                            )
-                            .await;
-
-                            return (
-                                StatusCode::UNPROCESSABLE_ENTITY,
-                                Json(anthropic_error_response(message, "capability_error")),
-                            )
-                                .into_response();
-                        }
-
-                        let counted = count_tokens_with_fallback(&ir, None);
-                        append_log_with_dimensions(
-                            &log_service,
-                            RequestLogEntry {
-                                request_id: request_id.clone(),
-                                gateway_id: state.gateway_id.clone(),
-                                provider_id: target.provider_id.clone(),
-                                model: model.clone(),
-                                status_code: i64::from(StatusCode::OK.as_u16()),
-                                latency_ms: started_at.elapsed().as_millis() as i64,
-                                error: None,
-                                observation: Default::default(),
-                                usage: Default::default(),
-                            },
-                            &json!({
-                                "compatibility_mode": match target.compatibility_mode {
-                                    CompatibilityMode::Permissive => "permissive",
-                                    _ => "compatible"
-                                },
-                                "event": "degraded_to_estimate"
-                            }),
-                        )
-                        .await;
-
-                        return (
-                            StatusCode::OK,
-                            Json(json!({
-                                "input_tokens": counted.input_tokens,
-                                "estimated": counted.estimated,
-                                "notice": "degraded_to_estimate"
-                            })),
-                        )
-                            .into_response();
-                    }
-
-                    let message = body
-                        .as_ref()
-                        .and_then(extract_error_message_from_json)
-                        .unwrap_or_else(|| "upstream returned an error".to_string());
-
-                    append_log(
-                        &log_service,
-                        RequestLogEntry {
-                            request_id: request_id.clone(),
-                            gateway_id: state.gateway_id.clone(),
-                            provider_id: target.provider_id,
-                            model: model.clone(),
-                            status_code: i64::from(status_code.as_u16()),
-                            latency_ms: started_at.elapsed().as_millis() as i64,
-                            error: None,
-                            observation: Default::default(),
-                            usage: Default::default(),
-                        },
-                    )
-                    .await;
-
-                    (
-                        status_code,
-                        Json(anthropic_error_response(message, "api_error")),
-                    )
-                        .into_response()
-                }
-                Err(err) => {
-                    append_log(
-                        &log_service,
-                        RequestLogEntry {
-                            request_id,
-                            gateway_id: state.gateway_id.clone(),
-                            provider_id: target.provider_id,
-                            model: model.clone(),
-                            status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
-                            latency_ms: started_at.elapsed().as_millis() as i64,
-                            error: Some(err.to_string()),
-                            observation: Default::default(),
-                            usage: Default::default(),
-                        },
-                    )
-                    .await;
-
-                    (
-                        StatusCode::BAD_GATEWAY,
-                        Json(anthropic_error_response(
-                            format!("upstream forward failed: {err}"),
-                            "api_error",
-                        )),
-                    )
-                        .into_response()
-                }
-            }
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(anthropic_error_response(
+                    "no available anthropic route targets".to_string(),
+                    "api_error",
+                )),
+            )
+                .into_response()
         }
         Err(err) => {
             append_log(
@@ -1695,18 +1784,6 @@ fn is_strict_known_extension_field(key: &str) -> bool {
             | "service_tier"
             | "betas"
     )
-}
-
-async fn fetch_provider_target(
-    state: &AnthropicRouteState,
-) -> anyhow::Result<ProviderRoutingTarget> {
-    let targets = fetch_provider_targets(state).await?;
-    targets.into_iter().next().ok_or_else(|| {
-        anyhow::anyhow!(
-            "gateway has no available route targets: {}",
-            state.gateway_id
-        )
-    })
 }
 
 async fn fetch_provider_targets(

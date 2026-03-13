@@ -537,7 +537,6 @@
 
 以下内容明确归入后续阶段追踪，不计入当前阶段性提交完成范围：
 
-- Anthropic `count_tokens` 请求级 failover
 - failover 观测字段：
   - `failover_performed`
   - `route_attempt_count`
@@ -545,6 +544,10 @@
 - `HealthMonitor` 真实主动探测、冷却窗口调度与退避
 - 健康状态从 Provider 全局维度细化到更小作用域
 - 原生 macOS 端的链路编辑、健康状态展示与手动 probe 闭环
+
+更新（2026-03-13）：
+
+- Anthropic `count_tokens` 请求级 failover 已在 Phase 2 跟进中补齐，不再属于未完成范围
 
 ## 推荐实施顺序
 

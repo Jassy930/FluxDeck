@@ -320,6 +320,40 @@ async fn anthropic_messages_fail_over_to_next_provider_on_upstream_5xx() {
     );
 }
 
+#[tokio::test]
+async fn anthropic_count_tokens_fail_over_to_next_provider_on_upstream_5xx() {
+    let failing_upstream = spawn_upstream_count_tokens_server_error_mock().await;
+    let healthy_upstream = spawn_upstream_count_tokens_mock().await;
+    let (gateway, pool) = setup_gateway_with_failover_provider_base_urls(
+        format!("http://{}/v1", failing_upstream.addr),
+        format!("http://{}/v1", healthy_upstream.addr),
+    )
+    .await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages/count_tokens", gateway.addr))
+        .json(&json!({
+            "model": "claude-3-7-sonnet",
+            "messages": [{"role": "user", "content": "hello"}]
+        }))
+        .send()
+        .await
+        .expect("call gateway");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let body: Value = resp.json().await.expect("decode gateway response");
+    assert_eq!(body["input_tokens"], 654);
+    assert_eq!(body["estimated"], false);
+
+    let log = latest_request_log(&pool).await;
+    assert_eq!(log.provider_id.as_deref(), Some("provider_openai_b"));
+    assert_eq!(
+        provider_health_status(&pool, "provider_openai_a").await,
+        Some("degraded".to_string())
+    );
+}
+
 struct SpawnedServer {
     addr: SocketAddr,
 }
@@ -381,6 +415,19 @@ async fn spawn_upstream_openai_server_error_mock() -> SpawnedServer {
     let app = Router::new().route(
         "/v1/chat/completions",
         post(upstream_chat_completions_server_error),
+    );
+    spawn_gateway(app).await
+}
+
+async fn spawn_upstream_count_tokens_mock() -> SpawnedServer {
+    let app = Router::new().route("/v1/messages/count_tokens", post(upstream_count_tokens));
+    spawn_gateway(app).await
+}
+
+async fn spawn_upstream_count_tokens_server_error_mock() -> SpawnedServer {
+    let app = Router::new().route(
+        "/v1/messages/count_tokens",
+        post(upstream_count_tokens_server_error),
     );
     spawn_gateway(app).await
 }
@@ -774,6 +821,24 @@ async fn upstream_chat_completions_server_error(_: Json<Value>) -> impl IntoResp
         Json(json!({
             "error": {
                 "message": "upstream overloaded"
+            }
+        })),
+    )
+}
+
+async fn upstream_count_tokens(Json(payload): Json<Value>) -> impl IntoResponse {
+    assert_eq!(payload["messages"][0]["role"], "user");
+    assert_eq!(payload["messages"][0]["content"], "hello");
+
+    Json(json!({ "input_tokens": 654 }))
+}
+
+async fn upstream_count_tokens_server_error(_: Json<Value>) -> impl IntoResponse {
+    (
+        reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({
+            "error": {
+                "message": "count_tokens overloaded"
             }
         })),
     )

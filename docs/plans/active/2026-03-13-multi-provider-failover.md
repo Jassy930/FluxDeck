@@ -525,15 +525,20 @@ git commit -m "docs: close multi-provider failover rollout"
 - Test: `crates/fluxd/tests/anthropic_forwarding_test.rs`
 - Modify: `docs/progress/2026-03-13-multi-provider-failover.md`
 
+**状态：已完成（2026-03-13）**
+
 **Step 1: 写失败测试，覆盖首个 Provider `5xx` 时 `count_tokens` 切到第二个 Provider**
+
+- 已在 `crates/fluxd/tests/anthropic_forwarding_test.rs` 新增：
+  - `anthropic_count_tokens_fail_over_to_next_provider_on_upstream_5xx`
 
 **Step 2: 运行测试确认失败**
 
 Run: `cargo test -q -p fluxd --test anthropic_forwarding_test anthropic_count_tokens_fail_over_to_next_provider_on_upstream_5xx`
 
-Expected:
-
-- FAIL，当前仍按单 target 处理
+- 实际结果：
+  - FAIL
+  - 断言显示响应状态仍为 `500`，说明 `count_tokens` 仍按单 target 处理
 
 **Step 3: 实现最小 failover**
 
@@ -545,9 +550,17 @@ Expected:
 
 Run: `cargo test -q -p fluxd --test anthropic_forwarding_test`
 
-Expected:
+- 实际结果：
+  - PASS
+  - 同时补跑 `cargo test -q -p fluxd --test anthropic_forwarding_test --test anthropic_count_tokens_test`
+  - `anthropic_forwarding_test`: `12 passed`
+  - `anthropic_count_tokens_test`: `5 passed`
 
-- PASS
+**完成说明：**
+
+- Anthropic `count_tokens` 现在与 `/v1/messages` 共用 ordered candidates 语义
+- OpenAI-compatible 与 Anthropic native upstream 两条 `count_tokens` 路径都已支持请求级 failover
+- Phase 2 剩余工作转入 Task 12 继续补观测字段与日志维度
 
 ### Task 12: 补 failover 观测字段与日志维度
 

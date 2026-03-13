@@ -31,7 +31,6 @@
 ## 下一步
 
 - 当前阶段性提交已完成，后续按 Phase 2 计划继续补齐：
-  - Task 11：Anthropic `count_tokens` 请求级 failover
   - Task 12：failover 观测字段与日志维度
   - Task 13：真实主动探测、冷却窗口、退避策略
   - Task 14：健康状态细化到更小粒度
@@ -118,6 +117,25 @@
 - `cargo test -q -p fluxd --test openai_passthrough_fallback_test`
 - `cargo test -q -p fluxd --test anthropic_forwarding_test`
 
+### Task 11 已完成：Anthropic `count_tokens` 请求级 failover
+
+- `count_tokens_handler` 已改为复用 ordered candidates，而不是单 target 直连
+- Anthropic native upstream 与 OpenAI-compatible upstream 两条 `count_tokens` 路径现在都支持：
+  - 网络错误时顺序切到下一个 provider
+  - `429` / `5xx` 时顺序切到下一个 provider
+  - 成功 / 失败结果回写 `ProviderHealthService`
+- 新增回归测试 `anthropic_count_tokens_fail_over_to_next_provider_on_upstream_5xx`
+- 当前仍未补 `failover_performed / route_attempt_count / provider_id_initial` 之类额外观测字段，这部分继续放在 Task 12
+
+验证：
+
+- `cargo test -q -p fluxd --test anthropic_forwarding_test anthropic_count_tokens_fail_over_to_next_provider_on_upstream_5xx`
+  - 初次运行：FAIL，观察到首个 provider `500` 后未切流
+  - 实现后再次运行：PASS
+- `cargo test -q -p fluxd --test anthropic_forwarding_test --test anthropic_count_tokens_test`
+  - `anthropic_forwarding_test`：`12 passed`
+  - `anthropic_count_tokens_test`：`5 passed`
+
 ### 当前剩余缺口
 
 - Task 7 已完成最小 CLI 闭环：
@@ -130,7 +148,6 @@
   - `fluxd` 启动时会拉起后台 `HealthMonitor`
   - `HealthMonitor` 当前会周期性补齐健康快照，并把 `unhealthy` Provider 推进到 `probing`
 - 为兼容 `provider_health_states -> providers` 外键约束，Provider 删除路径已调整为先删健康快照、再删 Provider 实体
-- Anthropic `count_tokens` 路径仍未补齐请求级 failover，目前仍按单 target 处理
 - `request_logs` 还未额外增加 `failover_performed / route_attempt_count / provider_id_initial` 等新观测字段
 - 后台主动探测仍是保守骨架：
   - 还没有真实上游网络探测
@@ -141,7 +158,7 @@
 
 | Task | 内容 | 状态 | 最近说明 |
 |------|------|------|----------|
-| 11 | Anthropic `count_tokens` 请求级 failover | 未开始 | `messages` 已完成，`count_tokens` 仍按单 target |
+| 11 | Anthropic `count_tokens` 请求级 failover | 已完成 | 已支持网络错误 / `429` / `5xx` 顺序切流，并回写 Provider 健康状态 |
 | 12 | failover 观测字段与日志维度 | 未开始 | 尚未记录 `failover_performed / route_attempt_count / provider_id_initial` |
 | 13 | `HealthMonitor` 真实主动探测 | 未开始 | 当前仍为保守骨架，只做快照补齐和 `probing` 推进 |
 | 14 | 健康状态粒度细化 | 未开始 | 当前仍为 Provider 全局维度 |
