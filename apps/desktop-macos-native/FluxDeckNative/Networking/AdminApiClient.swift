@@ -794,6 +794,45 @@ struct AdminStatsTrendPoint: Decodable, Equatable {
     let inputTokens: Int
     let outputTokens: Int
     let cachedTokens: Int
+    let byModel: [AdminStatsTrendModelBucket]
+
+    struct AdminStatsTrendModelBucket: Decodable, Equatable {
+        let model: String
+        let totalTokens: Int
+        let inputTokens: Int
+        let outputTokens: Int
+        let cachedTokens: Int
+        let requestCount: Int
+        let errorCount: Int
+
+        enum CodingKeys: String, CodingKey {
+            case model
+            case totalTokens = "total_tokens"
+            case inputTokens = "input_tokens"
+            case outputTokens = "output_tokens"
+            case cachedTokens = "cached_tokens"
+            case requestCount = "request_count"
+            case errorCount = "error_count"
+        }
+
+        init(
+            model: String,
+            totalTokens: Int,
+            inputTokens: Int,
+            outputTokens: Int,
+            cachedTokens: Int,
+            requestCount: Int,
+            errorCount: Int
+        ) {
+            self.model = model
+            self.totalTokens = totalTokens
+            self.inputTokens = inputTokens
+            self.outputTokens = outputTokens
+            self.cachedTokens = cachedTokens
+            self.requestCount = requestCount
+            self.errorCount = errorCount
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
         case timestamp
@@ -803,6 +842,19 @@ struct AdminStatsTrendPoint: Decodable, Equatable {
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
         case cachedTokens = "cached_tokens"
+        case byModel = "by_model"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        timestamp = try container.decode(String.self, forKey: .timestamp)
+        requestCount = try container.decode(Int.self, forKey: .requestCount)
+        avgLatency = try container.decode(Int.self, forKey: .avgLatency)
+        errorCount = try container.decode(Int.self, forKey: .errorCount)
+        inputTokens = try container.decode(Int.self, forKey: .inputTokens)
+        outputTokens = try container.decode(Int.self, forKey: .outputTokens)
+        cachedTokens = try container.decode(Int.self, forKey: .cachedTokens)
+        byModel = try container.decodeIfPresent([AdminStatsTrendModelBucket].self, forKey: .byModel) ?? []
     }
 
     init(
@@ -812,7 +864,8 @@ struct AdminStatsTrendPoint: Decodable, Equatable {
         errorCount: Int,
         inputTokens: Int,
         outputTokens: Int,
-        cachedTokens: Int = 0
+        cachedTokens: Int = 0,
+        byModel: [AdminStatsTrendModelBucket] = []
     ) {
         self.timestamp = timestamp
         self.requestCount = requestCount
@@ -821,6 +874,7 @@ struct AdminStatsTrendPoint: Decodable, Equatable {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
         self.cachedTokens = cachedTokens
+        self.byModel = byModel
     }
 }
 

@@ -1747,6 +1747,298 @@ async fn admin_api_stats_endpoints_return_cached_token_fields() {
     assert_eq!(trend_data[0].get("cached_tokens"), Some(&json!(40)));
 }
 
+#[tokio::test]
+async fn admin_stats_trend_includes_bucket_model_token_breakdown() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool.clone()));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_stats_model_trend",
+            "name": "Stats Model Trend Provider",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-stats-model-trend",
+            "models": ["gpt-4o-mini", "gpt-5-codex"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider request");
+
+    client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_stats_model_trend",
+            "name": "Stats Model Trend Gateway",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "default_provider_id": "provider_stats_model_trend",
+            "default_model": "gpt-4o-mini",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create gateway request");
+
+    sqlx::query(
+        r#"
+        INSERT INTO request_logs (
+            request_id, gateway_id, provider_id, model, model_effective, status_code, latency_ms,
+            input_tokens, output_tokens, cached_tokens, total_tokens, error, created_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now', '-4 minutes'))
+        "#,
+    )
+    .bind("req_stats_model_trend_1")
+    .bind("gateway_stats_model_trend")
+    .bind("provider_stats_model_trend")
+    .bind("gpt-4o-mini")
+    .bind("gpt-4o-mini")
+    .bind(200_i64)
+    .bind(180_i64)
+    .bind(120_i64)
+    .bind(80_i64)
+    .bind(20_i64)
+    .bind(220_i64)
+    .bind(Option::<String>::None)
+    .execute(&pool)
+    .await
+    .expect("insert first model trend log");
+
+    sqlx::query(
+        r#"
+        INSERT INTO request_logs (
+            request_id, gateway_id, provider_id, model, model_effective, status_code, latency_ms,
+            input_tokens, output_tokens, cached_tokens, total_tokens, error, created_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now', '-3 minutes'))
+        "#,
+    )
+    .bind("req_stats_model_trend_2")
+    .bind("gateway_stats_model_trend")
+    .bind("provider_stats_model_trend")
+    .bind("gpt-5-codex")
+    .bind("gpt-5-codex")
+    .bind(502_i64)
+    .bind(240_i64)
+    .bind(90_i64)
+    .bind(130_i64)
+    .bind(10_i64)
+    .bind(230_i64)
+    .bind("upstream boom")
+    .execute(&pool)
+    .await
+    .expect("insert second model trend log");
+
+    let trend: serde_json::Value = client
+        .get(format!("{base}/admin/stats/trend?period=1h&interval=1h"))
+        .send()
+        .await
+        .expect("fetch stats trend")
+        .json()
+        .await
+        .expect("decode stats trend");
+
+    let trend_data = trend
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .expect("stats trend data array");
+    assert_eq!(trend_data.len(), 1);
+
+    let by_model = trend_data[0]
+        .get("by_model")
+        .and_then(serde_json::Value::as_array)
+        .expect("bucket by_model array");
+
+    assert_eq!(by_model.len(), 2);
+    assert_eq!(by_model[0].get("model"), Some(&json!("gpt-5-codex")));
+    assert_eq!(by_model[0].get("total_tokens"), Some(&json!(230)));
+    assert_eq!(by_model[0].get("input_tokens"), Some(&json!(90)));
+    assert_eq!(by_model[0].get("output_tokens"), Some(&json!(130)));
+    assert_eq!(by_model[0].get("cached_tokens"), Some(&json!(10)));
+    assert_eq!(by_model[0].get("request_count"), Some(&json!(1)));
+    assert_eq!(by_model[0].get("error_count"), Some(&json!(1)));
+    assert_eq!(by_model[1].get("model"), Some(&json!("gpt-4o-mini")));
+    assert_eq!(by_model[1].get("total_tokens"), Some(&json!(220)));
+}
+
+#[tokio::test]
+async fn admin_stats_trend_groups_model_tokens_per_bucket() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool.clone()));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_stats_bucket_models",
+            "name": "Stats Bucket Models Provider",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-stats-bucket-models",
+            "models": ["gpt-4o-mini", "gpt-5-codex", "o3-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider request");
+
+    client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_stats_bucket_models",
+            "name": "Stats Bucket Models Gateway",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "default_provider_id": "provider_stats_bucket_models",
+            "default_model": "gpt-4o-mini",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create gateway request");
+
+    sqlx::query(
+        r#"
+        INSERT INTO request_logs (
+            request_id, gateway_id, provider_id, model, model_effective, status_code, latency_ms,
+            input_tokens, output_tokens, cached_tokens, total_tokens, error, created_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now', '-11 minutes'))
+        "#,
+    )
+    .bind("req_stats_bucket_models_1")
+    .bind("gateway_stats_bucket_models")
+    .bind("provider_stats_bucket_models")
+    .bind("gpt-4o-mini")
+    .bind("gpt-5-codex")
+    .bind(200_i64)
+    .bind(140_i64)
+    .bind(80_i64)
+    .bind(70_i64)
+    .bind(10_i64)
+    .bind(160_i64)
+    .bind(Option::<String>::None)
+    .execute(&pool)
+    .await
+    .expect("insert bucket model first log");
+
+    sqlx::query(
+        r#"
+        INSERT INTO request_logs (
+            request_id, gateway_id, provider_id, model, model_effective, status_code, latency_ms,
+            input_tokens, output_tokens, cached_tokens, total_tokens, error, created_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now', '-1 minutes'))
+        "#,
+    )
+    .bind("req_stats_bucket_models_2")
+    .bind("gateway_stats_bucket_models")
+    .bind("provider_stats_bucket_models")
+    .bind("o3-mini")
+    .bind(Option::<String>::None)
+    .bind(200_i64)
+    .bind(120_i64)
+    .bind(35_i64)
+    .bind(40_i64)
+    .bind(5_i64)
+    .bind(80_i64)
+    .bind(Option::<String>::None)
+    .execute(&pool)
+    .await
+    .expect("insert bucket model second log");
+
+    sqlx::query(
+        r#"
+        INSERT INTO request_logs (
+            request_id, gateway_id, provider_id, model, model_effective, status_code, latency_ms,
+            input_tokens, output_tokens, cached_tokens, total_tokens, error, created_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now', '-1 minutes'))
+        "#,
+    )
+    .bind("req_stats_bucket_models_3")
+    .bind("gateway_stats_bucket_models")
+    .bind("provider_stats_bucket_models")
+    .bind("")
+    .bind(Option::<String>::None)
+    .bind(503_i64)
+    .bind(180_i64)
+    .bind(20_i64)
+    .bind(20_i64)
+    .bind(0_i64)
+    .bind(40_i64)
+    .bind("unknown failure")
+    .execute(&pool)
+    .await
+    .expect("insert bucket model unknown log");
+
+    let trend: serde_json::Value = client
+        .get(format!("{base}/admin/stats/trend?period=1h&interval=5m"))
+        .send()
+        .await
+        .expect("fetch stats trend")
+        .json()
+        .await
+        .expect("decode stats trend");
+
+    let trend_data = trend
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .expect("stats trend data array");
+    assert_eq!(trend_data.len(), 2);
+
+    let first_bucket_models = trend_data[0]
+        .get("by_model")
+        .and_then(serde_json::Value::as_array)
+        .expect("first bucket by_model array");
+    assert_eq!(first_bucket_models.len(), 1);
+    assert_eq!(
+        first_bucket_models[0].get("model"),
+        Some(&json!("gpt-5-codex"))
+    );
+    assert_eq!(
+        first_bucket_models[0].get("total_tokens"),
+        Some(&json!(160))
+    );
+
+    let second_bucket_models = trend_data[1]
+        .get("by_model")
+        .and_then(serde_json::Value::as_array)
+        .expect("second bucket by_model array");
+    assert_eq!(second_bucket_models.len(), 2);
+    assert_eq!(
+        second_bucket_models[0].get("model"),
+        Some(&json!("o3-mini"))
+    );
+    assert_eq!(
+        second_bucket_models[0].get("total_tokens"),
+        Some(&json!(80))
+    );
+    assert_eq!(
+        second_bucket_models[1].get("model"),
+        Some(&json!("Unknown model"))
+    );
+    assert_eq!(second_bucket_models[1].get("error_count"), Some(&json!(1)));
+}
+
 async fn insert_request_log(
     pool: &sqlx::SqlitePool,
     request_id: &str,

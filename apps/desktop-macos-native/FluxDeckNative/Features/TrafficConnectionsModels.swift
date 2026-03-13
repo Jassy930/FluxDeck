@@ -31,6 +31,34 @@ struct TrafficKpiSupplementRow: Equatable {
     let value: String
 }
 
+struct TrafficTokenTrendSeries: Equatable {
+    let modelName: String
+    let bucketValues: [Int]
+    let totalTokens: Int
+}
+
+struct TrafficTokenTrendBucketRow: Equatable {
+    let modelName: String
+    let totalTokens: Int
+    let inputTokens: Int
+    let outputTokens: Int
+    let cachedTokens: Int
+    let requestCount: Int
+    let errorCount: Int
+}
+
+struct TrafficTokenTrendBucket: Equatable {
+    let timestamp: String
+    let totalTokens: Int
+    let errorCount: Int
+    let rows: [TrafficTokenTrendBucketRow]
+}
+
+struct TrafficTrendSummaryItem: Equatable {
+    let title: String
+    let value: String
+}
+
 struct TrafficAnalyticsModel {
     let totalRequests: Int
     let errorCount: Int
@@ -53,6 +81,9 @@ struct TrafficAnalyticsModel {
     let totalInputTokens: Int
     let totalOutputTokens: Int
     let totalCachedTokens: Int
+    let tokenTrendSeries: [TrafficTokenTrendSeries]
+    let tokenTrendBuckets: [TrafficTokenTrendBucket]
+    let tokenTrendSummaryItems: [TrafficTrendSummaryItem]
 
     var compactGatewayBreakdown: [TrafficBreakdownRow] {
         Array(gatewayBreakdown.prefix(Self.compactBreakdownLimit))
@@ -151,7 +182,10 @@ struct TrafficAnalyticsModel {
             gatewayStatsForKpi: [],
             totalInputTokens: logs.compactMap(\.inputTokens).reduce(0, +),
             totalOutputTokens: logs.compactMap(\.outputTokens).reduce(0, +),
-            totalCachedTokens: logs.compactMap(\.cachedTokens).reduce(0, +)
+            totalCachedTokens: logs.compactMap(\.cachedTokens).reduce(0, +),
+            tokenTrendSeries: [],
+            tokenTrendBuckets: [],
+            tokenTrendSummaryItems: defaultTokenTrendSummaryItems()
         )
     }
 
@@ -161,6 +195,7 @@ struct TrafficAnalyticsModel {
         selectedPeriod: String
     ) -> TrafficAnalyticsModel {
         guard let overview else {
+            let tokenTrend = buildTokenTrend(from: trend)
             return TrafficAnalyticsModel(
                 totalRequests: 0,
                 errorCount: 0,
@@ -182,7 +217,10 @@ struct TrafficAnalyticsModel {
                 gatewayStatsForKpi: [],
                 totalInputTokens: summedInputTokens(from: trend),
                 totalOutputTokens: summedOutputTokens(from: trend),
-                totalCachedTokens: summedCachedTokens(from: trend)
+                totalCachedTokens: summedCachedTokens(from: trend),
+                tokenTrendSeries: tokenTrend.series,
+                tokenTrendBuckets: tokenTrend.buckets,
+                tokenTrendSummaryItems: tokenTrend.summaryItems
             )
         }
 
@@ -214,6 +252,8 @@ struct TrafficAnalyticsModel {
             )
         }
 
+        let tokenTrend = buildTokenTrend(from: trend)
+
         return TrafficAnalyticsModel(
             totalRequests: overview.totalRequests,
             errorCount: overview.errorRequests,
@@ -235,12 +275,16 @@ struct TrafficAnalyticsModel {
             gatewayStatsForKpi: overview.byGateway,
             totalInputTokens: summedInputTokens(from: trend),
             totalOutputTokens: summedOutputTokens(from: trend),
-            totalCachedTokens: overview.cachedTokens
+            totalCachedTokens: overview.cachedTokens,
+            tokenTrendSeries: tokenTrend.series,
+            tokenTrendBuckets: tokenTrend.buckets,
+            tokenTrendSummaryItems: tokenTrend.summaryItems
         )
     }
 
     private static let compactBreakdownLimit = 3
     private static let kpiGatewayLimit = 2
+    fileprivate static let tokenTrendModelLimit = 4
 }
 
 struct ConnectionsModel {
@@ -368,3 +412,126 @@ private func summedOutputTokens(from trend: AdminStatsTrend?) -> Int {
 private func summedCachedTokens(from trend: AdminStatsTrend?) -> Int {
     trend?.data.map(\.cachedTokens).reduce(0, +) ?? 0
 }
+
+private func defaultTokenTrendSummaryItems() -> [TrafficTrendSummaryItem] {
+    [
+        TrafficTrendSummaryItem(title: "Peak Total Tokens", value: "0"),
+        TrafficTrendSummaryItem(title: "Top Model Share", value: "No model"),
+        TrafficTrendSummaryItem(title: "Peak Bucket Errors", value: "0")
+    ]
+}
+
+private func buildTokenTrend(
+    from trend: AdminStatsTrend?
+) -> (
+    series: [TrafficTokenTrendSeries],
+    buckets: [TrafficTokenTrendBucket],
+    summaryItems: [TrafficTrendSummaryItem]
+) {
+    guard let trend, !trend.data.isEmpty else {
+        return ([], [], defaultTokenTrendSummaryItems())
+    }
+
+    let modelTotals = trend.data.reduce(into: [String: Int]()) { partialResult, point in
+        for bucket in point.byModel {
+            partialResult[bucket.model, default: 0] += bucket.totalTokens
+        }
+    }
+
+    let topModelNames = modelTotals
+        .sorted { lhs, rhs in
+            if lhs.value == rhs.value {
+                return lhs.key < rhs.key
+            }
+            return lhs.value > rhs.value
+        }
+        .prefix(TrafficAnalyticsModel.tokenTrendModelLimit)
+        .map(\.key)
+
+    let topModelNameSet = Set(topModelNames)
+    let includesOther = modelTotals.keys.contains { !topModelNameSet.contains($0) }
+    let seriesNames = topModelNames + (includesOther ? [otherTokenTrendLabel] : [])
+    var seriesValues: [String: [Int]] = Dictionary(uniqueKeysWithValues: seriesNames.map { ($0, [Int]()) })
+    var buckets: [TrafficTokenTrendBucket] = []
+
+    for point in trend.data {
+        var aggregatedRows: [String: TrafficTokenTrendBucketRow] = [:]
+
+        for bucket in point.byModel {
+            let rowName = topModelNameSet.contains(bucket.model) ? bucket.model : otherTokenTrendLabel
+            let existing = aggregatedRows[rowName] ?? TrafficTokenTrendBucketRow(
+                modelName: rowName,
+                totalTokens: 0,
+                inputTokens: 0,
+                outputTokens: 0,
+                cachedTokens: 0,
+                requestCount: 0,
+                errorCount: 0
+            )
+            aggregatedRows[rowName] = TrafficTokenTrendBucketRow(
+                modelName: rowName,
+                totalTokens: existing.totalTokens + bucket.totalTokens,
+                inputTokens: existing.inputTokens + bucket.inputTokens,
+                outputTokens: existing.outputTokens + bucket.outputTokens,
+                cachedTokens: existing.cachedTokens + bucket.cachedTokens,
+                requestCount: existing.requestCount + bucket.requestCount,
+                errorCount: existing.errorCount + bucket.errorCount
+            )
+        }
+
+        for name in seriesNames {
+            seriesValues[name, default: []].append(aggregatedRows[name]?.totalTokens ?? 0)
+        }
+
+        let rows = aggregatedRows.values
+            .filter { $0.totalTokens > 0 }
+            .sorted { lhs, rhs in
+                if lhs.totalTokens == rhs.totalTokens {
+                    return lhs.modelName < rhs.modelName
+                }
+                return lhs.totalTokens > rhs.totalTokens
+            }
+
+        buckets.append(
+            TrafficTokenTrendBucket(
+                timestamp: point.timestamp,
+                totalTokens: rows.map(\.totalTokens).reduce(0, +),
+                errorCount: point.errorCount,
+                rows: rows
+            )
+        )
+    }
+
+    let series = seriesNames.map { name in
+        let bucketValues = seriesValues[name] ?? []
+        return TrafficTokenTrendSeries(
+            modelName: name,
+            bucketValues: bucketValues,
+            totalTokens: bucketValues.reduce(0, +)
+        )
+    }
+
+    let peakTotalTokens = buckets.map(\.totalTokens).max() ?? 0
+    let peakBucketErrors = buckets.map(\.errorCount).max() ?? 0
+    let overallTotalTokens = buckets.map(\.totalTokens).reduce(0, +)
+    let topModelShareValue: String
+    if let topModelName = topModelNames.first,
+       let topModelTotal = modelTotals[topModelName],
+       overallTotalTokens > 0 {
+        topModelShareValue = "\(topModelName) \(formatPercent(Double(topModelTotal) / Double(overallTotalTokens) * 100.0))"
+    } else {
+        topModelShareValue = "No model"
+    }
+
+    return (
+        series,
+        buckets,
+        [
+            TrafficTrendSummaryItem(title: "Peak Total Tokens", value: formatInteger(peakTotalTokens)),
+            TrafficTrendSummaryItem(title: "Top Model Share", value: topModelShareValue),
+            TrafficTrendSummaryItem(title: "Peak Bucket Errors", value: String(peakBucketErrors))
+        ]
+    )
+}
+
+private let otherTokenTrendLabel = "Other"

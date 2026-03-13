@@ -28,4 +28,4 @@
 
 ## 相关文档
 
-- `docs/plans/2026-03-12-native-distribution-design.md`
+- `docs/plans/active/2026-03-12-native-distribution-design.md`

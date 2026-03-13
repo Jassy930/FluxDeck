@@ -1,6 +1,6 @@
 # FluxDeck Admin API v1 契约
 
-本文档锁定 `fluxd` Admin API 的 v1 返回结构，供 Tauri 主线与 macOS 原生壳共同消费。
+本文档锁定 `fluxd` Admin API 的 v1 返回结构，供 `fluxctl`、macOS 原生桌面端和遗留 Web 消费者共同消费。
 
 ## 通用约定
 
@@ -306,20 +306,22 @@
   - 支持如 `1h`、`6h`、`24h`、`7d`
   - 默认 `1h`
 - `interval?: string`
-  - 支持如 `5m`、`15m`、`1h`
+  - 支持如 `1m`、`5m`、`15m`、`1h`
   - 默认 `5m`
 
 返回对象：
 
 - `period: string`
 - `interval: string`
-- `data: Array<{ timestamp: string, request_count: number, avg_latency: number, error_count: number, input_tokens: number, output_tokens: number, cached_tokens: number }>`
+- `data: Array<{ timestamp: string, request_count: number, avg_latency: number, error_count: number, input_tokens: number, output_tokens: number, cached_tokens: number, by_model: Array<{ model: string, total_tokens: number, input_tokens: number, output_tokens: number, cached_tokens: number, request_count: number, error_count: number }> }>`
 
 语义：
 
 - `timestamp` 为服务端聚合后的 UTC bucket 时间
 - `avg_latency` 当前以整数毫秒返回
 - `input_tokens / output_tokens / cached_tokens` 在源日志缺失时聚合为 `0`
+- `by_model` 按 `bucket + model_effective(优先) / model` 聚合；空模型名会归一为 `Unknown model`
+- `by_model` 内部按 `total_tokens DESC, model ASC` 排序
 
 ## 版本策略
 

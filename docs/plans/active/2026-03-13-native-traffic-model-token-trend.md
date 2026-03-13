@@ -15,7 +15,7 @@
 **Files:**
 - Modify: `crates/fluxd/tests/admin_api_test.rs`
 - Modify: `docs/contracts/admin-api-v1.md`
-- Modify: `docs/plans/2026-03-13-native-traffic-model-token-trend-design.md`
+- Modify: `docs/plans/active/2026-03-13-native-traffic-model-token-trend-design.md`
 
 **Step 1: 写失败测试，要求 trend bucket 返回 `by_model`**
 
@@ -42,7 +42,7 @@ Expected: FAIL，错误应来自响应中缺少 `by_model` 或断言不成立。
 **Step 4: 提交文档草案**
 
 ```bash
-git add crates/fluxd/tests/admin_api_test.rs docs/contracts/admin-api-v1.md docs/plans/2026-03-13-native-traffic-model-token-trend-design.md
+git add crates/fluxd/tests/admin_api_test.rs docs/contracts/admin-api-v1.md docs/plans/active/2026-03-13-native-traffic-model-token-trend-design.md
 git commit -m "docs(traffic): define model token trend contract"
 ```
 
@@ -302,7 +302,7 @@ git add docs/contracts/admin-api-v1.md docs/progress/2026-03-13-native-traffic-m
 git commit -m "docs(traffic): record model token trend rollout"
 ```
 
-Plan complete and saved to `docs/plans/2026-03-13-native-traffic-model-token-trend.md`. Two execution options:
+Plan complete and saved to `docs/plans/active/2026-03-13-native-traffic-model-token-trend.md`. Two execution options:
 
 **1. Subagent-Driven (this session)** - I dispatch fresh subagent per task, review between tasks, fast iteration
 

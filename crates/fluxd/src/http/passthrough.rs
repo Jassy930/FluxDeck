@@ -229,10 +229,7 @@ pub async fn handle_passthrough_request(
     let status = response.status();
     let headers = response.headers().clone();
     let first_byte_ms = started_at.elapsed().as_millis() as i64;
-    let is_stream = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.starts_with("text/event-stream"));
+    let is_stream = is_event_stream_content_type(&headers);
 
     if is_stream {
         let stream_dimensions = PassthroughLogDimensions {
@@ -321,13 +318,23 @@ pub async fn handle_passthrough_request(
         }
     };
 
+    let sniffed_stream = status.is_success()
+        && supports_sse_body_sniff(&target.upstream_protocol)
+        && looks_like_sse_payload(&response_body);
     let usage = if status.is_success() {
-        extract_passthrough_usage(&target.upstream_protocol, &response_body)
+        if sniffed_stream {
+            extract_passthrough_body_stream_usage(&target.upstream_protocol, &response_body)
+        } else {
+            extract_passthrough_usage(&target.upstream_protocol, &response_body)
+        }
     } else {
         Default::default()
     };
-    let response_model =
-        extract_passthrough_response_model(&target.upstream_protocol, &response_body);
+    let response_model = if sniffed_stream {
+        None
+    } else {
+        extract_passthrough_response_model(&target.upstream_protocol, &response_body)
+    };
     append_passthrough_log(
         &log_service,
         request_id,
@@ -337,7 +344,7 @@ pub async fn handle_passthrough_request(
         &target.upstream_protocol,
         status,
         started_at,
-        Some(started_at.elapsed().as_millis() as i64),
+        Some(first_byte_ms),
         None,
         None,
         PassthroughLogDimensions {
@@ -346,7 +353,7 @@ pub async fn handle_passthrough_request(
             model_effective: response_model.or(request_model),
         },
         usage,
-        false,
+        sniffed_stream,
     )
     .await;
 
@@ -450,6 +457,46 @@ fn extract_passthrough_usage(
         "anthropic" => extract_anthropic_usage(&response),
         _ => Default::default(),
     }
+}
+
+fn extract_passthrough_body_stream_usage(
+    upstream_protocol: &str,
+    response_body: &[u8],
+) -> crate::forwarding::types::UsageSnapshot {
+    match upstream_protocol {
+        "openai" | "openai-response" | "anthropic" => {
+            let mut tracker = PassthroughStreamUsageTracker::new(upstream_protocol.to_string());
+            if tracker.push_chunk(response_body).is_ok() {
+                return tracker.finish().ok().flatten().unwrap_or_default();
+            }
+            Default::default()
+        }
+        _ => Default::default(),
+    }
+}
+
+fn is_event_stream_content_type(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/event-stream"))
+}
+
+fn supports_sse_body_sniff(upstream_protocol: &str) -> bool {
+    matches!(
+        upstream_protocol,
+        "openai" | "openai-response" | "anthropic"
+    )
+}
+
+fn looks_like_sse_payload(response_body: &[u8]) -> bool {
+    let body = response_body
+        .iter()
+        .copied()
+        .skip_while(|byte| byte.is_ascii_whitespace())
+        .collect::<Vec<u8>>();
+
+    body.starts_with(b"event:") || body.starts_with(b"data:")
 }
 
 fn extract_passthrough_requested_model(

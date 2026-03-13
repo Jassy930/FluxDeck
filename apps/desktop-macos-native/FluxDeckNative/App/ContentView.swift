@@ -708,16 +708,18 @@ struct ContentView: View {
         settingsError = nil
         await refreshAll()
     }
+}
 
-    private func trafficTrendInterval(for period: String) -> String {
-        switch period {
-        case "24h":
-            return "1h"
-        case "6h":
-            return "15m"
-        default:
-            return "5m"
-        }
+func trafficTrendInterval(for period: String) -> String {
+    switch period {
+    case "1h":
+        return "1m"
+    case "6h":
+        return "5m"
+    case "24h":
+        return "15m"
+    default:
+        return "5m"
     }
 }
 

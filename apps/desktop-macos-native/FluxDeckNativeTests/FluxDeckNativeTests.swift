@@ -1170,7 +1170,27 @@ final class FluxDeckNativeTests: XCTestCase {
               "error_count": 1,
               "input_tokens": 800,
               "output_tokens": 1200,
-              "cached_tokens": 300
+              "cached_tokens": 300,
+              "by_model": [
+                {
+                  "model": "gpt-5-codex",
+                  "total_tokens": 700,
+                  "input_tokens": 320,
+                  "output_tokens": 340,
+                  "cached_tokens": 40,
+                  "request_count": 3,
+                  "error_count": 1
+                },
+                {
+                  "model": "gpt-4o-mini",
+                  "total_tokens": 600,
+                  "input_tokens": 480,
+                  "output_tokens": 120,
+                  "cached_tokens": 0,
+                  "request_count": 9,
+                  "error_count": 0
+                }
+              ]
             },
             {
               "timestamp": "2026-03-11 10:05:00",
@@ -1179,7 +1199,18 @@ final class FluxDeckNativeTests: XCTestCase {
               "error_count": 3,
               "input_tokens": 1000,
               "output_tokens": 1800,
-              "cached_tokens": 500
+              "cached_tokens": 500,
+              "by_model": [
+                {
+                  "model": "gpt-5-codex",
+                  "total_tokens": 1900,
+                  "input_tokens": 700,
+                  "output_tokens": 1100,
+                  "cached_tokens": 100,
+                  "request_count": 8,
+                  "error_count": 2
+                }
+              ]
             }
           ]
         }
@@ -1193,6 +1224,11 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(trend.data.last?.avgLatency, 240)
         XCTAssertEqual(trend.data.first?.cachedTokens, 300)
         XCTAssertEqual(trend.data.last?.cachedTokens, 500)
+        XCTAssertEqual(trend.data.first?.byModel.count, 2)
+        XCTAssertEqual(trend.data.first?.byModel.first?.model, "gpt-5-codex")
+        XCTAssertEqual(trend.data.first?.byModel.first?.totalTokens, 700)
+        XCTAssertEqual(trend.data.first?.byModel.first?.requestCount, 3)
+        XCTAssertEqual(trend.data.last?.byModel.first?.cachedTokens, 100)
     }
 
     func testTrafficMonitorModelBuildsKpisAlertsAndBreakdowns() {
@@ -1308,7 +1344,10 @@ final class FluxDeckNativeTests: XCTestCase {
             gatewayStatsForKpi: [],
             totalInputTokens: 0,
             totalOutputTokens: 0,
-            totalCachedTokens: 0
+            totalCachedTokens: 0,
+            tokenTrendSeries: [],
+            tokenTrendBuckets: [],
+            tokenTrendSummaryItems: []
         )
 
         XCTAssertEqual(model.compactGatewayBreakdown.count, 3)
@@ -1447,6 +1486,184 @@ final class FluxDeckNativeTests: XCTestCase {
                 TrafficKpiSupplementRow(label: "Input", value: "2,200"),
                 TrafficKpiSupplementRow(label: "Output", value: "3,300"),
                 TrafficKpiSupplementRow(label: "Cached", value: "900")
+            ]
+        )
+    }
+
+    func testTrafficMonitorBuildsTokenTrendSeriesAndSummary() {
+        let overview = AdminStatsOverview(
+            totalRequests: 20,
+            successfulRequests: 11,
+            errorRequests: 9,
+            successRate: 55.0,
+            requestsPerMinute: 0.3,
+            totalTokens: 2_000,
+            cachedTokens: 120,
+            byGateway: [],
+            byProvider: [],
+            byModel: [
+                AdminModelStats(
+                    model: "gpt-5-codex",
+                    requestCount: 8,
+                    successCount: 6,
+                    errorCount: 2,
+                    totalTokens: 800,
+                    cachedTokens: 80,
+                    avgLatency: 420
+                )
+            ]
+        )
+        let trend = AdminStatsTrend(
+            period: "1h",
+            interval: "5m",
+            data: [
+                AdminStatsTrendPoint(
+                    timestamp: "2026-03-11 10:00:00",
+                    requestCount: 9,
+                    avgLatency: 300,
+                    errorCount: 2,
+                    inputTokens: 400,
+                    outputTokens: 500,
+                    cachedTokens: 100,
+                    byModel: [
+                        .init(model: "gpt-5-codex", totalTokens: 500, inputTokens: 200, outputTokens: 250, cachedTokens: 50, requestCount: 5, errorCount: 1),
+                        .init(model: "gpt-4o-mini", totalTokens: 200, inputTokens: 80, outputTokens: 110, cachedTokens: 10, requestCount: 2, errorCount: 0),
+                        .init(model: "claude-sonnet", totalTokens: 100, inputTokens: 40, outputTokens: 55, cachedTokens: 5, requestCount: 1, errorCount: 0),
+                        .init(model: "o3-mini", totalTokens: 50, inputTokens: 20, outputTokens: 25, cachedTokens: 5, requestCount: 1, errorCount: 0),
+                        .init(model: "gemini-2.0", totalTokens: 150, inputTokens: 60, outputTokens: 70, cachedTokens: 20, requestCount: 1, errorCount: 1)
+                    ]
+                ),
+                AdminStatsTrendPoint(
+                    timestamp: "2026-03-11 10:05:00",
+                    requestCount: 11,
+                    avgLatency: 450,
+                    errorCount: 7,
+                    inputTokens: 700,
+                    outputTokens: 250,
+                    cachedTokens: 20,
+                    byModel: [
+                        .init(model: "gpt-5-codex", totalTokens: 300, inputTokens: 110, outputTokens: 170, cachedTokens: 20, requestCount: 3, errorCount: 1),
+                        .init(model: "gpt-4o-mini", totalTokens: 300, inputTokens: 140, outputTokens: 150, cachedTokens: 10, requestCount: 3, errorCount: 2),
+                        .init(model: "claude-sonnet", totalTokens: 200, inputTokens: 120, outputTokens: 75, cachedTokens: 5, requestCount: 2, errorCount: 1),
+                        .init(model: "o3-mini", totalTokens: 200, inputTokens: 130, outputTokens: 65, cachedTokens: 5, requestCount: 3, errorCount: 3)
+                    ]
+                )
+            ]
+        )
+
+        let model = TrafficAnalyticsModel.make(
+            overview: overview,
+            trend: trend,
+            selectedPeriod: "1h"
+        )
+
+        XCTAssertEqual(
+            model.tokenTrendSeries.map(\.modelName),
+            ["gpt-5-codex", "gpt-4o-mini", "claude-sonnet", "o3-mini", "Other"]
+        )
+        XCTAssertEqual(model.tokenTrendSeries[0].bucketValues, [500, 300])
+        XCTAssertEqual(model.tokenTrendSeries[4].bucketValues, [150, 0])
+        XCTAssertEqual(
+            model.tokenTrendSummaryItems,
+            [
+                TrafficTrendSummaryItem(title: "Peak Total Tokens", value: "1,000"),
+                TrafficTrendSummaryItem(title: "Top Model Share", value: "gpt-5-codex 40.0%"),
+                TrafficTrendSummaryItem(title: "Peak Bucket Errors", value: "7")
+            ]
+        )
+        XCTAssertEqual(
+            model.tokenTrendBuckets[0].rows.map(\.modelName),
+            ["gpt-5-codex", "gpt-4o-mini", "Other", "claude-sonnet", "o3-mini"]
+        )
+    }
+
+    func testTrafficMonitorGroupsTailModelsIntoOtherForTokenTrend() {
+        let overview = AdminStatsOverview(
+            totalRequests: 5,
+            successfulRequests: 5,
+            errorRequests: 0,
+            successRate: 100.0,
+            requestsPerMinute: 0.1,
+            totalTokens: 720,
+            byGateway: [],
+            byProvider: [],
+            byModel: []
+        )
+        let trend = AdminStatsTrend(
+            period: "1h",
+            interval: "5m",
+            data: [
+                AdminStatsTrendPoint(
+                    timestamp: "2026-03-11 10:00:00",
+                    requestCount: 3,
+                    avgLatency: 120,
+                    errorCount: 0,
+                    inputTokens: 220,
+                    outputTokens: 140,
+                    cachedTokens: 0,
+                    byModel: [
+                        .init(model: "a", totalTokens: 200, inputTokens: 100, outputTokens: 100, cachedTokens: 0, requestCount: 1, errorCount: 0),
+                        .init(model: "b", totalTokens: 150, inputTokens: 70, outputTokens: 80, cachedTokens: 0, requestCount: 1, errorCount: 0),
+                        .init(model: "c", totalTokens: 90, inputTokens: 45, outputTokens: 45, cachedTokens: 0, requestCount: 1, errorCount: 0),
+                        .init(model: "e", totalTokens: 20, inputTokens: 10, outputTokens: 10, cachedTokens: 0, requestCount: 1, errorCount: 0)
+                    ]
+                ),
+                AdminStatsTrendPoint(
+                    timestamp: "2026-03-11 10:05:00",
+                    requestCount: 2,
+                    avgLatency: 140,
+                    errorCount: 0,
+                    inputTokens: 160,
+                    outputTokens: 110,
+                    cachedTokens: 0,
+                    byModel: [
+                        .init(model: "a", totalTokens: 40, inputTokens: 20, outputTokens: 20, cachedTokens: 0, requestCount: 1, errorCount: 0),
+                        .init(model: "b", totalTokens: 110, inputTokens: 60, outputTokens: 50, cachedTokens: 0, requestCount: 1, errorCount: 0),
+                        .init(model: "c", totalTokens: 30, inputTokens: 15, outputTokens: 15, cachedTokens: 0, requestCount: 1, errorCount: 0),
+                        .init(model: "d", totalTokens: 80, inputTokens: 40, outputTokens: 40, cachedTokens: 0, requestCount: 1, errorCount: 0)
+                    ]
+                )
+            ]
+        )
+
+        let model = TrafficAnalyticsModel.make(
+            overview: overview,
+            trend: trend,
+            selectedPeriod: "1h"
+        )
+
+        XCTAssertEqual(model.tokenTrendSeries.map(\.modelName), ["b", "a", "c", "d", "Other"])
+        XCTAssertEqual(model.tokenTrendSeries[3].bucketValues, [0, 80])
+        XCTAssertEqual(model.tokenTrendSeries[4].bucketValues, [20, 0])
+    }
+
+    func testTrafficTrendIntervalUsesDenserBuckets() {
+        XCTAssertEqual(trafficTrendInterval(for: "1h"), "1m")
+        XCTAssertEqual(trafficTrendInterval(for: "6h"), "5m")
+        XCTAssertEqual(trafficTrendInterval(for: "24h"), "15m")
+        XCTAssertEqual(trafficTrendInterval(for: "unexpected"), "5m")
+    }
+
+    func testTrafficTrendRenderableLinesUseTotalAsPrimaryAndModelRawValues() {
+        let series = [
+            TrafficTokenTrendSeries(modelName: "gpt-5-codex", bucketValues: [500, 300], totalTokens: 800),
+            TrafficTokenTrendSeries(modelName: "gpt-4o-mini", bucketValues: [200, 300], totalTokens: 500),
+            TrafficTokenTrendSeries(modelName: "Other", bucketValues: [150, 0], totalTokens: 150)
+        ]
+        let buckets = [
+            TrafficTokenTrendBucket(timestamp: "2026-03-11 10:00:00", totalTokens: 850, errorCount: 2, rows: []),
+            TrafficTokenTrendBucket(timestamp: "2026-03-11 10:05:00", totalTokens: 600, errorCount: 7, rows: [])
+        ]
+
+        let lines = buildTrafficTrendRenderableLines(series: series, buckets: buckets)
+
+        XCTAssertEqual(
+            lines,
+            [
+                TrafficTrendRenderableLine(name: "Total Tokens", values: [850, 600], style: .total),
+                TrafficTrendRenderableLine(name: "gpt-5-codex", values: [500, 300], style: .model),
+                TrafficTrendRenderableLine(name: "gpt-4o-mini", values: [200, 300], style: .model),
+                TrafficTrendRenderableLine(name: "Other", values: [150, 0], style: .model)
             ]
         )
     }

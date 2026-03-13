@@ -148,29 +148,39 @@ struct TrafficAnalyticsView: View {
 
     private var trendSection: some View {
         HStack(alignment: .top, spacing: 12) {
-            SurfaceCard(title: "Traffic Trend") {
+            SurfaceCard(title: "Token Trend by Model") {
                 VStack(alignment: .leading, spacing: 10) {
-                    if model.trendPoints.isEmpty {
+                    if model.tokenTrendBuckets.isEmpty {
                         Text("No trend buckets available for \(selectedPeriod).")
                             .font(.caption)
                             .foregroundStyle(DesignTokens.textSecondary)
                     } else {
-                        TrafficTrendChart(points: model.trendPoints)
-                            .frame(height: 144)
+                        let renderableLines = buildTrafficTrendRenderableLines(
+                            series: model.tokenTrendSeries,
+                            buckets: model.tokenTrendBuckets
+                        )
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(Array(renderableLines.enumerated()), id: \.element.name) { index, line in
+                                    tokenTrendLegendItem(
+                                        title: line.name,
+                                        color: tokenTrendRenderableColor(for: line, index: index)
+                                    )
+                                }
+                            }
+                            .padding(.bottom, 2)
+                        }
+
+                        TrafficTrendChart(
+                            series: model.tokenTrendSeries,
+                            buckets: model.tokenTrendBuckets
+                        )
+                        .frame(height: 196)
 
                         HStack(spacing: 8) {
-                            trendSummaryPill(
-                                title: "Peak Req",
-                                value: "\(peakRequestCount)"
-                            )
-                            trendSummaryPill(
-                                title: "Peak Latency",
-                                value: "\(peakLatency) ms"
-                            )
-                            trendSummaryPill(
-                                title: "Total Errors",
-                                value: "\(trendErrorCount)"
-                            )
+                            ForEach(model.tokenTrendSummaryItems, id: \.title) { item in
+                                trendSummaryPill(title: item.title, value: item.value)
+                            }
                         }
                     }
                 }
@@ -259,18 +269,6 @@ struct TrafficAnalyticsView: View {
         }
     }
 
-    private var peakRequestCount: Int {
-        model.trendPoints.map(\.requestCount).max() ?? 0
-    }
-
-    private var peakLatency: Int {
-        model.trendPoints.map(\.avgLatency).max() ?? 0
-    }
-
-    private var trendErrorCount: Int {
-        model.trendPoints.map(\.errorCount).reduce(0, +)
-    }
-
     private func periodButton(_ period: String) -> some View {
         Button {
             onSelectPeriod(period)
@@ -329,6 +327,27 @@ struct TrafficAnalyticsView: View {
                 }
             }
         }
+    }
+
+    private func tokenTrendLegendItem(title: String, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(title)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(DesignTokens.textSecondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            Capsule(style: .continuous)
+                .fill(DesignTokens.surfacePrimary.opacity(0.92))
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(DesignTokens.borderSubtle.opacity(0.9), lineWidth: 1)
+        )
     }
 
     private func trendSummaryPill(title: String, value: String) -> some View {
@@ -425,67 +444,142 @@ struct TrafficAnalyticsView: View {
 }
 
 private struct TrafficTrendChart: View {
-    let points: [AdminStatsTrendPoint]
+    let series: [TrafficTokenTrendSeries]
+    let buckets: [TrafficTokenTrendBucket]
+    @State private var hoveredBucketIndex: Int?
+
+    private var renderableLines: [TrafficTrendRenderableLine] {
+        buildTrafficTrendRenderableLines(series: series, buckets: buckets)
+    }
 
     var body: some View {
         GeometryReader { geometry in
             let frame = CGRect(origin: .zero, size: geometry.size)
+            let maxTotal = max(buckets.map(\.totalTokens).max() ?? 0, 1)
 
             ZStack {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(DesignTokens.surfacePrimary.opacity(0.88))
 
-                Path { path in
-                    let y = frame.height * 0.5
-                    path.move(to: CGPoint(x: 0, y: y))
-                    path.addLine(to: CGPoint(x: frame.width, y: y))
-                }
-                .stroke(DesignTokens.borderSubtle.opacity(0.65), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-
-                if requestPath(in: frame).isEmpty == false {
-                    requestPath(in: frame)
-                        .stroke(DesignTokens.statusColors.running.fill, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                ForEach(0..<3, id: \.self) { gridIndex in
+                    Path { path in
+                        let ratio = CGFloat(gridIndex + 1) / 4
+                        let y = frame.height - ratio * frame.height
+                        path.move(to: CGPoint(x: 0, y: y))
+                        path.addLine(to: CGPoint(x: frame.width, y: y))
+                    }
+                    .stroke(DesignTokens.borderSubtle.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
                 }
 
-                if latencyPath(in: frame).isEmpty == false {
-                    latencyPath(in: frame)
-                        .stroke(DesignTokens.statusColors.warning.fill, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                ForEach(Array(series.enumerated()), id: \.element.modelName) { index, _ in
+                    stackedAreaPath(for: index, in: frame, maxTotal: maxTotal)
+                        .fill(tokenTrendModelColor(for: index).opacity(0.12))
+                }
+
+                ForEach(Array(renderableLines.enumerated()), id: \.element.name) { index, line in
+                    rawLinePath(values: line.values, in: frame, maxTotal: maxTotal)
+                        .stroke(
+                            tokenTrendRenderableColor(for: line, index: index),
+                            style: StrokeStyle(
+                                lineWidth: line.style == .total ? 3.2 : 1.8,
+                                lineCap: .round,
+                                lineJoin: .round
+                            )
+                        )
+                        .shadow(
+                            color: line.style == .total ? totalTokenTrendColor().opacity(0.26) : .clear,
+                            radius: line.style == .total ? 8 : 0
+                        )
+                }
+
+                if let hoveredBucketIndex, buckets.indices.contains(hoveredBucketIndex) {
+                    let x = xPosition(for: hoveredBucketIndex, in: frame)
+
+                    Path { path in
+                        path.move(to: CGPoint(x: x, y: 0))
+                        path.addLine(to: CGPoint(x: x, y: frame.height))
+                    }
+                    .stroke(DesignTokens.textPrimary.opacity(0.24), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+
+                    ForEach(Array(renderableLines.enumerated()), id: \.element.name) { index, line in
+                        let value = line.values[hoveredBucketIndex]
+                        let point = CGPoint(
+                            x: x,
+                            y: yPosition(for: value, maxTotal: maxTotal, in: frame)
+                        )
+                        Circle()
+                            .fill(tokenTrendRenderableColor(for: line, index: index))
+                            .frame(width: 7, height: 7)
+                            .overlay(
+                                Circle()
+                                    .stroke(DesignTokens.surfacePrimary, lineWidth: 2)
+                            )
+                            .position(point)
+                    }
+
+                    tooltipView(for: hoveredBucketIndex)
+                        .position(
+                            x: tooltipXPosition(for: hoveredBucketIndex, in: frame),
+                            y: 54
+                        )
+                }
+            }
+            .contentShape(Rectangle())
+            .onContinuousHover(coordinateSpace: .local) { phase in
+                switch phase {
+                case .active(let location):
+                    hoveredBucketIndex = bucketIndex(for: location.x, in: frame)
+                case .ended:
+                    hoveredBucketIndex = nil
                 }
             }
         }
     }
 
-    private func requestPath(in rect: CGRect) -> Path {
-        linePath(
-            rect: rect,
-            values: points.map { Double($0.requestCount) }
-        )
+    private func stackedAreaPath(for seriesIndex: Int, in rect: CGRect, maxTotal: Int) -> Path {
+        let lowerValues = cumulativeValues(upTo: max(seriesIndex - 1, -1))
+        let upperValues = cumulativeValues(upTo: seriesIndex)
+        guard upperValues.count > 1 else {
+            return Path()
+        }
+
+        return Path { path in
+            for index in upperValues.indices {
+                let point = CGPoint(
+                    x: xPosition(for: index, in: rect),
+                    y: yPosition(for: upperValues[index], maxTotal: maxTotal, in: rect)
+                )
+                if index == 0 {
+                    path.move(to: point)
+                } else {
+                    path.addLine(to: point)
+                }
+            }
+
+            for index in lowerValues.indices.reversed() {
+                path.addLine(
+                    to: CGPoint(
+                        x: xPosition(for: index, in: rect),
+                        y: yPosition(for: lowerValues[index], maxTotal: maxTotal, in: rect)
+                    )
+                )
+            }
+
+            path.closeSubpath()
+        }
     }
 
-    private func latencyPath(in rect: CGRect) -> Path {
-        linePath(
-            rect: rect,
-            values: points.map { Double($0.avgLatency) }
-        )
-    }
-
-    private func linePath(rect: CGRect, values: [Double]) -> Path {
+    private func rawLinePath(values: [Int], in rect: CGRect, maxTotal: Int) -> Path {
         guard values.count > 1 else {
             return Path()
         }
 
-        let maxValue = max(values.max() ?? 1, 1)
-        let minValue = min(values.min() ?? 0, maxValue)
-        let range = max(maxValue - minValue, 1)
-        let stepX = rect.width / CGFloat(max(values.count - 1, 1))
-
         return Path { path in
-            for (index, value) in values.enumerated() {
-                let x = CGFloat(index) * stepX
-                let normalized = (value - minValue) / range
-                let y = rect.height - CGFloat(normalized) * max(rect.height - 16, 1) - 8
-                let point = CGPoint(x: x, y: y)
-
+            for index in values.indices {
+                let point = CGPoint(
+                    x: xPosition(for: index, in: rect),
+                    y: yPosition(for: values[index], maxTotal: maxTotal, in: rect)
+                )
                 if index == 0 {
                     path.move(to: point)
                 } else {
@@ -494,4 +588,174 @@ private struct TrafficTrendChart: View {
             }
         }
     }
+
+    private func cumulativeValues(upTo seriesIndex: Int) -> [Int] {
+        guard !series.isEmpty else {
+            return []
+        }
+        guard seriesIndex >= 0 else {
+            return Array(repeating: 0, count: buckets.count)
+        }
+
+        var cumulative = Array(repeating: 0, count: buckets.count)
+        for currentIndex in 0...min(seriesIndex, series.count - 1) {
+            for bucketIndex in cumulative.indices {
+                cumulative[bucketIndex] += series[currentIndex].bucketValues[bucketIndex]
+            }
+        }
+        return cumulative
+    }
+
+    private func xPosition(for bucketIndex: Int, in rect: CGRect) -> CGFloat {
+        guard buckets.count > 1 else {
+            return rect.midX
+        }
+        let step = rect.width / CGFloat(max(buckets.count - 1, 1))
+        return CGFloat(bucketIndex) * step
+    }
+
+    private func yPosition(for value: Int, maxTotal: Int, in rect: CGRect) -> CGFloat {
+        let normalized = Double(value) / Double(max(maxTotal, 1))
+        return rect.height - CGFloat(normalized) * max(rect.height - 16, 1) - 8
+    }
+
+    private func bucketIndex(for x: CGFloat, in rect: CGRect) -> Int {
+        guard buckets.count > 1 else {
+            return 0
+        }
+        let clampedX = min(max(x, 0), rect.width)
+        let ratio = clampedX / max(rect.width, 1)
+        return min(max(Int(round(ratio * CGFloat(buckets.count - 1))), 0), buckets.count - 1)
+    }
+
+    private func tooltipXPosition(for bucketIndex: Int, in rect: CGRect) -> CGFloat {
+        let preferredX = xPosition(for: bucketIndex, in: rect)
+        return min(max(preferredX, 118), rect.width - 118)
+    }
+
+    @ViewBuilder
+    private func tooltipView(for bucketIndex: Int) -> some View {
+        let bucket = buckets[bucketIndex]
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(bucket.timestamp)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                Spacer()
+                if bucket.errorCount > 0 {
+                    Text("\(bucket.errorCount) err")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(DesignTokens.statusColors.error.fill)
+                }
+            }
+
+            HStack(alignment: .firstTextBaseline) {
+                Text("Total Tokens")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(DesignTokens.textSecondary)
+                Spacer()
+                Text(formatTrendInteger(bucket.totalTokens))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+            }
+
+            Divider()
+                .overlay(DesignTokens.borderSubtle.opacity(0.8))
+
+            ForEach(bucket.rows, id: \.modelName) { row in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(tokenTrendModelColor(for: series.firstIndex(where: { $0.modelName == row.modelName }) ?? 0))
+                            .frame(width: 6, height: 6)
+                        Text(row.modelName)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(DesignTokens.textSecondary)
+                        Spacer()
+                        Text(formatTrendInteger(row.totalTokens))
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(DesignTokens.textPrimary)
+                    }
+
+                    Text("I \(formatTrendInteger(row.inputTokens))  O \(formatTrendInteger(row.outputTokens))  C \(formatTrendInteger(row.cachedTokens))")
+                        .font(.caption2)
+                        .foregroundStyle(DesignTokens.textSecondary.opacity(0.92))
+                }
+            }
+        }
+        .padding(10)
+        .frame(width: 236)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(DesignTokens.surfaceSecondary.opacity(0.98))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(DesignTokens.borderSubtle, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 12, x: 0, y: 8)
+    }
+}
+
+enum TrafficTrendRenderableLineStyle: Equatable {
+    case total
+    case model
+}
+
+struct TrafficTrendRenderableLine: Equatable {
+    let name: String
+    let values: [Int]
+    let style: TrafficTrendRenderableLineStyle
+}
+
+func buildTrafficTrendRenderableLines(
+    series: [TrafficTokenTrendSeries],
+    buckets: [TrafficTokenTrendBucket]
+) -> [TrafficTrendRenderableLine] {
+    [
+        TrafficTrendRenderableLine(
+            name: "Total Tokens",
+            values: buckets.map(\.totalTokens),
+            style: .total
+        )
+    ] + series.map {
+        TrafficTrendRenderableLine(
+            name: $0.modelName,
+            values: $0.bucketValues,
+            style: .model
+        )
+    }
+}
+
+private func totalTokenTrendColor() -> Color {
+    Color(red: 0.89, green: 0.96, blue: 1.0)
+}
+
+private func tokenTrendModelColor(for index: Int) -> Color {
+    let palette: [Color] = [
+        DesignTokens.statusColors.running.fill,
+        Color(red: 0.22, green: 0.82, blue: 0.88),
+        DesignTokens.statusColors.warning.fill,
+        Color(red: 0.39, green: 0.56, blue: 1.00),
+        Color(red: 0.47, green: 0.53, blue: 0.63)
+    ]
+    return palette[index % palette.count]
+}
+
+private func tokenTrendRenderableColor(
+    for line: TrafficTrendRenderableLine,
+    index: Int
+) -> Color {
+    switch line.style {
+    case .total:
+        return totalTokenTrendColor()
+    case .model:
+        return tokenTrendModelColor(for: max(index - 1, 0))
+    }
+}
+
+private func formatTrendInteger(_ value: Int) -> String {
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    return formatter.string(from: NSNumber(value: value)) ?? String(value)
 }

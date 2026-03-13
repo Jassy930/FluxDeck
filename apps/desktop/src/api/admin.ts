@@ -149,6 +149,18 @@ export type StatsTrendPoint = {
   error_count: number;
   input_tokens: number;
   output_tokens: number;
+  cached_tokens: number;
+  by_model: StatsTrendModelBucket[];
+};
+
+export type StatsTrendModelBucket = {
+  model: string;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+  request_count: number;
+  error_count: number;
 };
 
 export type StatsTrend = {

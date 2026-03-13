@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
@@ -503,6 +504,18 @@ struct StatsTrendPoint {
     input_tokens: i64,
     output_tokens: i64,
     cached_tokens: i64,
+    by_model: Vec<StatsTrendModelPoint>,
+}
+
+#[derive(Debug, Serialize)]
+struct StatsTrendModelPoint {
+    model: String,
+    total_tokens: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+    cached_tokens: i64,
+    request_count: i64,
+    error_count: i64,
 }
 
 async fn start_gateway(
@@ -744,10 +757,11 @@ async fn get_stats_overview(
     .fetch_one(&state.pool)
     .await;
 
-    let (total_requests, successful_requests, error_requests, total_tokens, cached_tokens) = match total_stats {
-        Ok(row) => row,
-        Err(_) => (0, 0, 0, 0, 0),
-    };
+    let (total_requests, successful_requests, error_requests, total_tokens, cached_tokens) =
+        match total_stats {
+            Ok(row) => row,
+            Err(_) => (0, 0, 0, 0, 0),
+        };
 
     let success_rate = if total_requests > 0 {
         (successful_requests as f64 / total_requests as f64) * 100.0
@@ -782,7 +796,15 @@ async fn get_stats_overview(
     .unwrap_or_default()
     .into_iter()
     .map(
-        |(gateway_id, request_count, success_count, error_count, total_tokens, cached_tokens, avg_latency)| {
+        |(
+            gateway_id,
+            request_count,
+            success_count,
+            error_count,
+            total_tokens,
+            cached_tokens,
+            avg_latency,
+        )| {
             DimensionStats {
                 _gateway_id: Some(gateway_id),
                 _provider_id: None,
@@ -818,7 +840,15 @@ async fn get_stats_overview(
     .unwrap_or_default()
     .into_iter()
     .map(
-        |(provider_id, request_count, success_count, error_count, total_tokens, cached_tokens, avg_latency)| {
+        |(
+            provider_id,
+            request_count,
+            success_count,
+            error_count,
+            total_tokens,
+            cached_tokens,
+            avg_latency,
+        )| {
             DimensionStats {
                 _gateway_id: None,
                 _provider_id: Some(provider_id),
@@ -854,7 +884,15 @@ async fn get_stats_overview(
     .unwrap_or_default()
     .into_iter()
     .filter_map(
-        |(model, request_count, success_count, error_count, total_tokens, cached_tokens, avg_latency)| {
+        |(
+            model,
+            request_count,
+            success_count,
+            error_count,
+            total_tokens,
+            cached_tokens,
+            avg_latency,
+        )| {
             model.map(|m| ModelDimensionStats {
                 model: m,
                 request_count,
@@ -924,6 +962,7 @@ async fn get_stats_trend(
         "datetime((strftime('%s', created_at) / {}) * {}, 'unixepoch')",
         interval_seconds, interval_seconds
     );
+    let normalized_model_expr = "COALESCE(NULLIF(TRIM(COALESCE(model_effective, '')), ''), NULLIF(TRIM(COALESCE(model, '')), ''), 'Unknown model')";
 
     let rows = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64, i64)>(
         &format!(
@@ -947,10 +986,68 @@ async fn get_stats_trend(
     .await
     .unwrap_or_default();
 
+    let model_rows = sqlx::query_as::<_, (String, String, i64, i64, i64, i64, i64, i64)>(
+        &format!(
+            "SELECT
+                {} as time_bucket,
+                {} as model,
+                COALESCE(SUM(total_tokens), 0) as total_tokens,
+                COALESCE(SUM(input_tokens), 0) as input_tokens,
+                COALESCE(SUM(output_tokens), 0) as output_tokens,
+                COALESCE(SUM(cached_tokens), 0) as cached_tokens,
+                COUNT(*) as request_count,
+                SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count
+             FROM request_logs
+             WHERE created_at >= ?
+             GROUP BY time_bucket, model
+             ORDER BY time_bucket ASC, total_tokens DESC, model ASC",
+            bucket_expr, normalized_model_expr
+        ),
+    )
+    .bind(&since)
+    .fetch_all(&state.pool)
+    .await
+    .unwrap_or_default();
+
+    let mut models_by_bucket: HashMap<String, Vec<StatsTrendModelPoint>> = HashMap::new();
+    for (
+        timestamp,
+        model,
+        total_tokens,
+        input_tokens,
+        output_tokens,
+        cached_tokens,
+        request_count,
+        error_count,
+    ) in model_rows
+    {
+        models_by_bucket
+            .entry(timestamp)
+            .or_default()
+            .push(StatsTrendModelPoint {
+                model,
+                total_tokens,
+                input_tokens,
+                output_tokens,
+                cached_tokens,
+                request_count,
+                error_count,
+            });
+    }
+
     let data = rows
         .into_iter()
         .map(
-            |(timestamp, request_count, avg_latency, error_count, input_tokens, output_tokens, cached_tokens)| {
+            |(
+                timestamp,
+                request_count,
+                avg_latency,
+                error_count,
+                input_tokens,
+                output_tokens,
+                cached_tokens,
+            )| {
+                let by_model = models_by_bucket.remove(&timestamp).unwrap_or_default();
                 StatsTrendPoint {
                     timestamp,
                     request_count,
@@ -959,6 +1056,7 @@ async fn get_stats_trend(
                     input_tokens,
                     output_tokens,
                     cached_tokens,
+                    by_model,
                 }
             },
         )

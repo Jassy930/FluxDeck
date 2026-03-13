@@ -30,6 +30,7 @@
 - `Traffic` 支持 `1h / 6h / 24h` 时间范围切换、关键指标、趋势、维度分布和异常摘要
 - `Traffic` 已进一步压缩为高密度监控台布局，优先首屏扫描 KPI 与趋势主区
 - `Traffic` 的 4 个主要 KPI 现已合并为单条连续指标栏，减少首屏留白
+- `Traffic` 主图现已改为按模型堆叠的 token 趋势图，并支持更密时间桶、图例和 hover tooltip
 - `Providers / Gateways` 工作台支持删除操作
 - 删除 Provider 时若仍被 Gateway 引用，界面会直接展示冲突错误与引用方信息
 - Gateway 可独立删除；删除运行中的 Gateway 时，服务端会先停机再删除，原生端优先展示服务端返回的删除提示
