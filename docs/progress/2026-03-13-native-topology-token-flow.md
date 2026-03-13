@@ -14,6 +14,12 @@
   - 节点降级为轻量锚点，不再承担完整诊断展示
   - hover 流带与 hover 节点均可弹出诊断 tooltip
   - 非关联链路与节点会降透明度，强化当前阅读焦点
+  - 2026-03-13 第二轮减层级：
+    - 去掉 `Topology` 外层大卡片
+    - 去掉画布边界、列标题与轨道底板
+    - 让主舞台直接贴页面底色
+    - 节点收敛为名称 + 类型/端点 + 主指标的三行轻锚点
+    - 控件条压成单行无标题切换，并以淡竖线完成三组分隔
 - `TopologyGraph` 现已稳定聚合：
   - `totalTokens`
   - `requestCount`
@@ -66,6 +72,8 @@
 - `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTopologyCanvasAppliesMinimumReadableBandWidth -derivedDataPath /tmp/fluxdeck-native-derived-sankey-green2 -quiet`：PASS
 - `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTopologyCanvasPrioritizesBandStageOverHeavyCards -derivedDataPath /tmp/fluxdeck-native-derived-sankey-green3 -quiet`：PASS
 - `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTopologyCanvasBuildsHoverTooltipPayloads -derivedDataPath /tmp/fluxdeck-native-derived-sankey-green4 -quiet`：PASS
+- `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTopologyCanvasFlattensVisualHierarchyWithoutExtraChrome -derivedDataPath /tmp/fluxdeck-native-derived-sankey-flat-green -quiet`：PASS
+- `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTopologyCanvasUsesSingleLineControlStripWithoutSectionTitles -derivedDataPath /tmp/fluxdeck-native-derived-sankey-controls-green -quiet`：PASS
 - `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTopologyGraphAggregatesTokenSegmentsPerEdge -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTopologyGraphFallsBackForMissingTokenFields -derivedDataPath /tmp/fluxdeck-native-derived-topology-verify1 -quiet`：PASS
 - `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTopologyGraphBuildsTopModelHighlightsAndOtherBucket -derivedDataPath /tmp/fluxdeck-native-derived-topology-green2-fixed -quiet`：PASS
 - `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTopologyCanvasSummaryUsesTokenSemantics -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTopologyCanvasScreenModelExposesEmptyState -derivedDataPath /tmp/fluxdeck-native-derived-topology-green3c -quiet`：PASS
