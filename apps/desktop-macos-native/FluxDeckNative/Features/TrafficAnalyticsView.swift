@@ -543,30 +543,9 @@ private struct TrafficTrendChart: View {
             return Path()
         }
 
-        return Path { path in
-            for index in upperValues.indices {
-                let point = CGPoint(
-                    x: xPosition(for: index, in: rect),
-                    y: yPosition(for: upperValues[index], maxTotal: maxTotal, in: rect)
-                )
-                if index == 0 {
-                    path.move(to: point)
-                } else {
-                    path.addLine(to: point)
-                }
-            }
-
-            for index in lowerValues.indices.reversed() {
-                path.addLine(
-                    to: CGPoint(
-                        x: xPosition(for: index, in: rect),
-                        y: yPosition(for: lowerValues[index], maxTotal: maxTotal, in: rect)
-                    )
-                )
-            }
-
-            path.closeSubpath()
-        }
+        let upperPoints = points(for: upperValues, in: rect, maxTotal: maxTotal)
+        let lowerPoints = points(for: lowerValues, in: rect, maxTotal: maxTotal)
+        return smoothedClosedAreaPath(upperPoints: upperPoints, lowerPoints: lowerPoints)
     }
 
     private func rawLinePath(values: [Int], in rect: CGRect, maxTotal: Int) -> Path {
@@ -574,19 +553,7 @@ private struct TrafficTrendChart: View {
             return Path()
         }
 
-        return Path { path in
-            for index in values.indices {
-                let point = CGPoint(
-                    x: xPosition(for: index, in: rect),
-                    y: yPosition(for: values[index], maxTotal: maxTotal, in: rect)
-                )
-                if index == 0 {
-                    path.move(to: point)
-                } else {
-                    path.addLine(to: point)
-                }
-            }
-        }
+        return smoothedLinePath(points: points(for: values, in: rect, maxTotal: maxTotal))
     }
 
     private func cumulativeValues(upTo seriesIndex: Int) -> [Int] {
@@ -631,6 +598,15 @@ private struct TrafficTrendChart: View {
     private func tooltipXPosition(for bucketIndex: Int, in rect: CGRect) -> CGFloat {
         let preferredX = xPosition(for: bucketIndex, in: rect)
         return min(max(preferredX, 118), rect.width - 118)
+    }
+
+    private func points(for values: [Int], in rect: CGRect, maxTotal: Int) -> [CGPoint] {
+        values.indices.map { index in
+            CGPoint(
+                x: xPosition(for: index, in: rect),
+                y: yPosition(for: values[index], maxTotal: maxTotal, in: rect)
+            )
+        }
     }
 
     @ViewBuilder
@@ -697,6 +673,98 @@ private struct TrafficTrendChart: View {
     }
 }
 
+struct TrafficTrendSmoothingSegment: Equatable {
+    let start: CGPoint
+    let control1: CGPoint
+    let control2: CGPoint
+    let end: CGPoint
+}
+
+func buildTrafficTrendSmoothingSegments(
+    points: [CGPoint],
+    tension: CGFloat = 0.42
+) -> [TrafficTrendSmoothingSegment] {
+    guard points.count > 1 else {
+        return []
+    }
+
+    let adjustedTension = min(max(tension, 0), 0.5)
+
+    return (0..<(points.count - 1)).map { index in
+        let start = points[index]
+        let end = points[index + 1]
+        let previous = index > 0 ? points[index - 1] : start
+        let next = index + 2 < points.count ? points[index + 2] : end
+        let dx = end.x - start.x
+        let localMinY = min(start.y, end.y)
+        let localMaxY = max(start.y, end.y)
+
+        let control1 = CGPoint(
+            x: min(max(start.x + dx * adjustedTension, min(start.x, end.x)), max(start.x, end.x)),
+            y: clamp(
+                start.y + (end.y - previous.y) * adjustedTension * 0.5,
+                min: localMinY,
+                max: localMaxY
+            )
+        )
+
+        let control2 = CGPoint(
+            x: min(max(end.x - dx * adjustedTension, min(start.x, end.x)), max(start.x, end.x)),
+            y: clamp(
+                end.y - (next.y - start.y) * adjustedTension * 0.5,
+                min: localMinY,
+                max: localMaxY
+            )
+        )
+
+        return TrafficTrendSmoothingSegment(
+            start: start,
+            control1: control1,
+            control2: control2,
+            end: end
+        )
+    }
+}
+
+func smoothedLinePath(points: [CGPoint], tension: CGFloat = 0.42) -> Path {
+    guard let firstPoint = points.first else {
+        return Path()
+    }
+
+    let segments = buildTrafficTrendSmoothingSegments(points: points, tension: tension)
+    return Path { path in
+        path.move(to: firstPoint)
+        for segment in segments {
+            path.addCurve(to: segment.end, control1: segment.control1, control2: segment.control2)
+        }
+    }
+}
+
+func smoothedClosedAreaPath(
+    upperPoints: [CGPoint],
+    lowerPoints: [CGPoint],
+    tension: CGFloat = 0.42
+) -> Path {
+    guard let firstUpperPoint = upperPoints.first, upperPoints.count > 1, lowerPoints.count > 1 else {
+        return Path()
+    }
+
+    let upperSegments = buildTrafficTrendSmoothingSegments(points: upperPoints, tension: tension)
+    let reversedLowerPoints = lowerPoints.reversed()
+    let lowerSegments = buildTrafficTrendSmoothingSegments(points: Array(reversedLowerPoints), tension: tension)
+
+    return Path { path in
+        path.move(to: firstUpperPoint)
+        for segment in upperSegments {
+            path.addCurve(to: segment.end, control1: segment.control1, control2: segment.control2)
+        }
+        for segment in lowerSegments {
+            path.addCurve(to: segment.end, control1: segment.control1, control2: segment.control2)
+        }
+        path.closeSubpath()
+    }
+}
+
 enum TrafficTrendRenderableLineStyle: Equatable {
     case total
     case model
@@ -758,4 +826,8 @@ private func formatTrendInteger(_ value: Int) -> String {
     let formatter = NumberFormatter()
     formatter.numberStyle = .decimal
     return formatter.string(from: NSNumber(value: value)) ?? String(value)
+}
+
+private func clamp(_ value: CGFloat, min lowerBound: CGFloat, max upperBound: CGFloat) -> CGFloat {
+    Swift.min(Swift.max(value, lowerBound), upperBound)
 }

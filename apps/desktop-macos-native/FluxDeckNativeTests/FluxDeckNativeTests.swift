@@ -2262,6 +2262,45 @@ final class FluxDeckNativeTests: XCTestCase {
         )
     }
 
+    func testTrafficTrendSmoothingSegmentsKeepEndpointsAndClampControlPoints() {
+        let peakPoints = [
+            CGPoint(x: 0, y: 84),
+            CGPoint(x: 60, y: 18),
+            CGPoint(x: 120, y: 82)
+        ]
+
+        let peakSegments = buildTrafficTrendSmoothingSegments(points: peakPoints, tension: 0.42)
+
+        XCTAssertEqual(peakSegments.count, 2)
+        XCTAssertEqual(peakSegments[0].start, peakPoints[0])
+        XCTAssertEqual(peakSegments[0].end, peakPoints[1])
+        XCTAssertEqual(peakSegments[1].start, peakPoints[1])
+        XCTAssertEqual(peakSegments[1].end, peakPoints[2])
+
+        for segment in peakSegments {
+            let localMinY = min(segment.start.y, segment.end.y)
+            let localMaxY = max(segment.start.y, segment.end.y)
+            XCTAssertGreaterThanOrEqual(segment.control1.y, localMinY)
+            XCTAssertLessThanOrEqual(segment.control1.y, localMaxY)
+            XCTAssertGreaterThanOrEqual(segment.control2.y, localMinY)
+            XCTAssertLessThanOrEqual(segment.control2.y, localMaxY)
+        }
+
+        let plateauPoints = [
+            CGPoint(x: 0, y: 42),
+            CGPoint(x: 50, y: 42),
+            CGPoint(x: 100, y: 42)
+        ]
+
+        let plateauSegments = buildTrafficTrendSmoothingSegments(points: plateauPoints, tension: 0.42)
+
+        XCTAssertEqual(plateauSegments.count, 2)
+        XCTAssertEqual(plateauSegments[0].control1.y, 42, accuracy: 0.001)
+        XCTAssertEqual(plateauSegments[0].control2.y, 42, accuracy: 0.001)
+        XCTAssertEqual(plateauSegments[1].control1.y, 42, accuracy: 0.001)
+        XCTAssertEqual(plateauSegments[1].control2.y, 42, accuracy: 0.001)
+    }
+
     func testAdminStatsOverviewAndTrendDecodeCachedTokens() throws {
         let overviewData = """
         {

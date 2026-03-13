@@ -38,3 +38,21 @@
 
 - `cargo test -q` 仍存在仓库已有的 `unused variable: lines` warning，未在本轮处理
 - 本轮未修改暂停中的 `apps/desktop/` 界面实现，只同步了稳定 API 类型
+
+## 追加：趋势图柔化曲线
+
+### 变更
+
+- `Token Trend by Model` 主图的折线由逐段直线改为平滑贝塞尔曲线
+- 堆叠面积上边界与下边界改为复用同一套平滑路径逻辑，避免出现“线条变圆但面积仍然生硬”的割裂
+- 新增 `buildTrafficTrendSmoothingSegments` 几何辅助函数，用于稳定生成受约束的控制点
+- 控制点 `y` 值会被钳制在当前段起止点的局部范围内，避免尖峰附近出现明显过冲或假峰值
+
+### 验证
+
+- `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTrafficTrendSmoothingSegmentsKeepEndpointsAndClampControlPoints -derivedDataPath /tmp/fluxdeck-native-derived-curve-green1 -quiet`：PASS
+- `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTrafficTrendRenderableLinesUseTotalAsPrimaryAndModelRawValues -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTrafficTrendSmoothingSegmentsKeepEndpointsAndClampControlPoints -derivedDataPath /tmp/fluxdeck-native-derived-curve-final -quiet`：PASS
+
+### 说明
+
+- hover 命中、tooltip 数据、竖向高亮线和图例映射均保持原有 bucket 语义，不跟随曲线插值结果变化
