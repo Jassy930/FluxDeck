@@ -83,6 +83,47 @@
 - 这是单向约束：只有 Provider 删除会受 Gateway 引用关系限制；Gateway 删除本身不依赖 Provider 删除
 - 历史 `request_logs` 不会阻止 Provider 删除；日志中的 `provider_id` 作为历史快照保留
 
+### `GET /admin/providers/health`
+
+返回数组，元素字段（稳定字段）：
+
+- `provider_id: string`
+- `scope: string`
+  - 当前固定为 `global`
+- `status: string`
+  - 当前可能值：`healthy | degraded | unhealthy | probing`
+- `failure_streak: number`
+- `success_streak: number`
+- `last_check_at: string | null`
+- `last_success_at: string | null`
+- `last_failure_at: string | null`
+- `last_failure_reason: string | null`
+- `circuit_open_until: string | null`
+- `recover_after: string | null`
+
+说明：
+
+- 创建 Provider 后，服务端会自动创建一条默认健康快照，初始状态为 `healthy`
+- 当前一阶段健康快照按 Provider 全局维度维护，不区分 Gateway、模型或协议
+- `fluxd` 进程内会启动后台 `HealthMonitor`：
+  - 周期性补齐启用中 Provider 的默认健康快照
+  - 对状态为 `unhealthy` 的 Provider 发起轻量探测，并把状态推进到 `probing`
+- 当前后台探测仍为保守骨架，不直接发起真实上游 API 探针；真实请求成功/失败依旧是主要健康信号来源
+
+### `POST /admin/providers/{id}/probe`
+
+对指定 Provider 触发一次手动轻量探测。
+
+响应：
+
+- 成功：`200`，返回最新健康快照（字段同 `GET /admin/providers/health`）
+- 失败：`400`，返回 `{ "error": string, "id": string }`
+
+说明：
+
+- 当前手动 probe 会把目标 Provider 的状态推进到 `probing`
+- 若 Provider 不存在或健康状态写入失败，返回 `400`
+
 ## 2) Gateway
 
 ### `GET /admin/gateways`
@@ -99,6 +140,7 @@
 - 允许值：`provider_default | openai | openai-response | gemini | anthropic | azure-openai | new-api | ollama`
 - `protocol_config_json: object`
 - `default_provider_id: string`
+- `route_targets: Array<{ id: string, gateway_id: string, provider_id: string, priority: number, enabled: boolean }>`
 - `default_model: string | null`
 - `enabled: boolean`
 - `auto_start: boolean`
@@ -113,6 +155,10 @@
 
 - `inbound_protocol` 与 `upstream_protocol` 的协议值集合与 Provider `kind` 对齐
 - `upstream_protocol=provider_default` 表示运行时跟随默认 Provider 的 `kind`
+- `route_targets` 用于描述 Gateway 的有序上游链路：
+  - 每项字段：`provider_id`、`priority`、`enabled`
+  - 若未提供 `route_targets`，服务端会基于 `default_provider_id` 自动生成一条 `priority=0` 的默认 target
+  - 服务端会同步维护 `default_provider_id` 为第一条启用 target 的 `provider_id`，用于旧客户端兼容
 - 当 `inbound_protocol == upstream_protocol` 且请求路径没有命中专门 handler 时，Gateway 会启用同协议 passthrough fallback
   - 默认透传原始方法、路径、查询串、请求头与请求体
   - 当前 OpenAI 系已兼容 `/responses` 与 `/v1/responses`
@@ -130,6 +176,7 @@
 - `upstream_protocol: string`
 - `protocol_config_json: object`
 - `default_provider_id: string`
+- `route_targets?: Array<{ provider_id: string, priority: number, enabled: boolean }>`
 - `default_model: string | null`
 - `enabled: boolean`
 - `auto_start: boolean`
@@ -166,6 +213,7 @@
 - 自动拉起只对 `enabled=true && auto_start=true` 的 Gateway 生效
 - 若某个 Gateway 自动拉起失败，不会阻塞 `fluxd` 启动；错误会写入该 Gateway 的 `last_error`
 - `PUT /admin/gateways/{id}` 会先持久化配置，再根据运行态决定是否自动重启
+- 若请求体未携带 `route_targets`，服务端会继续沿用“单 `default_provider_id`”兼容写法并生成单条默认 target
 - 只有当“更新前实例处于 `running`”且“新旧配置确实发生变化”时，才会自动执行 `stop -> start`
 - 若实例未运行，则只保存配置，不会自动启动
 - 若自动重启失败，配置仍然会保存成功，错误会通过 `last_error` 与 `user_notice` 返回

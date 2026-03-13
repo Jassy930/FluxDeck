@@ -4,6 +4,7 @@ use sqlx::SqlitePool;
 use crate::domain::provider::{
     validate_provider_kind, CreateProviderInput, Provider, UpdateProviderInput,
 };
+use crate::repo::provider_health_repo::ProviderHealthRepo;
 use crate::repo::provider_repo::ProviderRepo;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,18 +17,22 @@ pub enum DeleteProviderResult {
 #[derive(Clone)]
 pub struct ProviderService {
     repo: ProviderRepo,
+    health_repo: ProviderHealthRepo,
 }
 
 impl ProviderService {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
-            repo: ProviderRepo::new(pool),
+            repo: ProviderRepo::new(pool.clone()),
+            health_repo: ProviderHealthRepo::new(pool),
         }
     }
 
     pub async fn create_provider(&self, input: CreateProviderInput) -> Result<Provider> {
         validate_provider_kind(&input.kind)?;
-        self.repo.create(input).await
+        let provider = self.repo.create(input).await?;
+        self.health_repo.ensure_default(&provider.id).await?;
+        Ok(provider)
     }
 
     pub async fn get_provider_by_id(&self, provider_id: &str) -> Result<Option<Provider>> {
@@ -59,6 +64,7 @@ impl ProviderService {
             ));
         }
 
+        self.health_repo.delete_by_provider_id(provider_id).await?;
         let deleted = self.repo.delete(provider_id).await?;
         if deleted {
             Ok(DeleteProviderResult::Deleted)

@@ -16,6 +16,7 @@ use crate::domain::provider::{CreateProviderInput, Provider, UpdateProviderInput
 use crate::http::dto::BasicOk;
 use crate::repo::gateway_repo::GatewayRepo;
 use crate::runtime::gateway_manager::GatewayManager;
+use crate::service::provider_health_service::ProviderHealthService;
 use crate::service::provider_service::DeleteProviderResult;
 use crate::service::provider_service::ProviderService;
 
@@ -23,6 +24,7 @@ use crate::service::provider_service::ProviderService;
 pub struct AdminApiState {
     pool: SqlitePool,
     provider_service: ProviderService,
+    provider_health_service: ProviderHealthService,
     gateway_repo: GatewayRepo,
     gateway_manager: Arc<GatewayManager>,
 }
@@ -31,6 +33,7 @@ impl AdminApiState {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             provider_service: ProviderService::new(pool.clone()),
+            provider_health_service: ProviderHealthService::new(pool.clone()),
             gateway_repo: GatewayRepo::new(pool.clone()),
             gateway_manager: Arc::new(GatewayManager::new(pool.clone())),
             pool,
@@ -48,10 +51,12 @@ pub fn build_admin_router(state: AdminApiState) -> Router {
             "/admin/providers",
             post(create_provider).get(list_providers),
         )
+        .route("/admin/providers/health", get(list_provider_health))
         .route(
             "/admin/providers/{id}",
             put(update_provider).delete(delete_provider),
         )
+        .route("/admin/providers/{id}/probe", post(probe_provider))
         .route("/admin/gateways", post(create_gateway).get(list_gateways))
         .route(
             "/admin/gateways/{id}",
@@ -70,7 +75,21 @@ async fn create_provider(
     Json(input): Json<CreateProviderInput>,
 ) -> (StatusCode, Json<Value>) {
     match state.provider_service.create_provider(input).await {
-        Ok(provider) => (StatusCode::CREATED, Json(json!(provider))),
+        Ok(provider) => {
+            if let Err(err) = state
+                .provider_health_service
+                .ensure_provider(&provider.id)
+                .await
+            {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": err.to_string()
+                    })),
+                );
+            }
+            (StatusCode::CREATED, Json(json!(provider)))
+        }
         Err(err) => (
             StatusCode::BAD_REQUEST,
             Json(json!({
@@ -82,6 +101,18 @@ async fn create_provider(
 
 async fn list_providers(State(state): State<AdminApiState>) -> (StatusCode, Json<Vec<Provider>>) {
     match state.provider_service.list_providers().await {
+        Ok(items) => (StatusCode::OK, Json(items)),
+        Err(_) => (StatusCode::OK, Json(vec![])),
+    }
+}
+
+async fn list_provider_health(
+    State(state): State<AdminApiState>,
+) -> (
+    StatusCode,
+    Json<Vec<crate::domain::provider_health::ProviderHealthState>>,
+) {
+    match state.provider_health_service.list_states().await {
         Ok(items) => (StatusCode::OK, Json(items)),
         Err(_) => (StatusCode::OK, Json(vec![])),
     }
@@ -150,6 +181,26 @@ async fn delete_provider(
     }
 }
 
+async fn probe_provider(
+    State(state): State<AdminApiState>,
+    Path(provider_id): Path<String>,
+) -> (StatusCode, Json<Value>) {
+    match state
+        .provider_health_service
+        .probe_provider(&provider_id)
+        .await
+    {
+        Ok(state) => (StatusCode::OK, Json(json!(state))),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": err.to_string(),
+                "id": provider_id
+            })),
+        ),
+    }
+}
+
 async fn create_gateway(
     State(state): State<AdminApiState>,
     Json(input): Json<CreateGatewayInput>,
@@ -167,6 +218,7 @@ async fn create_gateway(
                 upstream_protocol: "provider_default".to_string(),
                 protocol_config_json: json!({}),
                 default_provider_id: String::new(),
+                route_targets: vec![],
                 default_model: None,
                 enabled: false,
                 auto_start: false,
@@ -383,6 +435,12 @@ fn gateway_differs_from_update(gateway: &Gateway, input: &UpdateGatewayInput) ->
         || gateway.upstream_protocol != input.upstream_protocol
         || gateway.protocol_config_json != input.protocol_config_json
         || gateway.default_provider_id != input.default_provider_id
+        || gateway.route_targets
+            != crate::repo::gateway_repo::normalized_route_targets(
+                &gateway.id,
+                &input.default_provider_id,
+                &input.route_targets,
+            )
         || gateway.default_model != input.default_model
         || gateway.enabled != input.enabled
         || gateway.auto_start != input.auto_start

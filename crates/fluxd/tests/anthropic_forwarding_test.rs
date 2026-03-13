@@ -286,11 +286,46 @@ async fn keeps_original_model_when_rule_not_matched_and_no_fallback() {
     assert_eq!(body["model"], "unknown-model");
 }
 
+#[tokio::test]
+async fn anthropic_messages_fail_over_to_next_provider_on_upstream_5xx() {
+    let failing_upstream = spawn_upstream_openai_server_error_mock().await;
+    let healthy_upstream = spawn_upstream_mock().await;
+    let (gateway, pool) = setup_gateway_with_failover_provider_base_urls(
+        format!("http://{}/v1", failing_upstream.addr),
+        format!("http://{}/v1", healthy_upstream.addr),
+    )
+    .await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages", gateway.addr))
+        .json(&json!({
+            "model": "claude-3-7-sonnet",
+            "max_tokens": 128,
+            "messages": [{"role": "user", "content": "hello"}]
+        }))
+        .send()
+        .await
+        .expect("call gateway");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let body: Value = resp.json().await.expect("decode gateway response");
+    assert_eq!(body["content"][0]["text"], "pong");
+
+    let log = latest_request_log(&pool).await;
+    assert_eq!(log.provider_id.as_deref(), Some("provider_openai_b"));
+    assert_eq!(
+        provider_health_status(&pool, "provider_openai_a").await,
+        Some("degraded".to_string())
+    );
+}
+
 struct SpawnedServer {
     addr: SocketAddr,
 }
 
 struct RequestLogRow {
+    provider_id: Option<String>,
     inbound_protocol: Option<String>,
     upstream_protocol: Option<String>,
     model_effective: Option<String>,
@@ -338,6 +373,14 @@ async fn spawn_upstream_echo_model_mock() -> SpawnedServer {
     let app = Router::new().route(
         "/v1/chat/completions",
         post(upstream_chat_completions_echo_model),
+    );
+    spawn_gateway(app).await
+}
+
+async fn spawn_upstream_openai_server_error_mock() -> SpawnedServer {
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(upstream_chat_completions_server_error),
     );
     spawn_gateway(app).await
 }
@@ -466,20 +509,107 @@ async fn setup_gateway_with_provider_base_url_and_protocol_config_internal(
     spawn_gateway(app).await
 }
 
+async fn setup_gateway_with_failover_provider_base_urls(
+    primary_base_url: String,
+    secondary_base_url: String,
+) -> (SpawnedServer, sqlx::SqlitePool) {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    sqlx::query(
+        "INSERT INTO providers (id, name, kind, base_url, api_key, enabled) VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+    )
+    .bind("provider_openai_a")
+    .bind("OpenAI Upstream A")
+    .bind("openai")
+    .bind(primary_base_url)
+    .bind("sk-upstream-a")
+    .execute(&pool)
+    .await
+    .expect("insert provider a");
+
+    sqlx::query(
+        "INSERT INTO providers (id, name, kind, base_url, api_key, enabled) VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+    )
+    .bind("provider_openai_b")
+    .bind("OpenAI Upstream B")
+    .bind("openai")
+    .bind(secondary_base_url)
+    .bind("sk-upstream-b")
+    .execute(&pool)
+    .await
+    .expect("insert provider b");
+
+    sqlx::query(
+        "INSERT INTO gateways (id, name, listen_host, listen_port, inbound_protocol, upstream_protocol, protocol_config_json, default_provider_id, default_model, enabled) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
+    )
+    .bind("gw_anthropic")
+    .bind("Gateway Anthropic")
+    .bind("127.0.0.1")
+    .bind(18889_i64)
+    .bind("anthropic")
+    .bind("openai")
+    .bind(json!({}).to_string())
+    .bind("provider_openai_a")
+    .bind("gpt-4o-mini")
+    .execute(&pool)
+    .await
+    .expect("insert gateway");
+
+    sqlx::query(
+        "INSERT INTO gateway_route_targets (id, gateway_id, provider_id, priority, enabled) VALUES (?1, ?2, ?3, ?4, 1), (?5, ?6, ?7, ?8, 1)",
+    )
+    .bind("rt_openai_a")
+    .bind("gw_anthropic")
+    .bind("provider_openai_a")
+    .bind(0_i64)
+    .bind("rt_openai_b")
+    .bind("gw_anthropic")
+    .bind("provider_openai_b")
+    .bind(1_i64)
+    .execute(&pool)
+    .await
+    .expect("insert route targets");
+
+    let app = build_anthropic_router(AnthropicRouteState::new(pool.clone(), "gw_anthropic"));
+    let gateway = spawn_gateway(app).await;
+    (gateway, pool)
+}
+
 async fn latest_request_log(pool: &sqlx::SqlitePool) -> RequestLogRow {
-    let row = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>, Option<i64>)>(
-        "SELECT inbound_protocol, upstream_protocol, model_effective, input_tokens FROM request_logs ORDER BY created_at DESC LIMIT 1",
+    let row = sqlx::query_as::<
+        _,
+        (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+        ),
+    >(
+        "SELECT provider_id, inbound_protocol, upstream_protocol, model_effective, input_tokens FROM request_logs ORDER BY created_at DESC LIMIT 1",
     )
     .fetch_one(pool)
     .await
     .expect("fetch request log");
 
     RequestLogRow {
-        inbound_protocol: row.0,
-        upstream_protocol: row.1,
-        model_effective: row.2,
-        input_tokens: row.3,
+        provider_id: row.0,
+        inbound_protocol: row.1,
+        upstream_protocol: row.2,
+        model_effective: row.3,
+        input_tokens: row.4,
     }
+}
+
+async fn provider_health_status(pool: &sqlx::SqlitePool, provider_id: &str) -> Option<String> {
+    sqlx::query_scalar("SELECT status FROM provider_health_states WHERE provider_id = ?1")
+        .bind(provider_id)
+        .fetch_optional(pool)
+        .await
+        .expect("fetch provider health status")
 }
 
 async fn upstream_chat_completions(Json(payload): Json<Value>) -> impl IntoResponse {
@@ -636,6 +766,17 @@ async fn upstream_chat_completions_echo_model(Json(payload): Json<Value>) -> imp
             "total_tokens": 11
         }
     }))
+}
+
+async fn upstream_chat_completions_server_error(_: Json<Value>) -> impl IntoResponse {
+    (
+        reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({
+            "error": {
+                "message": "upstream overloaded"
+            }
+        })),
+    )
 }
 
 #[tokio::test]

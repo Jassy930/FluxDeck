@@ -466,6 +466,162 @@ async fn admin_api_returns_gateway_runtime_status() {
 }
 
 #[tokio::test]
+async fn admin_api_persists_gateway_route_targets() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    for provider_id in ["provider_route_a", "provider_route_b"] {
+        let provider_resp = client
+            .post(format!("{base}/admin/providers"))
+            .json(&json!({
+                "id": provider_id,
+                "name": format!("Provider {provider_id}"),
+                "kind": "openai",
+                "base_url": "https://api.openai.com/v1",
+                "api_key": format!("sk-{provider_id}"),
+                "models": ["gpt-4o-mini"],
+                "enabled": true
+            }))
+            .send()
+            .await
+            .expect("create provider request");
+        assert_eq!(provider_resp.status(), reqwest::StatusCode::CREATED);
+    }
+
+    let create_resp = client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_route_targets",
+            "name": "Gateway Route Targets",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "upstream_protocol": "provider_default",
+            "protocol_config_json": {},
+            "default_provider_id": "provider_route_a",
+            "default_model": "gpt-4o-mini",
+            "enabled": true,
+            "auto_start": false,
+            "route_targets": [
+                { "provider_id": "provider_route_a", "priority": 0, "enabled": true },
+                { "provider_id": "provider_route_b", "priority": 1, "enabled": true }
+            ]
+        }))
+        .send()
+        .await
+        .expect("create gateway request");
+    assert_eq!(create_resp.status(), reqwest::StatusCode::CREATED);
+
+    let created_gateway: serde_json::Value = create_resp.json().await.expect("decode gateway");
+    assert_eq!(
+        created_gateway
+            .get("route_targets")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(2)
+    );
+
+    let list_resp = client
+        .get(format!("{base}/admin/gateways"))
+        .send()
+        .await
+        .expect("list gateways request");
+    assert_eq!(list_resp.status(), reqwest::StatusCode::OK);
+
+    let gateways: serde_json::Value = list_resp.json().await.expect("decode gateways");
+    let gateway = gateways
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("gateways contains one item");
+    let route_targets = gateway
+        .get("route_targets")
+        .and_then(serde_json::Value::as_array)
+        .expect("gateway route targets array");
+    assert_eq!(route_targets.len(), 2);
+    assert_eq!(
+        route_targets[0].get("provider_id"),
+        Some(&json!("provider_route_a"))
+    );
+    assert_eq!(route_targets[0].get("priority"), Some(&json!(0)));
+    assert_eq!(
+        route_targets[1].get("provider_id"),
+        Some(&json!("provider_route_b"))
+    );
+    assert_eq!(
+        gateway.get("default_provider_id"),
+        Some(&json!("provider_route_a"))
+    );
+}
+
+#[tokio::test]
+async fn admin_api_exposes_provider_health_and_manual_probe() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    let provider_resp = client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_health_api",
+            "name": "Provider Health API",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-health-api",
+            "models": ["gpt-4o-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider request");
+    assert_eq!(provider_resp.status(), reqwest::StatusCode::CREATED);
+
+    let health_resp = client
+        .get(format!("{base}/admin/providers/health"))
+        .send()
+        .await
+        .expect("list provider health request");
+    assert_eq!(health_resp.status(), reqwest::StatusCode::OK);
+
+    let health_items: serde_json::Value = health_resp.json().await.expect("decode provider health");
+    let health_item = health_items
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| item.get("provider_id") == Some(&json!("provider_health_api")))
+        })
+        .expect("provider health item exists");
+    assert_eq!(health_item.get("status"), Some(&json!("healthy")));
+
+    let probe_resp = client
+        .post(format!("{base}/admin/providers/provider_health_api/probe"))
+        .send()
+        .await
+        .expect("probe provider request");
+    assert_eq!(probe_resp.status(), reqwest::StatusCode::OK);
+
+    let probed_item: serde_json::Value = probe_resp.json().await.expect("decode probe response");
+    assert_eq!(
+        probed_item.get("provider_id"),
+        Some(&json!("provider_health_api"))
+    );
+    assert_eq!(probed_item.get("status"), Some(&json!("probing")));
+}
+
+#[tokio::test]
 async fn admin_api_restarts_running_gateway_when_config_changes() {
     let pool = sqlx::SqlitePool::connect("sqlite::memory:")
         .await

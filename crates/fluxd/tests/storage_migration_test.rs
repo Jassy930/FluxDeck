@@ -1,4 +1,6 @@
 use fluxd::storage::migrate::run_migrations;
+use sqlx::migrate::Migrator;
+use sqlx::sqlite::SqlitePoolOptions;
 
 #[tokio::test]
 async fn migration_creates_core_tables() {
@@ -153,4 +155,137 @@ async fn migration_removes_request_log_resource_foreign_keys() {
     .expect("query request_logs foreign keys");
 
     assert_eq!(foreign_key_count, 0);
+}
+
+#[tokio::test]
+async fn migration_backfills_gateway_route_targets_from_default_provider() {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+
+    seed_schema_through_migration_006(&pool).await;
+
+    sqlx::query(
+        r#"
+        INSERT INTO providers (id, name, kind, base_url, api_key, enabled)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "#,
+    )
+    .bind("provider_route_target")
+    .bind("Provider Route Target")
+    .bind("openai")
+    .bind("https://api.openai.com/v1")
+    .bind("sk-route-target")
+    .bind(1_i64)
+    .execute(&pool)
+    .await
+    .expect("insert provider");
+
+    sqlx::query(
+        r#"
+        INSERT INTO gateways (
+            id, name, listen_host, listen_port, inbound_protocol,
+            default_provider_id, default_model, enabled
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "#,
+    )
+    .bind("gateway_route_target")
+    .bind("Gateway Route Target")
+    .bind("127.0.0.1")
+    .bind(18080_i64)
+    .bind("openai")
+    .bind("provider_route_target")
+    .bind(Option::<String>::None)
+    .bind(1_i64)
+    .execute(&pool)
+    .await
+    .expect("insert gateway");
+
+    run_migrations(&pool).await.expect("run migrations");
+
+    let route_target_table = sqlx::query_scalar::<_, String>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'gateway_route_targets'",
+    )
+    .fetch_optional(&pool)
+    .await
+    .expect("query gateway_route_targets table");
+    assert_eq!(route_target_table.as_deref(), Some("gateway_route_targets"));
+
+    let health_table = sqlx::query_scalar::<_, String>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_health_states'",
+    )
+    .fetch_optional(&pool)
+    .await
+    .expect("query provider_health_states table");
+    assert_eq!(health_table.as_deref(), Some("provider_health_states"));
+
+    let route_target = sqlx::query_as::<_, (String, i64, i64)>(
+        r#"
+        SELECT provider_id, priority, enabled
+        FROM gateway_route_targets
+        WHERE gateway_id = ?1
+        "#,
+    )
+    .bind("gateway_route_target")
+    .fetch_one(&pool)
+    .await
+    .expect("fetch route target");
+
+    assert_eq!(route_target.0, "provider_route_target");
+    assert_eq!(route_target.1, 0);
+    assert_eq!(route_target.2, 1);
+}
+
+async fn seed_schema_through_migration_006(pool: &sqlx::SqlitePool) {
+    static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS _sqlx_migrations (
+            version BIGINT PRIMARY KEY,
+            description TEXT NOT NULL,
+            installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            success BOOLEAN NOT NULL,
+            checksum BLOB NOT NULL,
+            execution_time BIGINT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .expect("create _sqlx_migrations");
+
+    for migration in MIGRATOR.migrations.iter().take(6) {
+        for statement in migration
+            .sql
+            .split(';')
+            .map(str::trim)
+            .filter(|statement| !statement.is_empty() && !statement.starts_with("--"))
+        {
+            sqlx::query(statement)
+                .execute(pool)
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("apply seeded migration {}: {error}", migration.version)
+                });
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO _sqlx_migrations (
+                version, description, success, checksum, execution_time
+            )
+            VALUES (?1, ?2, 1, ?3, 0)
+            "#,
+        )
+        .bind(migration.version)
+        .bind(migration.description.as_ref())
+        .bind(migration.checksum.as_ref())
+        .execute(pool)
+        .await
+        .unwrap_or_else(|error| panic!("record seeded migration {}: {error}", migration.version));
+    }
 }

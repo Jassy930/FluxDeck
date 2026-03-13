@@ -41,6 +41,24 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider delete provid
 - 若仍被任一 Gateway 引用，服务端会拒绝删除，并返回引用它的 Gateway ID 列表
 - 这是 Provider 侧的约束，不影响 Gateway 独立删除
 
+查看 Provider 健康状态：
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider health list
+```
+
+手动触发 Provider probe：
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider probe provider_main
+```
+
+说明：
+
+- `provider health list` 对应 Admin API `GET /admin/providers/health`
+- `provider probe <id>` 对应 Admin API `POST /admin/providers/{id}/probe`
+- 当前 probe 主要用于把 `unhealthy` Provider 推进到 `probing`，不是完整的真实上游拨测
+
 ## 创建并启动网关
 
 ```bash
@@ -53,6 +71,8 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
   --upstream-protocol provider_default \
   --protocol-config-json '{"compatibility_mode":"compatible"}' \
   --default-provider-id provider_main \
+  --route-target provider_main:0 \
+  --route-target provider_backup:1 \
   --default-model gpt-4o-mini \
   --auto-start true
 ```
@@ -61,8 +81,11 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
 
 - `--auto-start true`：fluxd 启动后自动拉起该 Gateway
 - `--auto-start false`（默认）：需要手动执行 `gateway start`
+- `--route-target` 可重复传入，格式为 `provider_id:priority[:enabled]`
 - 自动启动条件：`enabled=true && auto_start=true`
 - 单个 Gateway 自动启动失败不会阻塞 fluxd 主进程
+- 请求级故障切流当前已覆盖 OpenAI direct forwarding、OpenAI 同协议 passthrough fallback、Anthropic `/v1/messages`
+- 当前切流触发条件：网络错误、`429`、`5xx`
 
 Gateway 协议补充：
 
@@ -93,6 +116,8 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway update gateway
   --upstream-protocol provider_default \
   --protocol-config-json '{"compatibility_mode":"strict"}' \
   --default-provider-id provider_main \
+  --route-target provider_main:0 \
+  --route-target provider_backup:1:false \
   --default-model gpt-4.1-mini \
   --enabled true \
   --auto-start false

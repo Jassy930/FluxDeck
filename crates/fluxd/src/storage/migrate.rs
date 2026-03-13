@@ -1,8 +1,11 @@
 use anyhow::Result;
+use sqlx::migrate::Migrator;
 use sqlx::SqlitePool;
 
+static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
+
 pub async fn run_migrations(pool: &SqlitePool) -> Result<()> {
-    sqlx::migrate!("./migrations").run(pool).await?;
+    MIGRATOR.run(pool).await?;
     repair_request_log_resource_foreign_keys(pool).await?;
     Ok(())
 }

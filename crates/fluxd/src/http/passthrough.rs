@@ -14,8 +14,9 @@ use sqlx::SqlitePool;
 
 use crate::forwarding::anthropic_inbound::extract_anthropic_usage;
 use crate::forwarding::openai_inbound::extract_usage as extract_openai_usage;
-use crate::forwarding::target_resolver::TargetResolver;
+use crate::forwarding::route_selector::RouteSelector;
 use crate::forwarding::types::ForwardObservation;
+use crate::service::provider_health_service::ProviderHealthService;
 use crate::service::request_log_service::{RequestLogEntry, RequestLogService};
 
 const REQUEST_LOG_KEEP: i64 = 10_000;
@@ -66,9 +67,10 @@ pub async fn handle_passthrough_request(
     let request_id = next_request_id();
     let started_at = Instant::now();
     let log_service = RequestLogService::new(pool.clone());
-    let resolver = TargetResolver::new(pool);
-    let target = match resolver.resolve(gateway_id).await {
-        Ok(target) => target,
+    let selector = RouteSelector::new(pool.clone());
+    let health_service = ProviderHealthService::new(pool.clone());
+    let targets = match selector.ordered_candidates(gateway_id).await {
+        Ok(targets) => targets,
         Err(err) => {
             append_passthrough_log(
                 &log_service,
@@ -100,56 +102,27 @@ pub async fn handle_passthrough_request(
         }
     };
 
-    if target.upstream_protocol != inbound_protocol {
-        append_passthrough_log(
-            &log_service,
-            request_id,
-            gateway_id,
-            &target.provider_id,
-            inbound_protocol,
-            &target.upstream_protocol,
-            StatusCode::NOT_IMPLEMENTED,
-            started_at,
-            None,
-            Some(format!(
-                "passthrough fallback only supports same-protocol forwarding, got inbound `{inbound_protocol}` and upstream `{}`",
-                target.upstream_protocol
-            )),
-            Some(("protocol_match", "unsupported_protocol_bridge")),
-            Default::default(),
-            Default::default(),
-            false,
-        )
-        .await;
-        return (
-            StatusCode::NOT_IMPLEMENTED,
-            Json(json!({
-                "error": {
-                    "message": format!(
-                        "passthrough fallback only supports same-protocol forwarding, got inbound `{inbound_protocol}` and upstream `{}`",
-                        target.upstream_protocol
-                    ),
-                    "type": "unsupported_protocol_bridge"
-                }
-            })),
-        )
-            .into_response();
-    }
-
     let (parts, body) = request.into_parts();
     let path = parts.uri.path().to_string();
     let query = parts.uri.query().map(ToOwned::to_owned);
-    let url = build_upstream_url(&target.base_url, &path, query.as_deref());
     let body = match to_bytes(body, usize::MAX).await {
         Ok(body) => body,
         Err(err) => {
+            let provider_id = targets
+                .first()
+                .map(|target| target.provider_id.as_str())
+                .unwrap_or("unknown");
+            let upstream_protocol = targets
+                .first()
+                .map(|target| target.upstream_protocol.as_str())
+                .unwrap_or("unknown");
             append_passthrough_log(
                 &log_service,
-                request_id,
+                request_id.clone(),
                 gateway_id,
-                &target.provider_id,
+                provider_id,
                 inbound_protocol,
-                &target.upstream_protocol,
+                upstream_protocol,
                 StatusCode::BAD_REQUEST,
                 started_at,
                 None,
@@ -173,69 +146,238 @@ pub async fn handle_passthrough_request(
         }
     };
     let request_model = extract_passthrough_requested_model(inbound_protocol, &body);
+    let method = parts.method.clone();
+    let headers = parts.headers.clone();
+    let request_body = body.clone();
 
-    let mut upstream = client.request(parts.method, url);
-
-    for (name, value) in &parts.headers {
-        if should_forward_request_header(name) {
-            upstream = upstream.header(name, value);
-        }
-    }
-
-    upstream = apply_protocol_auth(
-        upstream,
-        &target.upstream_protocol,
-        &target.api_key,
-        &parts.headers,
-    );
-
-    if !body.is_empty() {
-        upstream = upstream.body(body);
-    }
-
-    let response = match upstream.send().await {
-        Ok(response) => response,
-        Err(err) => {
+    for (index, target) in targets.iter().enumerate() {
+        if target.upstream_protocol != inbound_protocol {
             append_passthrough_log(
                 &log_service,
-                request_id,
+                request_id.clone(),
                 gateway_id,
                 &target.provider_id,
                 inbound_protocol,
                 &target.upstream_protocol,
-                StatusCode::BAD_GATEWAY,
+                StatusCode::NOT_IMPLEMENTED,
                 started_at,
                 None,
-                Some(format!("passthrough upstream request failed: {err}")),
-                Some(("upstream_request", "upstream_error")),
+                Some(format!(
+                    "passthrough fallback only supports same-protocol forwarding, got inbound `{inbound_protocol}` and upstream `{}`",
+                    target.upstream_protocol
+                )),
+                Some(("protocol_match", "unsupported_protocol_bridge")),
                 Default::default(),
                 Default::default(),
                 false,
             )
             .await;
             return (
-                StatusCode::BAD_GATEWAY,
+                StatusCode::NOT_IMPLEMENTED,
                 Json(json!({
                     "error": {
-                        "message": format!("passthrough upstream request failed: {err}"),
-                        "type": "upstream_error"
+                        "message": format!(
+                            "passthrough fallback only supports same-protocol forwarding, got inbound `{inbound_protocol}` and upstream `{}`",
+                            target.upstream_protocol
+                        ),
+                        "type": "unsupported_protocol_bridge"
                     }
                 })),
             )
                 .into_response();
         }
-    };
 
-    let status = response.status();
-    let headers = response.headers().clone();
-    let first_byte_ms = started_at.elapsed().as_millis() as i64;
-    let is_stream = is_event_stream_content_type(&headers);
+        let url = build_upstream_url(&target.base_url, &path, query.as_deref());
+        let mut upstream = client.request(method.clone(), url);
 
-    if is_stream {
-        let stream_dimensions = PassthroughLogDimensions {
-            model: request_model.clone(),
-            model_requested: request_model.clone(),
-            model_effective: request_model.clone(),
+        for (name, value) in &headers {
+            if should_forward_request_header(name) {
+                upstream = upstream.header(name, value);
+            }
+        }
+
+        upstream = apply_protocol_auth(
+            upstream,
+            &target.upstream_protocol,
+            &target.api_key,
+            &headers,
+        );
+
+        if !request_body.is_empty() {
+            upstream = upstream.body(request_body.clone());
+        }
+
+        let response = match upstream.send().await {
+            Ok(response) => response,
+            Err(err) => {
+                let message = format!("passthrough upstream request failed: {err}");
+                let _ = health_service
+                    .record_failure(&target.provider_id, &message)
+                    .await;
+                if index + 1 < targets.len() {
+                    continue;
+                }
+                append_passthrough_log(
+                    &log_service,
+                    request_id.clone(),
+                    gateway_id,
+                    &target.provider_id,
+                    inbound_protocol,
+                    &target.upstream_protocol,
+                    StatusCode::BAD_GATEWAY,
+                    started_at,
+                    None,
+                    Some(message.clone()),
+                    Some(("upstream_request", "upstream_error")),
+                    Default::default(),
+                    Default::default(),
+                    false,
+                )
+                .await;
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({
+                        "error": {
+                            "message": message,
+                            "type": "upstream_error"
+                        }
+                    })),
+                )
+                    .into_response();
+            }
+        };
+
+        let status = response.status();
+        let headers = response.headers().clone();
+        let first_byte_ms = started_at.elapsed().as_millis() as i64;
+        let is_stream = is_event_stream_content_type(&headers);
+
+        if is_stream {
+            let _ = health_service.record_success(&target.provider_id).await;
+            let stream_dimensions = PassthroughLogDimensions {
+                model: request_model.clone(),
+                model_requested: request_model.clone(),
+                model_effective: request_model.clone(),
+            };
+            append_passthrough_log(
+                &log_service,
+                request_id.clone(),
+                gateway_id,
+                &target.provider_id,
+                inbound_protocol,
+                &target.upstream_protocol,
+                status,
+                started_at,
+                Some(first_byte_ms),
+                None,
+                None,
+                stream_dimensions,
+                Default::default(),
+                true,
+            )
+            .await;
+
+            let tracked_stream = track_passthrough_stream_usage(
+                response.bytes_stream(),
+                log_service.clone(),
+                request_id,
+                target.upstream_protocol.clone(),
+            );
+
+            let mut builder = Response::builder().status(status);
+            for (name, value) in &headers {
+                if should_forward_response_header(name) {
+                    builder = builder.header(name, value);
+                }
+            }
+
+            return builder
+                .body(Body::from_stream(tracked_stream))
+                .unwrap_or_else(|err| {
+                    (
+                        StatusCode::BAD_GATEWAY,
+                        Json(json!({
+                            "error": {
+                                "message": format!("build passthrough response failed: {err}"),
+                                "type": "gateway_response_error"
+                            }
+                        })),
+                    )
+                        .into_response()
+                });
+        }
+
+        let response_body = match response.bytes().await {
+            Ok(body) => body,
+            Err(err) => {
+                let message = format!("read passthrough upstream response failed: {err}");
+                let _ = health_service
+                    .record_failure(&target.provider_id, &message)
+                    .await;
+                if index + 1 < targets.len() {
+                    continue;
+                }
+                append_passthrough_log(
+                    &log_service,
+                    request_id.clone(),
+                    gateway_id,
+                    &target.provider_id,
+                    inbound_protocol,
+                    &target.upstream_protocol,
+                    StatusCode::BAD_GATEWAY,
+                    started_at,
+                    None,
+                    Some(message.clone()),
+                    Some(("read_upstream_response", "upstream_response_error")),
+                    Default::default(),
+                    Default::default(),
+                    false,
+                )
+                .await;
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({
+                        "error": {
+                            "message": message,
+                            "type": "upstream_response_error"
+                        }
+                    })),
+                )
+                    .into_response();
+            }
+        };
+
+        if should_failover_status(status) && index + 1 < targets.len() {
+            let _ = health_service
+                .record_failure(&target.provider_id, &format!("status {}", status.as_u16()))
+                .await;
+            continue;
+        }
+
+        if status.is_success() {
+            let _ = health_service.record_success(&target.provider_id).await;
+        } else if should_failover_status(status) {
+            let _ = health_service
+                .record_failure(&target.provider_id, &format!("status {}", status.as_u16()))
+                .await;
+        }
+
+        let sniffed_stream = status.is_success()
+            && supports_sse_body_sniff(&target.upstream_protocol)
+            && looks_like_sse_payload(&response_body);
+        let usage = if status.is_success() {
+            if sniffed_stream {
+                extract_passthrough_body_stream_usage(&target.upstream_protocol, &response_body)
+            } else {
+                extract_passthrough_usage(&target.upstream_protocol, &response_body)
+            }
+        } else {
+            Default::default()
+        };
+        let response_model = if sniffed_stream {
+            None
+        } else {
+            extract_passthrough_response_model(&target.upstream_protocol, &response_body)
         };
         append_passthrough_log(
             &log_service,
@@ -249,18 +391,15 @@ pub async fn handle_passthrough_request(
             Some(first_byte_ms),
             None,
             None,
-            stream_dimensions,
-            Default::default(),
-            true,
+            PassthroughLogDimensions {
+                model: request_model.clone(),
+                model_requested: request_model.clone(),
+                model_effective: response_model.or_else(|| request_model.clone()),
+            },
+            usage,
+            sniffed_stream,
         )
         .await;
-
-        let tracked_stream = track_passthrough_stream_usage(
-            response.bytes_stream(),
-            log_service.clone(),
-            request_id,
-            target.upstream_protocol.clone(),
-        );
 
         let mut builder = Response::builder().status(status);
         for (name, value) in &headers {
@@ -270,7 +409,7 @@ pub async fn handle_passthrough_request(
         }
 
         return builder
-            .body(Body::from_stream(tracked_stream))
+            .body(Body::from(response_body))
             .unwrap_or_else(|err| {
                 (
                     StatusCode::BAD_GATEWAY,
@@ -285,99 +424,16 @@ pub async fn handle_passthrough_request(
             });
     }
 
-    let response_body = match response.bytes().await {
-        Ok(body) => body,
-        Err(err) => {
-            append_passthrough_log(
-                &log_service,
-                request_id,
-                gateway_id,
-                &target.provider_id,
-                inbound_protocol,
-                &target.upstream_protocol,
-                StatusCode::BAD_GATEWAY,
-                started_at,
-                None,
-                Some(format!("read passthrough upstream response failed: {err}")),
-                Some(("read_upstream_response", "upstream_response_error")),
-                Default::default(),
-                Default::default(),
-                false,
-            )
-            .await;
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({
-                    "error": {
-                        "message": format!("read passthrough upstream response failed: {err}"),
-                        "type": "upstream_response_error"
-                    }
-                })),
-            )
-                .into_response();
-        }
-    };
-
-    let sniffed_stream = status.is_success()
-        && supports_sse_body_sniff(&target.upstream_protocol)
-        && looks_like_sse_payload(&response_body);
-    let usage = if status.is_success() {
-        if sniffed_stream {
-            extract_passthrough_body_stream_usage(&target.upstream_protocol, &response_body)
-        } else {
-            extract_passthrough_usage(&target.upstream_protocol, &response_body)
-        }
-    } else {
-        Default::default()
-    };
-    let response_model = if sniffed_stream {
-        None
-    } else {
-        extract_passthrough_response_model(&target.upstream_protocol, &response_body)
-    };
-    append_passthrough_log(
-        &log_service,
-        request_id,
-        gateway_id,
-        &target.provider_id,
-        inbound_protocol,
-        &target.upstream_protocol,
-        status,
-        started_at,
-        Some(first_byte_ms),
-        None,
-        None,
-        PassthroughLogDimensions {
-            model: request_model.clone(),
-            model_requested: request_model.clone(),
-            model_effective: response_model.or(request_model),
-        },
-        usage,
-        sniffed_stream,
+    (
+        StatusCode::BAD_GATEWAY,
+        Json(json!({
+            "error": {
+                "message": "no available passthrough route targets",
+                "type": "config_error"
+            }
+        })),
     )
-    .await;
-
-    let mut builder = Response::builder().status(status);
-    for (name, value) in &headers {
-        if should_forward_response_header(name) {
-            builder = builder.header(name, value);
-        }
-    }
-
-    builder
-        .body(Body::from(response_body))
-        .unwrap_or_else(|err| {
-            (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({
-                    "error": {
-                        "message": format!("build passthrough response failed: {err}"),
-                        "type": "gateway_response_error"
-                    }
-                })),
-            )
-                .into_response()
-        })
+        .into_response()
 }
 
 async fn forward_passthrough(
@@ -420,7 +476,11 @@ async fn append_passthrough_log(
     observation.is_stream = is_stream;
     observation.status_code = Some(i64::from(status_code.as_u16()));
     observation.latency_ms = Some(latency_ms);
-    observation.first_byte_ms = first_byte_ms;
+    observation.first_byte_ms = if is_stream {
+        first_byte_ms
+    } else {
+        Some(latency_ms)
+    };
     if let Some((stage, error_type)) = error_details {
         observation.error_stage = Some(stage.to_string());
         observation.error_type = Some(error_type.to_string());
@@ -497,6 +557,10 @@ fn looks_like_sse_payload(response_body: &[u8]) -> bool {
         .collect::<Vec<u8>>();
 
     body.starts_with(b"event:") || body.starts_with(b"data:")
+}
+
+fn should_failover_status(status: StatusCode) -> bool {
+    status.as_u16() == 429 || status.is_server_error()
 }
 
 fn extract_passthrough_requested_model(

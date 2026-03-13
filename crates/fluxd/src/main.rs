@@ -5,6 +5,7 @@ use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use fluxd::http::admin_routes::{build_admin_router, AdminApiState};
+use fluxd::runtime::health_monitor::HealthMonitor;
 use fluxd::storage::migrate::run_migrations;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::SqlitePool;
@@ -30,6 +31,7 @@ async fn main() -> Result<()> {
         .await
         .with_context(|| format!("bind admin listener: {admin_addr}"))?;
 
+    let health_monitor_handle = HealthMonitor::with_default_interval(pool.clone()).start();
     let state = AdminApiState::new(pool);
     let gateway_manager = state.gateway_manager();
     match gateway_manager.start_auto_start_gateways().await {
@@ -47,9 +49,9 @@ async fn main() -> Result<()> {
     let app = build_admin_router(state);
     println!("fluxd admin listening on http://{admin_addr}");
 
-    axum::serve(listener, app)
-        .await
-        .context("serve admin http")?;
+    let serve_result = axum::serve(listener, app).await.context("serve admin http");
+    health_monitor_handle.stop().await;
+    serve_result?;
 
     Ok(())
 }

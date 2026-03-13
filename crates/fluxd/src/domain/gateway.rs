@@ -7,6 +7,22 @@ use crate::domain::provider::SUPPORTED_PROVIDER_KINDS;
 pub const PROVIDER_DEFAULT_UPSTREAM_PROTOCOL: &str = "provider_default";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GatewayRouteTarget {
+    pub id: String,
+    pub gateway_id: String,
+    pub provider_id: String,
+    pub priority: i64,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GatewayRouteTargetInput {
+    pub provider_id: String,
+    pub priority: i64,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Gateway {
     pub id: String,
     pub name: String,
@@ -16,6 +32,8 @@ pub struct Gateway {
     pub upstream_protocol: String,
     pub protocol_config_json: Value,
     pub default_provider_id: String,
+    #[serde(default)]
+    pub route_targets: Vec<GatewayRouteTarget>,
     pub default_model: Option<String>,
     pub enabled: bool,
     pub auto_start: bool,
@@ -33,6 +51,8 @@ pub struct CreateGatewayInput {
     #[serde(default = "default_protocol_config_json")]
     pub protocol_config_json: Value,
     pub default_provider_id: String,
+    #[serde(default)]
+    pub route_targets: Vec<GatewayRouteTargetInput>,
     pub default_model: Option<String>,
     pub enabled: bool,
     #[serde(default)]
@@ -50,6 +70,8 @@ pub struct UpdateGatewayInput {
     #[serde(default = "default_protocol_config_json")]
     pub protocol_config_json: Value,
     pub default_provider_id: String,
+    #[serde(default)]
+    pub route_targets: Vec<GatewayRouteTargetInput>,
     pub default_model: Option<String>,
     pub enabled: bool,
     #[serde(default)]

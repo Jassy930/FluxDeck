@@ -11,18 +11,20 @@ use axum::{
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use serde_json::{json, Value};
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
 
 use crate::forwarding::anthropic_inbound::{
     apply_response as apply_anthropic_response, build_observation as build_anthropic_observation,
     extract_anthropic_usage, extract_openai_usage as extract_anthropic_openai_usage,
     usage_from_input_tokens,
 };
+use crate::forwarding::route_selector::RouteSelector;
 use crate::forwarding::types::UsageSnapshot;
 use crate::protocol::adapters::anthropic::{decode_anthropic_request, AnthropicSseEncoder};
 use crate::protocol::adapters::openai::{encode_openai_chat_request, OpenAiSseDecoder};
 use crate::protocol::ir::IrRequest;
 use crate::protocol::token_count::count_tokens as count_tokens_with_fallback;
+use crate::service::provider_health_service::ProviderHealthService;
 use crate::service::request_log_service::{RequestLogEntry, RequestLogService};
 use crate::upstream::anthropic_client::AnthropicClient;
 use crate::upstream::openai_client::OpenAiClient;
@@ -60,7 +62,7 @@ async fn forward_messages(
     Json(payload): Json<Value>,
 ) -> Response {
     let request_id = next_request_id();
-    let mut model = payload
+    let model = payload
         .get("model")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
@@ -72,7 +74,7 @@ async fn forward_messages(
     let started_at = Instant::now();
     let log_service = RequestLogService::new(state.pool.clone());
 
-    let mut ir = match decode_anthropic_request(&payload) {
+    let ir = match decode_anthropic_request(&payload) {
         Ok(ir) => ir,
         Err(err) => {
             append_log(
@@ -102,74 +104,376 @@ async fn forward_messages(
         }
     };
 
-    match fetch_provider_target(&state).await {
-        Ok(target) => {
-            maybe_log_request_payload(
-                "/v1/messages",
-                &state.gateway_id,
-                &request_id,
-                &payload,
-                &target.request_debug,
-            );
+    let strict_unsupported_extensions = strict_unsupported_extension_keys(&ir);
 
-            let strict_unsupported_extensions = strict_unsupported_extension_keys(&ir);
-            if target.compatibility_mode == CompatibilityMode::Strict
-                && !strict_unsupported_extensions.is_empty()
-            {
-                let message = format!(
-                    "strict compatibility mode does not allow extension fields: {}",
-                    strict_unsupported_extensions.join(", ")
+    match fetch_provider_targets(&state).await {
+        Ok(targets) => {
+            let health_service = ProviderHealthService::new(state.pool.clone());
+            for (index, target) in targets.iter().enumerate() {
+                let is_last_target = index + 1 == targets.len();
+                let mut ir = ir.clone();
+                let mut model = requested_model.clone();
+                maybe_log_request_payload(
+                    "/v1/messages",
+                    &state.gateway_id,
+                    &request_id,
+                    &payload,
+                    &target.request_debug,
                 );
-                append_log_with_dimensions(
-                    &log_service,
-                    RequestLogEntry {
-                        request_id,
-                        gateway_id: state.gateway_id.clone(),
-                        provider_id: target.provider_id,
-                        model,
-                        status_code: i64::from(StatusCode::UNPROCESSABLE_ENTITY.as_u16()),
-                        latency_ms: started_at.elapsed().as_millis() as i64,
-                        error: Some(message.clone()),
-                        observation: Default::default(),
-                        usage: Default::default(),
-                    },
-                    &json!({
-                        "compatibility_mode": "strict",
-                        "event": "reject_extension_fields",
-                        "unsupported_extension_fields": strict_unsupported_extensions
-                    }),
-                )
-                .await;
 
-                return (
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    Json(anthropic_error_response(message, "capability_error")),
-                )
-                    .into_response();
-            }
+                if target.compatibility_mode == CompatibilityMode::Strict
+                    && !strict_unsupported_extensions.is_empty()
+                {
+                    let message = format!(
+                        "strict compatibility mode does not allow extension fields: {}",
+                        strict_unsupported_extensions.join(", ")
+                    );
+                    append_log_with_dimensions(
+                        &log_service,
+                        RequestLogEntry {
+                            request_id: request_id.clone(),
+                            gateway_id: state.gateway_id.clone(),
+                            provider_id: target.provider_id.clone(),
+                            model: model.clone(),
+                            status_code: i64::from(StatusCode::UNPROCESSABLE_ENTITY.as_u16()),
+                            latency_ms: started_at.elapsed().as_millis() as i64,
+                            error: Some(message.clone()),
+                            observation: Default::default(),
+                            usage: Default::default(),
+                        },
+                        &json!({
+                            "compatibility_mode": "strict",
+                            "event": "reject_extension_fields",
+                            "unsupported_extension_fields": strict_unsupported_extensions
+                        }),
+                    )
+                    .await;
 
-            if let Some(requested_model) = ir.model.as_deref() {
-                let resolved_model = target
-                    .model_mapping
-                    .resolve(requested_model, target.default_model.as_deref());
-                if resolved_model != requested_model {
-                    ir.model = Some(resolved_model.clone());
-                    model = Some(resolved_model);
+                    return (
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        Json(anthropic_error_response(message, "capability_error")),
+                    )
+                        .into_response();
                 }
-            }
 
-            if target.upstream_protocol == "anthropic" {
-                let mut native_payload = payload.clone();
-                if let Some(effective_model) = model.as_deref() {
-                    if requested_model.as_deref() != Some(effective_model) {
-                        rewrite_payload_model(&mut native_payload, effective_model);
+                if let Some(requested_model) = ir.model.as_deref() {
+                    let resolved_model = target
+                        .model_mapping
+                        .resolve(requested_model, target.default_model.as_deref());
+                    if resolved_model != requested_model {
+                        ir.model = Some(resolved_model.clone());
+                        model = Some(resolved_model);
                     }
                 }
 
-                if stream_requested {
+                if target.upstream_protocol == "anthropic" {
+                    let mut native_payload = payload.clone();
+                    if let Some(effective_model) = model.as_deref() {
+                        if requested_model.as_deref() != Some(effective_model) {
+                            rewrite_payload_model(&mut native_payload, effective_model);
+                        }
+                    }
+
+                    if stream_requested {
+                        let response = state
+                            .anthropic_client
+                            .messages_stream(&target.base_url, &target.api_key, &native_payload)
+                            .await;
+
+                        match response {
+                            Ok((status, upstream_response)) => {
+                                let status_code = StatusCode::from_u16(status.as_u16())
+                                    .unwrap_or(StatusCode::BAD_GATEWAY);
+
+                                if should_failover_status(status_code) && !is_last_target {
+                                    let _ = health_service
+                                        .record_failure(
+                                            &target.provider_id,
+                                            &format!("status {}", status_code.as_u16()),
+                                        )
+                                        .await;
+                                    continue;
+                                }
+
+                                if status_code.is_success() {
+                                    let _ =
+                                        health_service.record_success(&target.provider_id).await;
+                                    let latency_ms = started_at.elapsed().as_millis() as i64;
+                                    let mut observation = build_anthropic_observation(
+                                        &request_id,
+                                        &state.gateway_id,
+                                        &target.provider_id,
+                                        &target.upstream_protocol,
+                                        requested_model.clone(),
+                                        model.clone(),
+                                        true,
+                                    );
+                                    apply_anthropic_response(
+                                        &mut observation,
+                                        i64::from(status_code.as_u16()),
+                                        latency_ms,
+                                        latency_ms,
+                                        model.clone(),
+                                    );
+                                    append_log(
+                                        &log_service,
+                                        RequestLogEntry {
+                                            request_id: request_id.clone(),
+                                            gateway_id: state.gateway_id.clone(),
+                                            provider_id: target.provider_id.clone(),
+                                            model: model.clone(),
+                                            status_code: i64::from(status_code.as_u16()),
+                                            latency_ms,
+                                            error: None,
+                                            observation,
+                                            usage: Default::default(),
+                                        },
+                                    )
+                                    .await;
+
+                                    let request_log_service = log_service.clone();
+                                    let request_log_request_id = request_id.clone();
+                                    return (
+                                        status_code,
+                                        [(
+                                            header::CONTENT_TYPE,
+                                            "text/event-stream; charset=utf-8",
+                                        )],
+                                        Body::from_stream(track_anthropic_stream_usage(
+                                            upstream_response.bytes_stream(),
+                                            request_log_service,
+                                            request_log_request_id,
+                                        )),
+                                    )
+                                        .into_response();
+                                }
+
+                                if should_failover_status(status_code) {
+                                    let _ = health_service
+                                        .record_failure(
+                                            &target.provider_id,
+                                            &format!("status {}", status_code.as_u16()),
+                                        )
+                                        .await;
+                                }
+
+                                let message = extract_upstream_error_message_from_text(
+                                    &upstream_response.text().await.unwrap_or_default(),
+                                );
+                                return (
+                                    status_code,
+                                    Json(anthropic_error_response(message, "api_error")),
+                                )
+                                    .into_response();
+                            }
+                            Err(err) => {
+                                let message = err.to_string();
+                                let _ = health_service
+                                    .record_failure(&target.provider_id, &message)
+                                    .await;
+                                if !is_last_target {
+                                    continue;
+                                }
+                                append_log(
+                                    &log_service,
+                                    RequestLogEntry {
+                                        request_id: request_id.clone(),
+                                        gateway_id: state.gateway_id.clone(),
+                                        provider_id: target.provider_id.clone(),
+                                        model: model.clone(),
+                                        status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
+                                        latency_ms: started_at.elapsed().as_millis() as i64,
+                                        error: Some(message.clone()),
+                                        observation: Default::default(),
+                                        usage: Default::default(),
+                                    },
+                                )
+                                .await;
+
+                                return (
+                                    StatusCode::BAD_GATEWAY,
+                                    Json(anthropic_error_response(
+                                        format!("upstream forward failed: {message}"),
+                                        "api_error",
+                                    )),
+                                )
+                                    .into_response();
+                            }
+                        }
+                    }
+
                     let response = state
                         .anthropic_client
-                        .messages_stream(&target.base_url, &target.api_key, &native_payload)
+                        .messages(&target.base_url, &target.api_key, &native_payload)
+                        .await;
+
+                    match response {
+                        Ok((status, value)) => {
+                            let status_code = StatusCode::from_u16(status.as_u16())
+                                .unwrap_or(StatusCode::BAD_GATEWAY);
+
+                            if should_failover_status(status_code) && !is_last_target {
+                                let _ = health_service
+                                    .record_failure(
+                                        &target.provider_id,
+                                        &format!("status {}", status_code.as_u16()),
+                                    )
+                                    .await;
+                                continue;
+                            }
+
+                            if status_code.is_success() {
+                                let _ = health_service.record_success(&target.provider_id).await;
+                                let latency_ms = started_at.elapsed().as_millis() as i64;
+                                let mut observation = build_anthropic_observation(
+                                    &request_id,
+                                    &state.gateway_id,
+                                    &target.provider_id,
+                                    &target.upstream_protocol,
+                                    requested_model.clone(),
+                                    model.clone(),
+                                    false,
+                                );
+                                apply_anthropic_response(
+                                    &mut observation,
+                                    i64::from(status_code.as_u16()),
+                                    latency_ms,
+                                    latency_ms,
+                                    value
+                                        .get("model")
+                                        .and_then(Value::as_str)
+                                        .map(ToOwned::to_owned),
+                                );
+                                append_log(
+                                    &log_service,
+                                    RequestLogEntry {
+                                        request_id: request_id.clone(),
+                                        gateway_id: state.gateway_id.clone(),
+                                        provider_id: target.provider_id.clone(),
+                                        model: model.clone(),
+                                        status_code: i64::from(status_code.as_u16()),
+                                        latency_ms,
+                                        error: None,
+                                        observation,
+                                        usage: extract_anthropic_usage(&value),
+                                    },
+                                )
+                                .await;
+
+                                return (status_code, Json(value)).into_response();
+                            }
+
+                            if should_failover_status(status_code) {
+                                let _ = health_service
+                                    .record_failure(
+                                        &target.provider_id,
+                                        &format!("status {}", status_code.as_u16()),
+                                    )
+                                    .await;
+                            }
+
+                            let message = value
+                                .as_object()
+                                .and_then(extract_error_message_from_json_map)
+                                .unwrap_or_else(|| summarize_json_for_error(&value));
+
+                            return (
+                                status_code,
+                                Json(anthropic_error_response(message, "api_error")),
+                            )
+                                .into_response();
+                        }
+                        Err(err) => {
+                            let message = err.to_string();
+                            let _ = health_service
+                                .record_failure(&target.provider_id, &message)
+                                .await;
+                            if !is_last_target {
+                                continue;
+                            }
+                            append_log(
+                                &log_service,
+                                RequestLogEntry {
+                                    request_id: request_id.clone(),
+                                    gateway_id: state.gateway_id.clone(),
+                                    provider_id: target.provider_id.clone(),
+                                    model: model.clone(),
+                                    status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
+                                    latency_ms: started_at.elapsed().as_millis() as i64,
+                                    error: Some(message.clone()),
+                                    observation: Default::default(),
+                                    usage: Default::default(),
+                                },
+                            )
+                            .await;
+
+                            return (
+                                StatusCode::BAD_GATEWAY,
+                                Json(anthropic_error_response(
+                                    format!("upstream forward failed: {message}"),
+                                    "api_error",
+                                )),
+                            )
+                                .into_response();
+                        }
+                    }
+                }
+
+                let mut upstream_payload = match encode_openai_chat_request(&ir) {
+                    Ok(payload) => payload,
+                    Err(err) => {
+                        append_log(
+                            &log_service,
+                            RequestLogEntry {
+                                request_id,
+                                gateway_id: state.gateway_id.clone(),
+                                provider_id: target.provider_id.clone(),
+                                model,
+                                status_code: i64::from(StatusCode::BAD_REQUEST.as_u16()),
+                                latency_ms: started_at.elapsed().as_millis() as i64,
+                                error: Some(err.to_string()),
+                                observation: Default::default(),
+                                usage: Default::default(),
+                            },
+                        )
+                        .await;
+
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(anthropic_error_response(
+                                format!("invalid request: {err}"),
+                                "invalid_request_error",
+                            )),
+                        )
+                            .into_response();
+                    }
+                };
+
+                if target.compatibility_mode == CompatibilityMode::Permissive {
+                    apply_extension_passthrough(&ir, &mut upstream_payload);
+                }
+
+                if stream_requested {
+                    if let Some(object) = upstream_payload.as_object_mut() {
+                        object.insert("stream".to_string(), Value::Bool(true));
+                    }
+                    ensure_openai_stream_include_usage(&mut upstream_payload);
+
+                    maybe_log_upstream_request_payload(
+                        &state.gateway_id,
+                        &request_id,
+                        &target.base_url,
+                        model.as_deref(),
+                        &upstream_payload,
+                    );
+
+                    let response = state
+                        .client
+                        .chat_completions_stream(
+                            &target.base_url,
+                            &target.api_key,
+                            &upstream_payload,
+                        )
                         .await;
 
                     match response {
@@ -177,7 +481,18 @@ async fn forward_messages(
                             let status_code = StatusCode::from_u16(status.as_u16())
                                 .unwrap_or(StatusCode::BAD_GATEWAY);
 
+                            if should_failover_status(status_code) && !is_last_target {
+                                let _ = health_service
+                                    .record_failure(
+                                        &target.provider_id,
+                                        &format!("status {}", status_code.as_u16()),
+                                    )
+                                    .await;
+                                continue;
+                            }
+
                             if status_code.is_success() {
+                                let _ = health_service.record_success(&target.provider_id).await;
                                 let latency_ms = started_at.elapsed().as_millis() as i64;
                                 let mut observation = build_anthropic_observation(
                                     &request_id,
@@ -200,8 +515,8 @@ async fn forward_messages(
                                     RequestLogEntry {
                                         request_id: request_id.clone(),
                                         gateway_id: state.gateway_id.clone(),
-                                        provider_id: target.provider_id,
-                                        model,
+                                        provider_id: target.provider_id.clone(),
+                                        model: model.clone(),
                                         status_code: i64::from(status_code.as_u16()),
                                         latency_ms,
                                         error: None,
@@ -213,21 +528,54 @@ async fn forward_messages(
 
                                 let request_log_service = log_service.clone();
                                 let request_log_request_id = request_id.clone();
-                                return (
-                                    status_code,
-                                    [(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")],
-                                    Body::from_stream(track_anthropic_stream_usage(
+                                let anthropic_stream =
+                                    map_upstream_to_anthropic_stream_and_track_usage(
                                         upstream_response.bytes_stream(),
                                         request_log_service,
                                         request_log_request_id,
-                                    )),
+                                    );
+                                return (
+                                    status_code,
+                                    [(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")],
+                                    Body::from_stream(anthropic_stream),
                                 )
                                     .into_response();
                             }
 
-                            let message = extract_upstream_error_message_from_text(
-                                &upstream_response.text().await.unwrap_or_default(),
+                            if should_failover_status(status_code) {
+                                let _ = health_service
+                                    .record_failure(
+                                        &target.provider_id,
+                                        &format!("status {}", status_code.as_u16()),
+                                    )
+                                    .await;
+                            }
+
+                            append_log(
+                                &log_service,
+                                RequestLogEntry {
+                                    request_id: request_id.clone(),
+                                    gateway_id: state.gateway_id.clone(),
+                                    provider_id: target.provider_id.clone(),
+                                    model: model.clone(),
+                                    status_code: i64::from(status_code.as_u16()),
+                                    latency_ms: started_at.elapsed().as_millis() as i64,
+                                    error: None,
+                                    observation: Default::default(),
+                                    usage: Default::default(),
+                                },
+                            )
+                            .await;
+
+                            let raw_sse = upstream_response.text().await.unwrap_or_default();
+                            maybe_log_upstream_error(
+                                &state.gateway_id,
+                                &request_id,
+                                status_code.as_u16(),
+                                &raw_sse,
                             );
+                            let message = extract_upstream_error_message_from_text(&raw_sse);
+
                             return (
                                 status_code,
                                 Json(anthropic_error_response(message, "api_error")),
@@ -235,16 +583,23 @@ async fn forward_messages(
                                 .into_response();
                         }
                         Err(err) => {
+                            let message = err.to_string();
+                            let _ = health_service
+                                .record_failure(&target.provider_id, &message)
+                                .await;
+                            if !is_last_target {
+                                continue;
+                            }
                             append_log(
                                 &log_service,
                                 RequestLogEntry {
-                                    request_id,
+                                    request_id: request_id.clone(),
                                     gateway_id: state.gateway_id.clone(),
-                                    provider_id: target.provider_id,
-                                    model,
+                                    provider_id: target.provider_id.clone(),
+                                    model: model.clone(),
                                     status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
                                     latency_ms: started_at.elapsed().as_millis() as i64,
-                                    error: Some(err.to_string()),
+                                    error: Some(message.clone()),
                                     observation: Default::default(),
                                     usage: Default::default(),
                                 },
@@ -254,7 +609,159 @@ async fn forward_messages(
                             return (
                                 StatusCode::BAD_GATEWAY,
                                 Json(anthropic_error_response(
-                                    format!("upstream forward failed: {err}"),
+                                    format!("upstream forward failed: {message}"),
+                                    "api_error",
+                                )),
+                            )
+                                .into_response();
+                        }
+                    }
+                } else {
+                    maybe_log_upstream_request_payload(
+                        &state.gateway_id,
+                        &request_id,
+                        &target.base_url,
+                        model.as_deref(),
+                        &upstream_payload,
+                    );
+
+                    let response = state
+                        .client
+                        .chat_completions(&target.base_url, &target.api_key, &upstream_payload)
+                        .await;
+
+                    match response {
+                        Ok((status, value)) => {
+                            let status_code = StatusCode::from_u16(status.as_u16())
+                                .unwrap_or(StatusCode::BAD_GATEWAY);
+
+                            if should_failover_status(status_code) && !is_last_target {
+                                let _ = health_service
+                                    .record_failure(
+                                        &target.provider_id,
+                                        &format!("status {}", status_code.as_u16()),
+                                    )
+                                    .await;
+                                continue;
+                            }
+
+                            if status_code.is_success() {
+                                let _ = health_service.record_success(&target.provider_id).await;
+                                let latency_ms = started_at.elapsed().as_millis() as i64;
+                                let anthropic_response =
+                                crate::forwarding::response_mapping::map_openai_to_anthropic_message(
+                                    &value, &ir,
+                                );
+                                let mut observation = build_anthropic_observation(
+                                    &request_id,
+                                    &state.gateway_id,
+                                    &target.provider_id,
+                                    &target.upstream_protocol,
+                                    requested_model.clone(),
+                                    model.clone(),
+                                    false,
+                                );
+                                let effective_model = anthropic_response
+                                    .get("model")
+                                    .and_then(Value::as_str)
+                                    .map(ToOwned::to_owned);
+                                apply_anthropic_response(
+                                    &mut observation,
+                                    i64::from(status_code.as_u16()),
+                                    latency_ms,
+                                    latency_ms,
+                                    effective_model.clone(),
+                                );
+                                append_log(
+                                    &log_service,
+                                    RequestLogEntry {
+                                        request_id: request_id.clone(),
+                                        gateway_id: state.gateway_id.clone(),
+                                        provider_id: target.provider_id.clone(),
+                                        model: model.clone(),
+                                        status_code: i64::from(status_code.as_u16()),
+                                        latency_ms,
+                                        error: None,
+                                        observation,
+                                        usage: extract_anthropic_openai_usage(&value),
+                                    },
+                                )
+                                .await;
+
+                                return (status_code, Json(anthropic_response)).into_response();
+                            }
+
+                            if should_failover_status(status_code) {
+                                let _ = health_service
+                                    .record_failure(
+                                        &target.provider_id,
+                                        &format!("status {}", status_code.as_u16()),
+                                    )
+                                    .await;
+                            }
+
+                            append_log(
+                                &log_service,
+                                RequestLogEntry {
+                                    request_id: request_id.clone(),
+                                    gateway_id: state.gateway_id.clone(),
+                                    provider_id: target.provider_id.clone(),
+                                    model: model.clone(),
+                                    status_code: i64::from(status_code.as_u16()),
+                                    latency_ms: started_at.elapsed().as_millis() as i64,
+                                    error: None,
+                                    observation: Default::default(),
+                                    usage: Default::default(),
+                                },
+                            )
+                            .await;
+
+                            let raw_response = serde_json::to_string(&value).unwrap_or_default();
+                            maybe_log_upstream_error(
+                                &state.gateway_id,
+                                &request_id,
+                                status_code.as_u16(),
+                                &raw_response,
+                            );
+                            let message = value
+                                .as_object()
+                                .and_then(extract_error_message_from_json_map)
+                                .unwrap_or_else(|| summarize_json_for_error(&value));
+
+                            return (
+                                status_code,
+                                Json(anthropic_error_response(message, "api_error")),
+                            )
+                                .into_response();
+                        }
+                        Err(err) => {
+                            let message = err.to_string();
+                            let _ = health_service
+                                .record_failure(&target.provider_id, &message)
+                                .await;
+                            if !is_last_target {
+                                continue;
+                            }
+                            append_log(
+                                &log_service,
+                                RequestLogEntry {
+                                    request_id: request_id.clone(),
+                                    gateway_id: state.gateway_id.clone(),
+                                    provider_id: target.provider_id.clone(),
+                                    model: model.clone(),
+                                    status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
+                                    latency_ms: started_at.elapsed().as_millis() as i64,
+                                    error: Some(message.clone()),
+                                    observation: Default::default(),
+                                    usage: Default::default(),
+                                },
+                            )
+                            .await;
+
+                            return (
+                                StatusCode::BAD_GATEWAY,
+                                Json(anthropic_error_response(
+                                    format!("upstream forward failed: {message}"),
                                     "api_error",
                                 )),
                             )
@@ -262,388 +769,32 @@ async fn forward_messages(
                         }
                     }
                 }
-
-                let response = state
-                    .anthropic_client
-                    .messages(&target.base_url, &target.api_key, &native_payload)
-                    .await;
-
-                match response {
-                    Ok((status, value)) => {
-                        let status_code = StatusCode::from_u16(status.as_u16())
-                            .unwrap_or(StatusCode::BAD_GATEWAY);
-
-                        if status_code.is_success() {
-                            let latency_ms = started_at.elapsed().as_millis() as i64;
-                            let mut observation = build_anthropic_observation(
-                                &request_id,
-                                &state.gateway_id,
-                                &target.provider_id,
-                                &target.upstream_protocol,
-                                requested_model.clone(),
-                                model.clone(),
-                                false,
-                            );
-                            apply_anthropic_response(
-                                &mut observation,
-                                i64::from(status_code.as_u16()),
-                                latency_ms,
-                                latency_ms,
-                                value
-                                    .get("model")
-                                    .and_then(Value::as_str)
-                                    .map(ToOwned::to_owned),
-                            );
-                            append_log(
-                                &log_service,
-                                RequestLogEntry {
-                                    request_id: request_id.clone(),
-                                    gateway_id: state.gateway_id.clone(),
-                                    provider_id: target.provider_id,
-                                    model,
-                                    status_code: i64::from(status_code.as_u16()),
-                                    latency_ms,
-                                    error: None,
-                                    observation,
-                                    usage: extract_anthropic_usage(&value),
-                                },
-                            )
-                            .await;
-
-                            return (status_code, Json(value)).into_response();
-                        }
-
-                        let message = value
-                            .as_object()
-                            .and_then(extract_error_message_from_json_map)
-                            .unwrap_or_else(|| summarize_json_for_error(&value));
-
-                        return (
-                            status_code,
-                            Json(anthropic_error_response(message, "api_error")),
-                        )
-                            .into_response();
-                    }
-                    Err(err) => {
-                        append_log(
-                            &log_service,
-                            RequestLogEntry {
-                                request_id,
-                                gateway_id: state.gateway_id.clone(),
-                                provider_id: target.provider_id,
-                                model,
-                                status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
-                                latency_ms: started_at.elapsed().as_millis() as i64,
-                                error: Some(err.to_string()),
-                                observation: Default::default(),
-                                usage: Default::default(),
-                            },
-                        )
-                        .await;
-
-                        return (
-                            StatusCode::BAD_GATEWAY,
-                            Json(anthropic_error_response(
-                                format!("upstream forward failed: {err}"),
-                                "api_error",
-                            )),
-                        )
-                            .into_response();
-                    }
-                }
             }
 
-            let mut upstream_payload = match encode_openai_chat_request(&ir) {
-                Ok(payload) => payload,
-                Err(err) => {
-                    append_log(
-                        &log_service,
-                        RequestLogEntry {
-                            request_id,
-                            gateway_id: state.gateway_id.clone(),
-                            provider_id: target.provider_id,
-                            model,
-                            status_code: i64::from(StatusCode::BAD_REQUEST.as_u16()),
-                            latency_ms: started_at.elapsed().as_millis() as i64,
-                            error: Some(err.to_string()),
-                            observation: Default::default(),
-                            usage: Default::default(),
-                        },
-                    )
-                    .await;
+            append_log(
+                &log_service,
+                RequestLogEntry {
+                    request_id: request_id.clone(),
+                    gateway_id: state.gateway_id.clone(),
+                    provider_id: "unknown".to_string(),
+                    model: requested_model.clone(),
+                    status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
+                    latency_ms: started_at.elapsed().as_millis() as i64,
+                    error: Some("no available anthropic route targets".to_string()),
+                    observation: Default::default(),
+                    usage: Default::default(),
+                },
+            )
+            .await;
 
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(anthropic_error_response(
-                            format!("invalid request: {err}"),
-                            "invalid_request_error",
-                        )),
-                    )
-                        .into_response();
-                }
-            };
-
-            if target.compatibility_mode == CompatibilityMode::Permissive {
-                apply_extension_passthrough(&ir, &mut upstream_payload);
-            }
-
-            if stream_requested {
-                if let Some(object) = upstream_payload.as_object_mut() {
-                    object.insert("stream".to_string(), Value::Bool(true));
-                }
-                ensure_openai_stream_include_usage(&mut upstream_payload);
-
-                maybe_log_upstream_request_payload(
-                    &state.gateway_id,
-                    &request_id,
-                    &target.base_url,
-                    model.as_deref(),
-                    &upstream_payload,
-                );
-
-                let response = state
-                    .client
-                    .chat_completions_stream(&target.base_url, &target.api_key, &upstream_payload)
-                    .await;
-
-                match response {
-                    Ok((status, upstream_response)) => {
-                        let status_code = StatusCode::from_u16(status.as_u16())
-                            .unwrap_or(StatusCode::BAD_GATEWAY);
-
-                        if status_code.is_success() {
-                            let latency_ms = started_at.elapsed().as_millis() as i64;
-                            let mut observation = build_anthropic_observation(
-                                &request_id,
-                                &state.gateway_id,
-                                &target.provider_id,
-                                &target.upstream_protocol,
-                                requested_model.clone(),
-                                model.clone(),
-                                true,
-                            );
-                            apply_anthropic_response(
-                                &mut observation,
-                                i64::from(status_code.as_u16()),
-                                latency_ms,
-                                latency_ms,
-                                model.clone(),
-                            );
-                            append_log(
-                                &log_service,
-                                RequestLogEntry {
-                                    request_id: request_id.clone(),
-                                    gateway_id: state.gateway_id.clone(),
-                                    provider_id: target.provider_id,
-                                    model,
-                                    status_code: i64::from(status_code.as_u16()),
-                                    latency_ms,
-                                    error: None,
-                                    observation,
-                                    usage: Default::default(),
-                                },
-                            )
-                            .await;
-
-                            let request_log_service = log_service.clone();
-                            let request_log_request_id = request_id.clone();
-                            let anthropic_stream = map_upstream_to_anthropic_stream_and_track_usage(
-                                upstream_response.bytes_stream(),
-                                request_log_service,
-                                request_log_request_id,
-                            );
-                            return (
-                                status_code,
-                                [(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")],
-                                Body::from_stream(anthropic_stream),
-                            )
-                                .into_response();
-                        }
-
-                        append_log(
-                            &log_service,
-                            RequestLogEntry {
-                                request_id: request_id.clone(),
-                                gateway_id: state.gateway_id.clone(),
-                                provider_id: target.provider_id,
-                                model,
-                                status_code: i64::from(status_code.as_u16()),
-                                latency_ms: started_at.elapsed().as_millis() as i64,
-                                error: None,
-                                observation: Default::default(),
-                                usage: Default::default(),
-                            },
-                        )
-                        .await;
-
-                        let raw_sse = upstream_response.text().await.unwrap_or_default();
-                        maybe_log_upstream_error(
-                            &state.gateway_id,
-                            &request_id,
-                            status_code.as_u16(),
-                            &raw_sse,
-                        );
-                        let message = extract_upstream_error_message_from_text(&raw_sse);
-
-                        (
-                            status_code,
-                            Json(anthropic_error_response(message, "api_error")),
-                        )
-                            .into_response()
-                    }
-                    Err(err) => {
-                        append_log(
-                            &log_service,
-                            RequestLogEntry {
-                                request_id,
-                                gateway_id: state.gateway_id.clone(),
-                                provider_id: target.provider_id,
-                                model,
-                                status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
-                                latency_ms: started_at.elapsed().as_millis() as i64,
-                                error: Some(err.to_string()),
-                                observation: Default::default(),
-                                usage: Default::default(),
-                            },
-                        )
-                        .await;
-
-                        (
-                            StatusCode::BAD_GATEWAY,
-                            Json(anthropic_error_response(
-                                format!("upstream forward failed: {err}"),
-                                "api_error",
-                            )),
-                        )
-                            .into_response()
-                    }
-                }
-            } else {
-                maybe_log_upstream_request_payload(
-                    &state.gateway_id,
-                    &request_id,
-                    &target.base_url,
-                    model.as_deref(),
-                    &upstream_payload,
-                );
-
-                let response = state
-                    .client
-                    .chat_completions(&target.base_url, &target.api_key, &upstream_payload)
-                    .await;
-
-                match response {
-                    Ok((status, value)) => {
-                        let status_code = StatusCode::from_u16(status.as_u16())
-                            .unwrap_or(StatusCode::BAD_GATEWAY);
-
-                        if status_code.is_success() {
-                            let latency_ms = started_at.elapsed().as_millis() as i64;
-                            let anthropic_response =
-                                crate::forwarding::response_mapping::map_openai_to_anthropic_message(
-                                    &value, &ir,
-                                );
-                            let mut observation = build_anthropic_observation(
-                                &request_id,
-                                &state.gateway_id,
-                                &target.provider_id,
-                                &target.upstream_protocol,
-                                requested_model.clone(),
-                                model.clone(),
-                                false,
-                            );
-                            let effective_model = anthropic_response
-                                .get("model")
-                                .and_then(Value::as_str)
-                                .map(ToOwned::to_owned);
-                            apply_anthropic_response(
-                                &mut observation,
-                                i64::from(status_code.as_u16()),
-                                latency_ms,
-                                latency_ms,
-                                effective_model.clone(),
-                            );
-                            append_log(
-                                &log_service,
-                                RequestLogEntry {
-                                    request_id: request_id.clone(),
-                                    gateway_id: state.gateway_id.clone(),
-                                    provider_id: target.provider_id,
-                                    model,
-                                    status_code: i64::from(status_code.as_u16()),
-                                    latency_ms,
-                                    error: None,
-                                    observation,
-                                    usage: extract_anthropic_openai_usage(&value),
-                                },
-                            )
-                            .await;
-
-                            return (status_code, Json(anthropic_response)).into_response();
-                        }
-
-                        append_log(
-                            &log_service,
-                            RequestLogEntry {
-                                request_id: request_id.clone(),
-                                gateway_id: state.gateway_id.clone(),
-                                provider_id: target.provider_id,
-                                model,
-                                status_code: i64::from(status_code.as_u16()),
-                                latency_ms: started_at.elapsed().as_millis() as i64,
-                                error: None,
-                                observation: Default::default(),
-                                usage: Default::default(),
-                            },
-                        )
-                        .await;
-
-                        let raw_response = serde_json::to_string(&value).unwrap_or_default();
-                        maybe_log_upstream_error(
-                            &state.gateway_id,
-                            &request_id,
-                            status_code.as_u16(),
-                            &raw_response,
-                        );
-                        let message = value
-                            .as_object()
-                            .and_then(extract_error_message_from_json_map)
-                            .unwrap_or_else(|| summarize_json_for_error(&value));
-
-                        (
-                            status_code,
-                            Json(anthropic_error_response(message, "api_error")),
-                        )
-                            .into_response()
-                    }
-                    Err(err) => {
-                        append_log(
-                            &log_service,
-                            RequestLogEntry {
-                                request_id,
-                                gateway_id: state.gateway_id.clone(),
-                                provider_id: target.provider_id,
-                                model,
-                                status_code: i64::from(StatusCode::BAD_GATEWAY.as_u16()),
-                                latency_ms: started_at.elapsed().as_millis() as i64,
-                                error: Some(err.to_string()),
-                                observation: Default::default(),
-                                usage: Default::default(),
-                            },
-                        )
-                        .await;
-
-                        (
-                            StatusCode::BAD_GATEWAY,
-                            Json(anthropic_error_response(
-                                format!("upstream forward failed: {err}"),
-                                "api_error",
-                            )),
-                        )
-                            .into_response()
-                    }
-                }
-            }
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(anthropic_error_response(
+                    "no available anthropic route targets".to_string(),
+                    "api_error",
+                )),
+            )
+                .into_response()
         }
         Err(err) => {
             append_log(
@@ -1549,43 +1700,43 @@ fn is_strict_known_extension_field(key: &str) -> bool {
 async fn fetch_provider_target(
     state: &AnthropicRouteState,
 ) -> anyhow::Result<ProviderRoutingTarget> {
-    let row = sqlx::query(
-        r#"
-        SELECT p.id AS provider_id, p.kind AS provider_kind, p.base_url, p.api_key, g.protocol_config_json, g.upstream_protocol, g.default_model
-        FROM gateways g
-        JOIN providers p ON p.id = g.default_provider_id
-        WHERE g.id = ?1
-        "#,
-    )
-    .bind(&state.gateway_id)
-    .fetch_optional(&state.pool)
-    .await?;
-
-    let row = row.ok_or_else(|| anyhow::anyhow!("gateway not found: {}", state.gateway_id))?;
-    let protocol_config_json: Value =
-        serde_json::from_str(&row.get::<String, _>("protocol_config_json"))
-            .unwrap_or_else(|_| json!({}));
-    let configured_protocol = row.get::<String, _>("upstream_protocol");
-    let provider_kind = row.get::<String, _>("provider_kind");
-    let upstream_protocol = if configured_protocol == "provider_default" {
-        provider_kind
-    } else {
-        configured_protocol
-    };
-
-    // 读取 default_model，数据库字段可能为 NULL
-    let default_model: Option<String> = row.try_get("default_model").ok().flatten();
-
-    Ok(ProviderRoutingTarget {
-        provider_id: row.get("provider_id"),
-        base_url: row.get("base_url"),
-        api_key: row.get("api_key"),
-        upstream_protocol,
-        compatibility_mode: CompatibilityMode::from_protocol_config(&protocol_config_json),
-        model_mapping: ModelMappingConfig::from_protocol_config(&protocol_config_json),
-        default_model,
-        request_debug: RequestDebugConfig::from_protocol_config(&protocol_config_json),
+    let targets = fetch_provider_targets(state).await?;
+    targets.into_iter().next().ok_or_else(|| {
+        anyhow::anyhow!(
+            "gateway has no available route targets: {}",
+            state.gateway_id
+        )
     })
+}
+
+async fn fetch_provider_targets(
+    state: &AnthropicRouteState,
+) -> anyhow::Result<Vec<ProviderRoutingTarget>> {
+    let targets = RouteSelector::new(state.pool.clone())
+        .ordered_candidates(&state.gateway_id)
+        .await?;
+    Ok(targets
+        .into_iter()
+        .map(|target| {
+            let protocol_config_json = target.protocol_config.clone();
+            let default_model = target.effective_model.clone();
+
+            ProviderRoutingTarget {
+                provider_id: target.provider_id,
+                base_url: target.base_url,
+                api_key: target.api_key,
+                upstream_protocol: target.upstream_protocol,
+                compatibility_mode: CompatibilityMode::from_protocol_config(&protocol_config_json),
+                model_mapping: ModelMappingConfig::from_protocol_config(&protocol_config_json),
+                default_model,
+                request_debug: RequestDebugConfig::from_protocol_config(&protocol_config_json),
+            }
+        })
+        .collect())
+}
+
+fn should_failover_status(status: StatusCode) -> bool {
+    status.as_u16() == 429 || status.is_server_error()
 }
 
 fn apply_extension_passthrough(ir: &IrRequest, upstream_payload: &mut Value) {

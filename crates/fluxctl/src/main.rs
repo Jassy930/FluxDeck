@@ -2,10 +2,10 @@ use std::io::{self, Write};
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use serde_json::json;
+use serde_json::{json, Map, Value};
 
 use fluxctl::build_logs_path;
-use fluxctl::cli::{Cli, Commands, GatewayCmd, ProviderCmd};
+use fluxctl::cli::{Cli, Commands, GatewayCmd, ProviderCmd, ProviderHealthCmd};
 use fluxctl::client::AdminClient;
 
 #[tokio::main]
@@ -54,6 +54,17 @@ async fn main() -> Result<()> {
                     return Err(anyhow!(serde_json::to_string_pretty(&result)?));
                 }
             }
+            ProviderCmd::Probe { id } => {
+                let path = format!("/admin/providers/{id}/probe");
+                let result = client.post_json(&path, json!({})).await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            ProviderCmd::Health { command } => match command {
+                ProviderHealthCmd::List => {
+                    let result = client.get_json("/admin/providers/health").await?;
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
+            },
             ProviderCmd::List => {
                 let result = client.get_json("/admin/providers").await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
@@ -69,25 +80,27 @@ async fn main() -> Result<()> {
                 upstream_protocol,
                 protocol_config_json,
                 default_provider_id,
+                route_targets,
                 default_model,
                 enabled,
                 auto_start,
             } => {
                 let protocol_config_json: serde_json::Value =
                     serde_json::from_str(&protocol_config_json)?;
-                let payload = json!({
-                    "id": id,
-                    "name": name,
-                    "listen_host": listen_host,
-                    "listen_port": listen_port,
-                    "inbound_protocol": inbound_protocol,
-                    "upstream_protocol": upstream_protocol,
-                    "protocol_config_json": protocol_config_json,
-                    "default_provider_id": default_provider_id,
-                    "default_model": default_model,
-                    "enabled": enabled,
-                    "auto_start": auto_start
-                });
+                let payload = build_gateway_payload(
+                    Some(id),
+                    name,
+                    listen_host,
+                    listen_port,
+                    inbound_protocol,
+                    upstream_protocol,
+                    protocol_config_json,
+                    default_provider_id,
+                    route_targets,
+                    default_model,
+                    enabled,
+                    auto_start,
+                )?;
                 let result = client.post_json("/admin/gateways", payload).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
@@ -100,24 +113,27 @@ async fn main() -> Result<()> {
                 upstream_protocol,
                 protocol_config_json,
                 default_provider_id,
+                route_targets,
                 default_model,
                 enabled,
                 auto_start,
             } => {
                 let protocol_config_json: serde_json::Value =
                     serde_json::from_str(&protocol_config_json)?;
-                let payload = json!({
-                    "name": name,
-                    "listen_host": listen_host,
-                    "listen_port": listen_port,
-                    "inbound_protocol": inbound_protocol,
-                    "upstream_protocol": upstream_protocol,
-                    "protocol_config_json": protocol_config_json,
-                    "default_provider_id": default_provider_id,
-                    "default_model": default_model,
-                    "enabled": enabled,
-                    "auto_start": auto_start
-                });
+                let payload = build_gateway_payload(
+                    None,
+                    name,
+                    listen_host,
+                    listen_port,
+                    inbound_protocol,
+                    upstream_protocol,
+                    protocol_config_json,
+                    default_provider_id,
+                    route_targets,
+                    default_model,
+                    enabled,
+                    auto_start,
+                )?;
                 let path = format!("/admin/gateways/{id}");
                 let result = client.put_json(&path, payload).await?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
@@ -179,6 +195,99 @@ fn split_models(models: &str) -> Vec<String> {
         .collect()
 }
 
+fn build_gateway_payload(
+    id: Option<String>,
+    name: String,
+    listen_host: String,
+    listen_port: i64,
+    inbound_protocol: String,
+    upstream_protocol: String,
+    protocol_config_json: Value,
+    default_provider_id: String,
+    route_targets: Vec<String>,
+    default_model: Option<String>,
+    enabled: bool,
+    auto_start: bool,
+) -> Result<Value> {
+    let mut payload = Map::from_iter([
+        ("name".to_string(), Value::String(name)),
+        ("listen_host".to_string(), Value::String(listen_host)),
+        ("listen_port".to_string(), json!(listen_port)),
+        (
+            "inbound_protocol".to_string(),
+            Value::String(inbound_protocol),
+        ),
+        (
+            "upstream_protocol".to_string(),
+            Value::String(upstream_protocol),
+        ),
+        ("protocol_config_json".to_string(), protocol_config_json),
+        (
+            "default_provider_id".to_string(),
+            Value::String(default_provider_id),
+        ),
+        ("default_model".to_string(), json!(default_model)),
+        ("enabled".to_string(), json!(enabled)),
+        ("auto_start".to_string(), json!(auto_start)),
+    ]);
+
+    if let Some(id) = id {
+        payload.insert("id".to_string(), Value::String(id));
+    }
+
+    if !route_targets.is_empty() {
+        payload.insert(
+            "route_targets".to_string(),
+            Value::Array(
+                route_targets
+                    .into_iter()
+                    .map(|item| parse_route_target(&item))
+                    .collect::<Result<Vec<_>>>()?,
+            ),
+        );
+    }
+
+    Ok(Value::Object(payload))
+}
+
+fn parse_route_target(input: &str) -> Result<Value> {
+    let mut parts = input.split(':');
+    let provider_id = parts
+        .next()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("invalid --route-target `{input}`: missing provider_id"))?;
+    let priority = parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid --route-target `{input}`: missing priority"))?
+        .parse::<i64>()?;
+    let enabled = match parts.next() {
+        Some(value) => parse_bool_flag(value, input)?,
+        None => true,
+    };
+
+    if parts.next().is_some() {
+        return Err(anyhow!(
+            "invalid --route-target `{input}`: expected provider_id:priority[:enabled]"
+        ));
+    }
+
+    Ok(json!({
+        "provider_id": provider_id,
+        "priority": priority,
+        "enabled": enabled
+    }))
+}
+
+fn parse_bool_flag(input: &str, route_target: &str) -> Result<bool> {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "y" | "on" => Ok(true),
+        "false" | "0" | "no" | "n" | "off" => Ok(false),
+        _ => Err(anyhow!(
+            "invalid --route-target `{route_target}`: enabled must be true/false"
+        )),
+    }
+}
+
 fn gateway_update_notice(result: &serde_json::Value) -> Option<&str> {
     result
         .get("user_notice")
@@ -211,7 +320,7 @@ fn is_delete_confirmation_accepted(input: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{gateway_update_notice, is_delete_confirmation_accepted};
+    use super::{gateway_update_notice, is_delete_confirmation_accepted, parse_route_target};
     use serde_json::json;
 
     #[test]
@@ -253,5 +362,29 @@ mod tests {
         assert!(!is_delete_confirmation_accepted(""));
         assert!(!is_delete_confirmation_accepted("n"));
         assert!(!is_delete_confirmation_accepted("delete"));
+    }
+
+    #[test]
+    fn parses_route_target_with_default_enabled() {
+        assert_eq!(
+            parse_route_target("provider_a:0").expect("parse route target"),
+            json!({
+                "provider_id": "provider_a",
+                "priority": 0,
+                "enabled": true
+            })
+        );
+    }
+
+    #[test]
+    fn parses_route_target_with_explicit_enabled_flag() {
+        assert_eq!(
+            parse_route_target("provider_b:1:false").expect("parse route target"),
+            json!({
+                "provider_id": "provider_b",
+                "priority": 1,
+                "enabled": false
+            })
+        );
     }
 }

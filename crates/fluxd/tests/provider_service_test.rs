@@ -1,5 +1,5 @@
 use fluxd::domain::provider::{CreateProviderInput, Provider};
-use fluxd::service::provider_service::ProviderService;
+use fluxd::service::provider_service::{DeleteProviderResult, ProviderService};
 use fluxd::storage::migrate::run_migrations;
 
 #[tokio::test]
@@ -143,4 +143,82 @@ async fn update_provider_rejects_unknown_kind() {
     assert!(message.contains("bad-kind"));
     assert!(message.contains("azure-openai"));
     assert!(message.contains("new-api"));
+}
+
+#[tokio::test]
+async fn delete_provider_rejects_gateway_route_target_reference() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let service = ProviderService::new(pool.clone());
+
+    for (id, name) in [
+        ("provider_primary", "Primary Provider"),
+        ("provider_backup", "Backup Provider"),
+    ] {
+        service
+            .create_provider(CreateProviderInput {
+                id: id.to_string(),
+                name: name.to_string(),
+                kind: "openai".to_string(),
+                base_url: "https://api.openai.com/v1".to_string(),
+                api_key: format!("sk-{id}"),
+                models: vec!["gpt-4o-mini".to_string()],
+                enabled: true,
+            })
+            .await
+            .expect("create provider");
+    }
+
+    sqlx::query(
+        r#"
+        INSERT INTO gateways (
+            id, name, listen_host, listen_port, inbound_protocol,
+            upstream_protocol, protocol_config_json, default_provider_id,
+            default_model, enabled, auto_start
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        "#,
+    )
+    .bind("gateway_route_ref")
+    .bind("Gateway Route Ref")
+    .bind("127.0.0.1")
+    .bind(18080_i64)
+    .bind("openai")
+    .bind("provider_default")
+    .bind("{}")
+    .bind("provider_primary")
+    .bind(Option::<String>::None)
+    .bind(1_i64)
+    .bind(0_i64)
+    .execute(&pool)
+    .await
+    .expect("insert gateway");
+
+    sqlx::query(
+        r#"
+        INSERT INTO gateway_route_targets (id, gateway_id, provider_id, priority, enabled)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        "#,
+    )
+    .bind("gateway_route_ref__route__1")
+    .bind("gateway_route_ref")
+    .bind("provider_backup")
+    .bind(1_i64)
+    .bind(1_i64)
+    .execute(&pool)
+    .await
+    .expect("insert gateway route target");
+
+    let result = service
+        .delete_provider("provider_backup")
+        .await
+        .expect("delete provider result");
+
+    assert_eq!(
+        result,
+        DeleteProviderResult::ReferencedByGateways(vec!["gateway_route_ref".to_string()])
+    );
 }

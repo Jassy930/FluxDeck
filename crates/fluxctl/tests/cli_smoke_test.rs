@@ -76,6 +76,10 @@ fn parses_gateway_create_with_protocol_graph_fields() {
         "{\"compatibility_mode\":\"compatible\"}",
         "--default-provider-id",
         "provider_1",
+        "--route-target",
+        "provider_1:0",
+        "--route-target",
+        "provider_2:1:false",
         "--default-model",
         "claude-3-7-sonnet",
         "--auto-start",
@@ -88,6 +92,7 @@ fn parses_gateway_create_with_protocol_graph_fields() {
                 inbound_protocol,
                 upstream_protocol,
                 protocol_config_json,
+                route_targets,
                 auto_start,
                 ..
             } => {
@@ -97,6 +102,7 @@ fn parses_gateway_create_with_protocol_graph_fields() {
                     protocol_config_json,
                     "{\"compatibility_mode\":\"compatible\"}"
                 );
+                assert_eq!(route_targets, vec!["provider_1:0", "provider_2:1:false"]);
                 assert!(auto_start);
             }
             _ => panic!("expected gateway create command"),
@@ -128,6 +134,10 @@ fn parses_gateway_update_command() {
         "{\"compatibility_mode\":\"strict\"}",
         "--default-provider-id",
         "provider_1",
+        "--route-target",
+        "provider_1:0",
+        "--route-target",
+        "provider_2:1",
         "--default-model",
         "gpt-4.1-mini",
         "--enabled",
@@ -142,6 +152,7 @@ fn parses_gateway_update_command() {
                 id,
                 listen_port,
                 protocol_config_json,
+                route_targets,
                 enabled,
                 auto_start,
                 ..
@@ -149,6 +160,7 @@ fn parses_gateway_update_command() {
                 assert_eq!(id, "gateway_1");
                 assert_eq!(listen_port, 19090);
                 assert_eq!(protocol_config_json, "{\"compatibility_mode\":\"strict\"}");
+                assert_eq!(route_targets, vec!["provider_1:0", "provider_2:1"]);
                 assert!(!enabled);
                 assert!(auto_start);
             }
@@ -177,4 +189,32 @@ fn parses_gateway_delete_command_without_yes_flag() {
 #[test]
 fn builds_logs_path_with_limit_query() {
     assert_eq!(build_logs_path(20), "/admin/logs?limit=20");
+}
+
+#[test]
+fn parses_provider_health_list_command() {
+    let cli = Cli::parse_from(["fluxctl", "provider", "health", "list"]);
+
+    match cli.command {
+        Commands::Provider { command } => match command {
+            ProviderCmd::Health { command } => match command {
+                fluxctl::cli::ProviderHealthCmd::List => {}
+            },
+            _ => panic!("expected provider health command"),
+        },
+        _ => panic!("expected provider command"),
+    }
+}
+
+#[test]
+fn parses_provider_probe_command() {
+    let cli = Cli::parse_from(["fluxctl", "provider", "probe", "provider_1"]);
+
+    match cli.command {
+        Commands::Provider { command } => match command {
+            ProviderCmd::Probe { id } => assert_eq!(id, "provider_1"),
+            _ => panic!("expected provider probe command"),
+        },
+        _ => panic!("expected provider command"),
+    }
 }

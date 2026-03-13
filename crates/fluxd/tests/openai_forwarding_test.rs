@@ -61,6 +61,97 @@ async fn forwards_chat_completions_to_upstream() {
     assert_eq!(body["object"], "chat.completion");
 }
 
+#[tokio::test]
+async fn fails_over_to_second_provider_when_primary_returns_502() {
+    let primary = spawn_upstream_failing_mock().await;
+    let backup = spawn_upstream_mock().await;
+
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    sqlx::query(
+        "INSERT INTO providers (id, name, kind, base_url, api_key, enabled) VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+    )
+    .bind("provider_openai_primary")
+    .bind("OpenAI Upstream Primary")
+    .bind("openai")
+    .bind(format!("http://{}/v1", primary.addr))
+    .bind("sk-upstream-primary")
+    .execute(&pool)
+    .await
+    .expect("insert primary provider");
+
+    sqlx::query(
+        "INSERT INTO providers (id, name, kind, base_url, api_key, enabled) VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+    )
+    .bind("provider_openai_backup")
+    .bind("OpenAI Upstream Backup")
+    .bind("openai")
+    .bind(format!("http://{}/v1", backup.addr))
+    .bind("sk-upstream-backup")
+    .execute(&pool)
+    .await
+    .expect("insert backup provider");
+
+    sqlx::query(
+        "INSERT INTO gateways (id, name, listen_host, listen_port, inbound_protocol, default_provider_id, default_model, enabled) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
+    )
+    .bind("gw_openai_failover")
+    .bind("Gateway OpenAI Failover")
+    .bind("127.0.0.1")
+    .bind(18889_i64)
+    .bind("openai")
+    .bind("provider_openai_primary")
+    .bind("gpt-4o-mini")
+    .execute(&pool)
+    .await
+    .expect("insert gateway");
+
+    sqlx::query(
+        r#"
+        INSERT INTO gateway_route_targets (id, gateway_id, provider_id, priority, enabled)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        "#,
+    )
+    .bind("gw_openai_failover__route__1")
+    .bind("gw_openai_failover")
+    .bind("provider_openai_backup")
+    .bind(1_i64)
+    .bind(1_i64)
+    .execute(&pool)
+    .await
+    .expect("insert backup route target");
+
+    let app = build_openai_router(OpenAiRouteState::new(pool.clone(), "gw_openai_failover"));
+    let gateway = spawn_gateway(app).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/v1/chat/completions", gateway.addr))
+        .json(&json!({
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hello"}]
+        }))
+        .send()
+        .await
+        .expect("call gateway");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let body: Value = resp.json().await.expect("decode gateway response");
+    assert_eq!(body["id"], "chatcmpl_mock_001");
+    assert_eq!(body["object"], "chat.completion");
+
+    let provider_id: String = sqlx::query_scalar(
+        "SELECT provider_id FROM request_logs ORDER BY created_at DESC, request_id DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("fetch latest provider id");
+    assert_eq!(provider_id, "provider_openai_backup");
+}
+
 struct SpawnedServer {
     addr: SocketAddr,
 }
@@ -101,4 +192,23 @@ async fn upstream_chat_completions(Json(payload): Json<Value>) -> impl IntoRespo
             }
         ]
     }))
+}
+
+async fn upstream_chat_completions_failing() -> impl IntoResponse {
+    (
+        axum::http::StatusCode::BAD_GATEWAY,
+        Json(json!({
+            "error": {
+                "message": "upstream temporary failure"
+            }
+        })),
+    )
+}
+
+async fn spawn_upstream_failing_mock() -> SpawnedServer {
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(upstream_chat_completions_failing),
+    );
+    spawn_gateway(app).await
 }

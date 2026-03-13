@@ -79,6 +79,18 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider create \
 cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider list
 ```
 
+查看 Provider 健康快照：
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider health list
+```
+
+手动触发一次 Provider probe：
+
+```bash
+cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider probe provider_main
+```
+
 更新 Provider 配置（Admin API）：
 
 ```bash
@@ -126,6 +138,8 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
   --upstream-protocol provider_default \
   --protocol-config-json '{"compatibility_mode":"compatible"}' \
   --default-provider-id provider_main \
+  --route-target provider_main:0 \
+  --route-target provider_backup:1 \
   --default-model gpt-4o-mini \
   --auto-start true
 ```
@@ -133,6 +147,11 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway create \
 说明：
 
 - `fluxctl gateway create` 已支持 `--auto-start true|false`
+- `--route-target` 支持重复传入，格式为 `provider_id:priority[:enabled]`
+  - 例如：`--route-target provider_main:0`
+  - 例如：`--route-target provider_backup:1:false`
+- 请求级故障切流当前已覆盖 OpenAI direct forwarding、OpenAI 同协议 passthrough fallback、Anthropic `/v1/messages`
+- 切流触发条件为网络错误、`429` 或 `5xx`
 - 原生前端也已支持创建/编辑 Gateway 配置，并可直接切换 `Auto Start`
 - 原生前端中的 Gateway 创建/编辑弹窗现已与 Provider 配置页统一为工作台式布局：
   - 顶部摘要会显示监听地址、入口协议、出口协议与默认 Provider
@@ -175,6 +194,8 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway update gateway
   --upstream-protocol provider_default \
   --protocol-config-json '{"compatibility_mode":"strict"}' \
   --default-provider-id provider_main \
+  --route-target provider_main:0 \
+  --route-target provider_backup:1 \
   --default-model gpt-4.1-mini \
   --enabled true \
   --auto-start false

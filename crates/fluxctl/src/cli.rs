@@ -49,6 +49,18 @@ pub enum ProviderCmd {
         #[arg(short = 'y', long = "yes", default_value_t = false)]
         yes: bool,
     },
+    Probe {
+        id: String,
+    },
+    Health {
+        #[command(subcommand)]
+        command: ProviderHealthCmd,
+    },
+    List,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProviderHealthCmd {
     List,
 }
 
@@ -71,6 +83,8 @@ pub enum GatewayCmd {
         protocol_config_json: String,
         #[arg(long = "default-provider-id")]
         default_provider_id: String,
+        #[arg(long = "route-target")]
+        route_targets: Vec<String>,
         #[arg(long = "default-model")]
         default_model: Option<String>,
         #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
@@ -94,6 +108,8 @@ pub enum GatewayCmd {
         protocol_config_json: String,
         #[arg(long = "default-provider-id")]
         default_provider_id: String,
+        #[arg(long = "route-target")]
+        route_targets: Vec<String>,
         #[arg(long = "default-model")]
         default_model: Option<String>,
         #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]

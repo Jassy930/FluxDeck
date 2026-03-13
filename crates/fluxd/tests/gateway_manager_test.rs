@@ -1,10 +1,15 @@
 use std::net::TcpListener as StdTcpListener;
+use std::time::Duration;
 
 use fluxd::domain::gateway::CreateGatewayInput;
+use fluxd::domain::provider::CreateProviderInput;
 use fluxd::repo::gateway_repo::GatewayRepo;
 use fluxd::runtime::gateway_manager::{
     GatewayAutoStartSummary, GatewayManager, GatewayRuntimeStatus,
 };
+use fluxd::runtime::health_monitor::HealthMonitor;
+use fluxd::service::provider_health_service::ProviderHealthService;
+use fluxd::service::provider_service::ProviderService;
 use fluxd::storage::migrate::run_migrations;
 use serde_json::json;
 
@@ -38,6 +43,7 @@ async fn starts_multiple_gateways_on_different_ports() {
             upstream_protocol: "provider_default".to_string(),
             protocol_config_json: serde_json::json!({}),
             default_provider_id: "provider_default".to_string(),
+            route_targets: vec![],
             default_model: Some("gpt-4o-mini".to_string()),
             enabled: true,
             auto_start: false,
@@ -55,6 +61,7 @@ async fn starts_multiple_gateways_on_different_ports() {
             upstream_protocol: "provider_default".to_string(),
             protocol_config_json: serde_json::json!({}),
             default_provider_id: "provider_default".to_string(),
+            route_targets: vec![],
             default_model: Some("gpt-4.1".to_string()),
             enabled: true,
             auto_start: false,
@@ -107,6 +114,7 @@ async fn routes_gateway_runtime_by_inbound_protocol() {
             upstream_protocol: "provider_default".to_string(),
             protocol_config_json: serde_json::json!({}),
             default_provider_id: "provider_default".to_string(),
+            route_targets: vec![],
             default_model: Some("gpt-4o-mini".to_string()),
             enabled: true,
             auto_start: false,
@@ -124,6 +132,7 @@ async fn routes_gateway_runtime_by_inbound_protocol() {
             upstream_protocol: "provider_default".to_string(),
             protocol_config_json: serde_json::json!({}),
             default_provider_id: "provider_default".to_string(),
+            route_targets: vec![],
             default_model: Some("claude-3-7-sonnet".to_string()),
             enabled: true,
             auto_start: false,
@@ -205,6 +214,7 @@ async fn starts_openai_response_gateway_runtime() {
             upstream_protocol: "provider_default".to_string(),
             protocol_config_json: serde_json::json!({}),
             default_provider_id: "provider_response".to_string(),
+            route_targets: vec![],
             default_model: Some("gpt-5-codex".to_string()),
             enabled: true,
             auto_start: false,
@@ -259,6 +269,7 @@ async fn auto_start_only_starts_enabled_gateways_and_records_failures() {
             upstream_protocol: "provider_default".to_string(),
             protocol_config_json: serde_json::json!({}),
             default_provider_id: "provider_default".to_string(),
+            route_targets: vec![],
             default_model: Some("gpt-4o-mini".to_string()),
             enabled: true,
             auto_start: true,
@@ -276,6 +287,7 @@ async fn auto_start_only_starts_enabled_gateways_and_records_failures() {
             upstream_protocol: "provider_default".to_string(),
             protocol_config_json: serde_json::json!({}),
             default_provider_id: "provider_default".to_string(),
+            route_targets: vec![],
             default_model: Some("gpt-4o-mini".to_string()),
             enabled: true,
             auto_start: false,
@@ -293,6 +305,7 @@ async fn auto_start_only_starts_enabled_gateways_and_records_failures() {
             upstream_protocol: "provider_default".to_string(),
             protocol_config_json: serde_json::json!({}),
             default_provider_id: "provider_default".to_string(),
+            route_targets: vec![],
             default_model: Some("gpt-4o-mini".to_string()),
             enabled: false,
             auto_start: true,
@@ -316,6 +329,7 @@ async fn auto_start_only_starts_enabled_gateways_and_records_failures() {
             upstream_protocol: "provider_default".to_string(),
             protocol_config_json: serde_json::json!({}),
             default_provider_id: "provider_default".to_string(),
+            route_targets: vec![],
             default_model: Some("gpt-4o-mini".to_string()),
             enabled: true,
             auto_start: true,
@@ -369,4 +383,44 @@ fn next_free_port() -> i64 {
     let port = listener.local_addr().expect("read local addr").port() as i64;
     drop(listener);
     port
+}
+
+#[tokio::test]
+async fn health_monitor_probes_unhealthy_providers_on_run_once() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let provider_service = ProviderService::new(pool.clone());
+    provider_service
+        .create_provider(CreateProviderInput {
+            id: "provider_monitor_probe".to_string(),
+            name: "Provider Monitor Probe".to_string(),
+            kind: "openai".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: "sk-monitor-probe".to_string(),
+            models: vec!["gpt-4o-mini".to_string()],
+            enabled: true,
+        })
+        .await
+        .expect("create provider");
+
+    let health_service = ProviderHealthService::new(pool.clone());
+    for _ in 0..3 {
+        health_service
+            .record_failure("provider_monitor_probe", "timeout")
+            .await
+            .expect("record failure");
+    }
+
+    let monitor = HealthMonitor::new(pool.clone(), Duration::from_millis(50));
+    monitor.run_once().await.expect("run health monitor once");
+
+    let state = health_service
+        .get_state("provider_monitor_probe")
+        .await
+        .expect("get provider health")
+        .expect("provider health exists");
+    assert_eq!(state.status, "probing");
 }

@@ -181,10 +181,19 @@ impl ProviderRepo {
     pub async fn list_gateway_ids_referencing(&self, provider_id: &str) -> Result<Vec<String>> {
         let rows = sqlx::query(
             r#"
-            SELECT id
-            FROM gateways
-            WHERE default_provider_id = ?1
-            ORDER BY created_at DESC
+            SELECT DISTINCT gateway_id
+            FROM (
+                SELECT id AS gateway_id
+                FROM gateways
+                WHERE default_provider_id = ?1
+
+                UNION
+
+                SELECT gateway_id
+                FROM gateway_route_targets
+                WHERE provider_id = ?1
+            )
+            ORDER BY gateway_id ASC
             "#,
         )
         .bind(provider_id)
@@ -193,7 +202,7 @@ impl ProviderRepo {
 
         Ok(rows
             .into_iter()
-            .map(|row| row.get::<String, _>("id"))
+            .map(|row| row.get::<String, _>("gateway_id"))
             .collect())
     }
 

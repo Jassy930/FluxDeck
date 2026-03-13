@@ -274,6 +274,39 @@ async fn persists_first_byte_for_streaming_openai_responses_fallback() {
     assert!(row.1 >= row.0.unwrap_or_default());
 }
 
+#[tokio::test]
+async fn fails_over_to_backup_provider_for_openai_passthrough_fallback() {
+    let primary = spawn_failing_responses_upstream_mock().await;
+    let backup = spawn_upstream_mock().await;
+    let gateway = spawn_openai_gateway_with_backup(
+        format!("http://{}/v1", primary.addr),
+        format!("http://{}/v1", backup.addr),
+    )
+    .await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/responses", gateway.addr))
+        .json(&json!({
+            "model": "gpt-5-codex",
+            "input": "ping"
+        }))
+        .send()
+        .await
+        .expect("call gateway /responses");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: Value = resp.json().await.expect("decode /responses body");
+    assert_eq!(body["id"], "resp_mock_001");
+
+    let provider_id: String = sqlx::query_scalar(
+        "SELECT provider_id FROM request_logs ORDER BY created_at DESC, request_id DESC LIMIT 1",
+    )
+    .fetch_one(&gateway.pool)
+    .await
+    .expect("fetch latest passthrough provider id");
+    assert_eq!(provider_id, "provider_openai_backup");
+}
+
 struct SpawnedServer {
     addr: SocketAddr,
 }
@@ -324,6 +357,77 @@ async fn spawn_openai_gateway(base_url: String) -> SpawnedGateway {
     }
 }
 
+async fn spawn_openai_gateway_with_backup(
+    primary_base_url: String,
+    backup_base_url: String,
+) -> SpawnedGateway {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    sqlx::query(
+        "INSERT INTO providers (id, name, kind, base_url, api_key, enabled) VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+    )
+    .bind("provider_openai")
+    .bind("OpenAI Upstream")
+    .bind("openai")
+    .bind(primary_base_url)
+    .bind("sk-upstream")
+    .execute(&pool)
+    .await
+    .expect("insert primary provider");
+
+    sqlx::query(
+        "INSERT INTO providers (id, name, kind, base_url, api_key, enabled) VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+    )
+    .bind("provider_openai_backup")
+    .bind("OpenAI Upstream Backup")
+    .bind("openai")
+    .bind(backup_base_url)
+    .bind("sk-upstream-backup")
+    .execute(&pool)
+    .await
+    .expect("insert backup provider");
+
+    sqlx::query(
+        "INSERT INTO gateways (id, name, listen_host, listen_port, inbound_protocol, upstream_protocol, default_provider_id, default_model, enabled) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
+    )
+    .bind("gw_openai")
+    .bind("Gateway OpenAI")
+    .bind("127.0.0.1")
+    .bind(18889_i64)
+    .bind("openai")
+    .bind("provider_default")
+    .bind("provider_openai")
+    .bind("gpt-5-codex")
+    .execute(&pool)
+    .await
+    .expect("insert gateway");
+
+    sqlx::query(
+        r#"
+        INSERT INTO gateway_route_targets (id, gateway_id, provider_id, priority, enabled)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        "#,
+    )
+    .bind("gw_openai__route__1")
+    .bind("gw_openai")
+    .bind("provider_openai_backup")
+    .bind(1_i64)
+    .bind(1_i64)
+    .execute(&pool)
+    .await
+    .expect("insert backup route target");
+
+    let app = build_openai_router(OpenAiRouteState::new(pool.clone(), "gw_openai"));
+    let server = spawn_server(app).await;
+    SpawnedGateway {
+        addr: server.addr,
+        pool,
+    }
+}
+
 async fn spawn_upstream_mock() -> SpawnedServer {
     let app = Router::new()
         .route("/v1/responses", post(upstream_responses))
@@ -334,6 +438,13 @@ async fn spawn_upstream_mock() -> SpawnedServer {
 async fn spawn_text_plain_sse_upstream_mock() -> SpawnedServer {
     let app = Router::new()
         .route("/v1/responses", post(upstream_responses_text_plain_sse))
+        .route("/healthz", get(|| async { "ok" }));
+    spawn_server(app).await
+}
+
+async fn spawn_failing_responses_upstream_mock() -> SpawnedServer {
+    let app = Router::new()
+        .route("/v1/responses", post(upstream_responses_failing))
         .route("/healthz", get(|| async { "ok" }));
     spawn_server(app).await
 }
@@ -421,6 +532,18 @@ async fn upstream_responses_text_plain_sse(request: Request) -> impl IntoRespons
     (
         [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
         Body::from_stream(stream::iter(chunks)),
+    )
+        .into_response()
+}
+
+async fn upstream_responses_failing() -> impl IntoResponse {
+    (
+        axum::http::StatusCode::BAD_GATEWAY,
+        axum::Json(json!({
+            "error": {
+                "message": "upstream temporary failure"
+            }
+        })),
     )
         .into_response()
 }
