@@ -89,6 +89,7 @@ struct TopologyCanvasNodeSummary: Identifiable, Hashable {
     let metricLine: String
     let detailLine: String
     let hoverSummary: TopologyCanvasNodeHoverSummary
+    let anchorLineCount: Int
 }
 
 enum TopologyCanvasHoverTarget: Equatable {
@@ -159,6 +160,12 @@ struct TopologyCanvasStageLayout {
     let minReadableBandWidth: CGFloat
     let maxRenderedBandWidth: CGFloat
     let bandGap: CGFloat
+    let showsOuterPanel: Bool
+    let showsCanvasBackground: Bool
+    let showsCanvasBorder: Bool
+    let showsColumnHeaders: Bool
+    let showsColumnRails: Bool
+    let showsNodeDetailLine: Bool
 
     static let sankey = TopologyCanvasStageLayout(
         canvasPadding: 22,
@@ -170,12 +177,38 @@ struct TopologyCanvasStageLayout {
         columnSpacing: 28,
         minReadableBandWidth: 10,
         maxRenderedBandWidth: 34,
-        bandGap: 3
+        bandGap: 3,
+        showsOuterPanel: false,
+        showsCanvasBackground: false,
+        showsCanvasBorder: false,
+        showsColumnHeaders: false,
+        showsColumnRails: false,
+        showsNodeDetailLine: false
     )
 
     func width(forColumnAt index: Int) -> CGFloat {
         index == 1 ? gatewayNodeWidth : nodeWidth
     }
+}
+
+struct TopologyControlStripLayout {
+    let usesSingleLine: Bool
+    let showsSectionTitles: Bool
+    let usesSubtleVerticalDividers: Bool
+    let groupCount: Int
+    let groupSpacing: CGFloat
+    let dividerOpacity: Double
+    let dividerHeight: CGFloat
+
+    static let sankey = TopologyControlStripLayout(
+        usesSingleLine: true,
+        showsSectionTitles: false,
+        usesSubtleVerticalDividers: true,
+        groupCount: 3,
+        groupSpacing: 10,
+        dividerOpacity: 0.34,
+        dividerHeight: 20
+    )
 }
 
 enum TopologyBandScale {
@@ -496,7 +529,8 @@ struct TopologyCanvasScreenModel {
                     hoverSummary: TopologyCanvasNodeHoverSummary(
                         topModelName: topModelName,
                         errorCount: node.errorCount
-                    )
+                    ),
+                    anchorLineCount: 3
                 )
             }
     }
@@ -583,6 +617,7 @@ struct TopologyCanvasView: View {
     @State private var hoverTarget: TopologyCanvasHoverTarget?
 
     private let stageLayout = TopologyCanvasStageLayout.sankey
+    private let controlStripLayout = TopologyControlStripLayout.sankey
 
     private var screenModel: TopologyCanvasScreenModel {
         TopologyCanvasScreenModel.make(
@@ -600,39 +635,35 @@ struct TopologyCanvasView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                SurfaceCard(title: "Topology Flow") {
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack(alignment: .top, spacing: 16) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Entrypoints · Gateways · Providers")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(DesignTokens.textSecondary)
-                                Text("Sankey stage keeps model density inside the link while hover restores diagnostics.")
-                                    .font(.caption2)
-                                    .foregroundStyle(DesignTokens.textSecondary.opacity(0.8))
-                            }
-
-                            Spacer()
-
-                            topologyControlStrip
-                                .frame(maxWidth: 500)
-                        }
-
-                        if let emptyStateText = screenModel.emptyStateText {
-                            emptyStateCard(text: emptyStateText)
-                        } else {
-                            TopologyCanvas(
-                                graph: screenModel.graph,
-                                edges: screenModel.canvasEdges,
-                                nodeSummaries: screenModel.nodeSummaries,
-                                hoverState: hoverState,
-                                stageLayout: stageLayout
-                            ) { nextTarget in
-                                hoverTarget = nextTarget
-                            }
-                            .frame(height: canvasHeight)
-                        }
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Topology")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(DesignTokens.textPrimary)
+                        Text("Sankey flow with inline model density and hover diagnostics.")
+                            .font(.caption)
+                            .foregroundStyle(DesignTokens.textSecondary)
                     }
+
+                    Spacer()
+
+                    topologyControlStrip
+                        .frame(maxWidth: 500)
+                }
+
+                if let emptyStateText = screenModel.emptyStateText {
+                    emptyStateCard(text: emptyStateText)
+                } else {
+                    TopologyCanvas(
+                        graph: screenModel.graph,
+                        edges: screenModel.canvasEdges,
+                        nodeSummaries: screenModel.nodeSummaries,
+                        hoverState: hoverState,
+                        stageLayout: stageLayout
+                    ) { nextTarget in
+                        hoverTarget = nextTarget
+                    }
+                    .frame(height: canvasHeight)
                 }
 
                 HStack(alignment: .top, spacing: 16) {
@@ -702,27 +733,64 @@ struct TopologyCanvasView: View {
     }
 
     private var topologyControlStrip: some View {
-        VStack(alignment: .trailing, spacing: 10) {
-            Picker("Metric", selection: $metricMode) {
-                ForEach(TopologyMetricMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
+        HStack(alignment: .center, spacing: controlStripLayout.groupSpacing) {
+            topologyControlGroup(accessibilityLabel: "Metric") {
+                Picker("Metric", selection: $metricMode) {
+                    ForEach(TopologyMetricMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
                 }
+                .pickerStyle(.segmented)
             }
-            .pickerStyle(.segmented)
 
-            Picker("Flow", selection: $flowMode) {
-                ForEach(TopologyFlowMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
+            if controlStripLayout.usesSubtleVerticalDividers {
+                topologyControlDivider
+            }
+
+            topologyControlGroup(accessibilityLabel: "Flow") {
+                Picker("Flow", selection: $flowMode) {
+                    ForEach(TopologyFlowMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
                 }
+                .pickerStyle(.segmented)
             }
-            .pickerStyle(.segmented)
 
-            Picker("Highlight", selection: $highlightMode) {
-                Text("Top 3").tag(TopologyHighlightMode.top3)
-                Text("Top 5").tag(TopologyHighlightMode.top5)
-                Text("All").tag(TopologyHighlightMode.all)
+            if controlStripLayout.usesSubtleVerticalDividers {
+                topologyControlDivider
             }
-            .pickerStyle(.segmented)
+
+            topologyControlGroup(accessibilityLabel: "Highlight") {
+                Picker("Highlight", selection: $highlightMode) {
+                    Text("Top 3").tag(TopologyHighlightMode.top3)
+                    Text("Top 5").tag(TopologyHighlightMode.top5)
+                    Text("All").tag(TopologyHighlightMode.all)
+                }
+                .pickerStyle(.segmented)
+            }
+        }
+    }
+
+    private var topologyControlDivider: some View {
+        Rectangle()
+            .fill(DesignTokens.borderSubtle.opacity(controlStripLayout.dividerOpacity))
+            .frame(width: 1, height: controlStripLayout.dividerHeight)
+    }
+
+    private func topologyControlGroup<Content: View>(
+        accessibilityLabel: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if controlStripLayout.showsSectionTitles {
+                Text(accessibilityLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(DesignTokens.textSecondary)
+            }
+
+            content()
+                .labelsHidden()
+                .accessibilityLabel(accessibilityLabel)
         }
     }
 
@@ -759,20 +827,14 @@ struct TopologyCanvasView: View {
     private func emptyStateCard(text: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Awaiting traffic")
-                .font(.headline)
+                .font(.headline.weight(.semibold))
                 .foregroundStyle(DesignTokens.textPrimary)
             Text(text)
                 .font(.caption)
                 .foregroundStyle(DesignTokens.textSecondary)
         }
-        .padding(20)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.surfaceSecondary.opacity(0.88))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(DesignTokens.borderSubtle, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var canvasHeight: CGFloat {
@@ -796,13 +858,6 @@ private struct TopologyCanvas: View {
             let bandRegions = buildBandRegions(points: points)
 
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(DesignTokens.topologyStageBackground)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .stroke(DesignTokens.borderSubtle.opacity(0.8), lineWidth: 1)
-                    )
-
                 Canvas { context, size in
                     for region in bandRegions {
                         let fillOpacity = hoverState.edgeOpacity(edgeID: region.edgeID, segmentID: region.segmentID)
@@ -822,38 +877,42 @@ private struct TopologyCanvas: View {
 
                 HStack(alignment: .top, spacing: columnGap) {
                     ForEach(Array(graph.columns.enumerated()), id: \.offset) { index, column in
-                        VStack(alignment: .leading, spacing: 14) {
-                            Text(column.title)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(DesignTokens.textSecondary)
-
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(DesignTokens.topologyRail)
-                                .frame(width: columnWidths[index], height: max(geometry.size.height - 80, 120))
-                                .overlay(alignment: .topLeading) {
-                                    VStack(alignment: .leading, spacing: 18) {
-                                        ForEach(column.nodes) { node in
-                                            if let summary = nodeSummaries[node.id] {
-                                                TopologyNodeAnchor(
-                                                    node: node,
-                                                    summary: summary,
-                                                    width: columnWidths[index],
-                                                    opacity: hoverState.nodeOpacity(nodeID: node.id)
-                                                ) { isHovering in
-                                                    onHoverTargetChanged(isHovering ? .node(nodeID: node.id) : nil)
-                                                }
-                                            }
-                                        }
+                        VStack(alignment: .leading, spacing: 18) {
+                            ForEach(column.nodes) { node in
+                                if let summary = nodeSummaries[node.id] {
+                                    TopologyNodeAnchor(
+                                        node: node,
+                                        summary: summary,
+                                        width: columnWidths[index],
+                                        opacity: hoverState.nodeOpacity(nodeID: node.id),
+                                        showsDetailLine: stageLayout.showsNodeDetailLine
+                                    ) { isHovering in
+                                        onHoverTargetChanged(isHovering ? .node(nodeID: node.id) : nil)
                                     }
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 12)
                                 }
+                            }
                         }
                         .frame(width: columnWidths[index], alignment: .topLeading)
+                        .overlay(alignment: .topLeading) {
+                            if stageLayout.showsColumnRails {
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .fill(DesignTokens.topologyRail)
+                                    .frame(width: columnWidths[index], height: max(geometry.size.height - 80, 120))
+                            }
+                        }
+                        .overlay(alignment: .topLeading) {
+                            if stageLayout.showsColumnHeaders {
+                                Text(column.title)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(DesignTokens.textSecondary)
+                                    .offset(y: -24)
+                            }
+                        }
+                        .padding(.top, stageLayout.showsColumnHeaders ? 24 : 0)
                     }
                 }
                 .padding(.horizontal, stageLayout.canvasPadding)
-                .padding(.top, 18)
+                .padding(.top, stageLayout.showsColumnHeaders ? 18 : 6)
 
                 ForEach(bandRegions) { region in
                     TopologyBandHoverRegion(region: region)
@@ -1033,6 +1092,7 @@ private struct TopologyNodeAnchor: View {
     let summary: TopologyCanvasNodeSummary
     let width: CGFloat
     let opacity: Double
+    let showsDetailLine: Bool
     let onHoverChanged: (Bool) -> Void
 
     private var accentColor: DesignTokens.SemanticColor {
@@ -1062,20 +1122,18 @@ private struct TopologyNodeAnchor: View {
                 .foregroundStyle(DesignTokens.textPrimary)
                 .lineLimit(1)
 
-            Text(summary.detailLine)
-                .font(.caption2)
-                .foregroundStyle(DesignTokens.textSecondary)
-                .lineLimit(1)
+            if showsDetailLine {
+                Text(summary.detailLine)
+                    .font(.caption2)
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .lineLimit(1)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(width: width - 20, alignment: .leading)
-        .background(DesignTokens.topologyAnchorFill.opacity(0.96))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(DesignTokens.borderSubtle.opacity(0.9), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(width: width - 8, alignment: .leading)
+        .background(DesignTokens.topologyAnchorFill.opacity(0.42))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .opacity(opacity)
         .onHover(perform: onHoverChanged)
     }

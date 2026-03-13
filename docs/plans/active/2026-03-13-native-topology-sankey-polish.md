@@ -16,7 +16,107 @@
   - 已补齐 `TopologyCanvasScreenModel` 的轻量节点摘要、hover payload 与 hover state
   - 已抽离 `TopologyBandScale` 与 `TopologyCanvasStageLayout`，锁定最小流带宽度和主舞台比例
   - 已将原生端 `Topology` 画布重构为更接近参考图的三列 Sankey 主舞台
+  - 已将控件条压成单行无标题切换，并用淡竖线保留分组语义
   - 已通过定向测试、完整原生测试、`cargo test -q` 与 `./scripts/e2e/smoke.sh`
+
+## 2026-03-13 Addendum: Flatten Visual Hierarchy
+
+**Goal:** 在不改变三列结构和 hover 诊断能力的前提下，进一步压平 Topology 的视觉层级，减少“卡片里套卡片”的感觉。
+
+**Files:**
+- Modify: `apps/desktop-macos-native/FluxDeckNative/Features/TopologyCanvasView.swift`
+- Modify: `apps/desktop-macos-native/FluxDeckNative/UI/DesignTokens.swift`
+- Modify: `apps/desktop-macos-native/FluxDeckNativeTests/FluxDeckNativeTests.swift`
+- Modify: `docs/plans/active/2026-03-13-native-topology-sankey-polish-design.md`
+- Modify: `docs/progress/2026-03-13-native-topology-token-flow.md`
+
+### Task 6: 压平 Topology 视觉层级
+
+**Step 1: 写失败测试，锁定扁平化显示规则**
+
+新增测试覆盖：
+
+- 画布不再依赖边界与轨道底板
+- 不再显示显式列标题
+- 节点只保留名称、类型/端点、主指标，不再常驻次级诊断
+
+**Step 2: 运行测试，确认失败**
+
+Run:
+
+```bash
+xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative \
+  -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTopologyCanvasFlattensVisualHierarchyWithoutExtraChrome \
+  -derivedDataPath /tmp/fluxdeck-native-derived-sankey-flat-red -quiet
+```
+
+Expected: FAIL
+
+**Step 3: 写最小实现**
+
+- 移除 `Topology` 外层 `SurfaceCard`
+- 移除画布描边、列标题与整列轨道底板
+- 将节点收敛为两行式轻锚点加一行主指标
+- 保持控件、底部摘要、三列位置与 hover 诊断可用
+
+**Step 4: 运行定向测试**
+
+Run:
+
+```bash
+xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative \
+  -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTopologyCanvasFlattensVisualHierarchyWithoutExtraChrome \
+  -derivedDataPath /tmp/fluxdeck-native-derived-sankey-flat-green -quiet
+```
+
+Expected: PASS
+
+### Task 7: 收敛控件条视觉存在感
+
+**Files:**
+- Modify: `apps/desktop-macos-native/FluxDeckNative/Features/TopologyCanvasView.swift`
+- Modify: `apps/desktop-macos-native/FluxDeckNativeTests/FluxDeckNativeTests.swift`
+- Modify: `docs/plans/active/2026-03-13-native-topology-sankey-polish-design.md`
+- Modify: `docs/progress/2026-03-13-native-topology-token-flow.md`
+
+**Step 1: 写失败测试，锁定单行无标题控件条**
+
+新增测试覆盖：
+
+- 三组控件压成单行
+- 不再显示 `Metric / Flow / Highlight` 标题
+- 三组之间只保留淡竖线分组语义
+
+**Step 2: 运行测试，确认失败**
+
+Run:
+
+```bash
+xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative \
+  -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTopologyCanvasUsesSingleLineControlStripWithoutSectionTitles \
+  -derivedDataPath /tmp/fluxdeck-native-derived-sankey-controls-red -quiet
+```
+
+Expected: FAIL
+
+**Step 3: 写最小实现**
+
+- 将三组控件改成单行排列
+- 去掉分组标题文字
+- 用极淡竖线替代大间距或额外容器
+- 保持现有切换能力与交互语义不变
+
+**Step 4: 运行定向测试**
+
+Run:
+
+```bash
+xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative \
+  -only-testing:FluxDeckNativeTests/FluxDeckNativeTests/testTopologyCanvasUsesSingleLineControlStripWithoutSectionTitles \
+  -derivedDataPath /tmp/fluxdeck-native-derived-sankey-controls-green -quiet
+```
+
+Expected: PASS
 
 ---
 

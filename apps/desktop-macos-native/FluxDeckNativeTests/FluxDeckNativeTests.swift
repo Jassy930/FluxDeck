@@ -826,6 +826,40 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(nodeHoverState.edgeOpacity(edgeID: "gw_aux->pv_anthropic", segmentID: "gw_aux->pv_anthropic#gemini-2.5-pro"), 0.16)
     }
 
+    func testTopologyCanvasFlattensVisualHierarchyWithoutExtraChrome() throws {
+        let graph = makeSankeyFixtureGraph()
+        let screen = TopologyCanvasScreenModel.make(
+            graph: graph,
+            metricMode: .tokens,
+            flowMode: .byModel,
+            highlightMode: .top5
+        )
+        let stage = TopologyCanvasStageLayout.sankey
+
+        XCTAssertFalse(stage.showsOuterPanel)
+        XCTAssertFalse(stage.showsCanvasBackground)
+        XCTAssertFalse(stage.showsCanvasBorder)
+        XCTAssertFalse(stage.showsColumnHeaders)
+        XCTAssertFalse(stage.showsColumnRails)
+        XCTAssertFalse(stage.showsNodeDetailLine)
+
+        let gatewaySummary = try XCTUnwrap(screen.nodeSummaries["gw_core"])
+        XCTAssertEqual(gatewaySummary.metricLine, "730 tok · 4 req")
+        XCTAssertEqual(gatewaySummary.subtitle, "127.0.0.1:18080")
+        XCTAssertEqual(gatewaySummary.detailLine, "12 cached · 1 err")
+        XCTAssertEqual(gatewaySummary.anchorLineCount, 3)
+    }
+
+    func testTopologyCanvasUsesSingleLineControlStripWithoutSectionTitles() {
+        let layout = TopologyControlStripLayout.sankey
+
+        XCTAssertTrue(layout.usesSingleLine)
+        XCTAssertFalse(layout.showsSectionTitles)
+        XCTAssertTrue(layout.usesSubtleVerticalDividers)
+        XCTAssertEqual(layout.groupCount, 3)
+        XCTAssertLessThan(layout.dividerOpacity, 0.5)
+    }
+
     func testOverviewDashboardModelBuildsRunningAndTrafficCards() {
         let model = OverviewDashboardModel.make(
             providers: [
