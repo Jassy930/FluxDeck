@@ -13,11 +13,13 @@ pub fn build_observation(
 ) -> ForwardObservation {
     let mut observation = ForwardObservation::new(request_id, gateway_id);
     observation.provider_id = Some(provider_id.to_string());
+    observation.provider_id_initial = Some(provider_id.to_string());
     observation.inbound_protocol = Some("anthropic".to_string());
     observation.upstream_protocol = Some(upstream_protocol.to_string());
     observation.model_requested = requested_model;
     observation.model_effective = effective_model;
     observation.is_stream = is_stream;
+    observation.route_attempt_count = 1;
     observation
 }
 

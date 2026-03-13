@@ -352,6 +352,9 @@ async fn admin_api_response_shape_is_stable() {
     assert!(log_item.get("usage_json").is_some());
     assert!(log_item.get("error_stage").is_some());
     assert!(log_item.get("error_type").is_some());
+    assert!(log_item.get("failover_performed").is_some());
+    assert!(log_item.get("route_attempt_count").is_some());
+    assert!(log_item.get("provider_id_initial").is_some());
     assert!(log_item.get("error").is_some());
     assert!(log_item.get("created_at").is_some());
 }

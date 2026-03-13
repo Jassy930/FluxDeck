@@ -3,11 +3,14 @@ pub struct ForwardObservation {
     pub request_id: String,
     pub gateway_id: String,
     pub provider_id: Option<String>,
+    pub provider_id_initial: Option<String>,
     pub inbound_protocol: Option<String>,
     pub upstream_protocol: Option<String>,
     pub model_requested: Option<String>,
     pub model_effective: Option<String>,
     pub is_stream: bool,
+    pub failover_performed: bool,
+    pub route_attempt_count: i64,
     pub status_code: Option<i64>,
     pub latency_ms: Option<i64>,
     pub first_byte_ms: Option<i64>,
@@ -21,17 +24,30 @@ impl ForwardObservation {
             request_id: request_id.into(),
             gateway_id: gateway_id.into(),
             provider_id: None,
+            provider_id_initial: None,
             inbound_protocol: None,
             upstream_protocol: None,
             model_requested: None,
             model_effective: None,
             is_stream: false,
+            failover_performed: false,
+            route_attempt_count: 0,
             status_code: None,
             latency_ms: None,
             first_byte_ms: None,
             error_stage: None,
             error_type: None,
         }
+    }
+
+    pub fn apply_route_attempts(
+        &mut self,
+        provider_id_initial: Option<String>,
+        route_attempt_count: usize,
+    ) {
+        self.provider_id_initial = provider_id_initial;
+        self.route_attempt_count = route_attempt_count as i64;
+        self.failover_performed = route_attempt_count > 1;
     }
 }
 

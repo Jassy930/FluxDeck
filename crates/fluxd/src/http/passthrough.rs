@@ -26,6 +26,9 @@ struct PassthroughLogDimensions {
     model: Option<String>,
     model_requested: Option<String>,
     model_effective: Option<String>,
+    provider_id_initial: Option<String>,
+    route_attempt_count: usize,
+    failover_performed: bool,
 }
 
 #[derive(Clone)]
@@ -146,6 +149,7 @@ pub async fn handle_passthrough_request(
         }
     };
     let request_model = extract_passthrough_requested_model(inbound_protocol, &body);
+    let provider_id_initial = targets.first().map(|target| target.provider_id.clone());
     let method = parts.method.clone();
     let headers = parts.headers.clone();
     let request_body = body.clone();
@@ -258,6 +262,9 @@ pub async fn handle_passthrough_request(
                 model: request_model.clone(),
                 model_requested: request_model.clone(),
                 model_effective: request_model.clone(),
+                provider_id_initial: provider_id_initial.clone(),
+                route_attempt_count: index + 1,
+                failover_performed: index > 0,
             };
             append_passthrough_log(
                 &log_service,
@@ -395,6 +402,9 @@ pub async fn handle_passthrough_request(
                 model: request_model.clone(),
                 model_requested: request_model.clone(),
                 model_effective: response_model.or_else(|| request_model.clone()),
+                provider_id_initial: provider_id_initial.clone(),
+                route_attempt_count: index + 1,
+                failover_performed: index > 0,
             },
             usage,
             sniffed_stream,
@@ -469,11 +479,16 @@ async fn append_passthrough_log(
     let latency_ms = started_at.elapsed().as_millis() as i64;
     let mut observation = ForwardObservation::new(request_id.clone(), gateway_id.to_string());
     observation.provider_id = Some(provider_id.to_string());
+    observation.apply_route_attempts(
+        dimensions.provider_id_initial,
+        dimensions.route_attempt_count,
+    );
     observation.inbound_protocol = Some(inbound_protocol.to_string());
     observation.upstream_protocol = Some(upstream_protocol.to_string());
     observation.model_requested = dimensions.model_requested.clone();
     observation.model_effective = dimensions.model_effective.clone();
     observation.is_stream = is_stream;
+    observation.failover_performed = dimensions.failover_performed;
     observation.status_code = Some(i64::from(status_code.as_u16()));
     observation.latency_ms = Some(latency_ms);
     observation.first_byte_ms = if is_stream {

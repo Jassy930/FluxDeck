@@ -31,7 +31,6 @@
 ## 下一步
 
 - 当前阶段性提交已完成，后续按 Phase 2 计划继续补齐：
-  - Task 12：failover 观测字段与日志维度
   - Task 13：真实主动探测、冷却窗口、退避策略
   - Task 14：健康状态细化到更小粒度
   - Task 15：原生端链路与健康视图闭环
@@ -136,6 +135,37 @@
   - `anthropic_forwarding_test`：`12 passed`
   - `anthropic_count_tokens_test`：`5 passed`
 
+### Task 12 已完成：failover 观测字段与日志维度
+
+- `request_logs` 已新增：
+  - `failover_performed`
+  - `route_attempt_count`
+  - `provider_id_initial`
+- `RequestLogService` 已把上述字段作为稳定列写入，而不是继续拼进 `error` 文本
+- `GET /admin/logs` 已返回这 3 个字段，Admin API 契约文档已同步更新
+- 当前已覆盖的请求级切流日志路径：
+  - OpenAI direct forwarding
+  - Anthropic `/v1/messages`
+  - Anthropic `/v1/messages/count_tokens`
+  - OpenAI passthrough fallback
+
+验证：
+
+- `cargo test -q -p fluxd --test storage_migration_test migration_adds_request_log_forwarding_columns`
+  - PASS
+- `cargo test -q -p fluxd --test request_log_service_test`
+  - PASS
+- `cargo test -q -p fluxd --test admin_api_test admin_api_response_shape_is_stable`
+  - PASS
+- `cargo test -q -p fluxd --test openai_forwarding_test`
+  - PASS
+- `cargo test -q -p fluxd --test openai_passthrough_fallback_test fails_over_to_backup_provider_for_openai_passthrough_fallback`
+  - PASS
+- `cargo test -q -p fluxd --test anthropic_forwarding_test anthropic_messages_fail_over_to_next_provider_on_upstream_5xx`
+  - PASS
+- `cargo test -q -p fluxd --test anthropic_forwarding_test anthropic_count_tokens_fail_over_to_next_provider_on_upstream_5xx`
+  - PASS
+
 ### 当前剩余缺口
 
 - Task 7 已完成最小 CLI 闭环：
@@ -148,7 +178,6 @@
   - `fluxd` 启动时会拉起后台 `HealthMonitor`
   - `HealthMonitor` 当前会周期性补齐健康快照，并把 `unhealthy` Provider 推进到 `probing`
 - 为兼容 `provider_health_states -> providers` 外键约束，Provider 删除路径已调整为先删健康快照、再删 Provider 实体
-- `request_logs` 还未额外增加 `failover_performed / route_attempt_count / provider_id_initial` 等新观测字段
 - 后台主动探测仍是保守骨架：
   - 还没有真实上游网络探测
   - 还没有独立冷却窗口调度与探测退避
@@ -159,7 +188,7 @@
 | Task | 内容 | 状态 | 最近说明 |
 |------|------|------|----------|
 | 11 | Anthropic `count_tokens` 请求级 failover | 已完成 | 已支持网络错误 / `429` / `5xx` 顺序切流，并回写 Provider 健康状态 |
-| 12 | failover 观测字段与日志维度 | 未开始 | 尚未记录 `failover_performed / route_attempt_count / provider_id_initial` |
+| 12 | failover 观测字段与日志维度 | 已完成 | `request_logs` 与 `GET /admin/logs` 已稳定返回 3 个 failover 观测字段 |
 | 13 | `HealthMonitor` 真实主动探测 | 未开始 | 当前仍为保守骨架，只做快照补齐和 `probing` 推进 |
 | 14 | 健康状态粒度细化 | 未开始 | 当前仍为 Provider 全局维度 |
 | 15 | 原生端链路与健康视图 | 未开始 | 需要在 macOS 原生端补 route targets / health / probe UI |

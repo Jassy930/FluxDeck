@@ -13,6 +13,9 @@ async fn request_logs_persist_forwarding_observation_fields() {
     assert_eq!(row.model_effective.as_deref(), Some("claude-sonnet-4-5"));
     assert_eq!(row.input_tokens, Some(128));
     assert_eq!(row.cached_tokens, Some(64));
+    assert_eq!(row.provider_id_initial.as_deref(), Some("provider_req_log"));
+    assert_eq!(row.route_attempt_count, 2);
+    assert!(row.failover_performed);
 }
 
 struct StoredRequestLogRow {
@@ -20,6 +23,9 @@ struct StoredRequestLogRow {
     model_effective: Option<String>,
     input_tokens: Option<i64>,
     cached_tokens: Option<i64>,
+    provider_id_initial: Option<String>,
+    route_attempt_count: i64,
+    failover_performed: bool,
 }
 
 async fn setup_db() -> sqlx::SqlitePool {
@@ -62,10 +68,13 @@ async fn append_test_log(pool: &sqlx::SqlitePool) {
     let service = RequestLogService::new(pool.clone());
     let mut observation = ForwardObservation::new("req_forward_obs", "gw_req_log");
     observation.provider_id = Some("provider_req_log".to_string());
+    observation.provider_id_initial = Some("provider_req_log".to_string());
     observation.inbound_protocol = Some("anthropic".to_string());
     observation.upstream_protocol = Some("anthropic".to_string());
     observation.model_requested = Some("claude-3-7-sonnet".to_string());
     observation.model_effective = Some("claude-sonnet-4-5".to_string());
+    observation.route_attempt_count = 2;
+    observation.failover_performed = true;
     observation.status_code = Some(200);
     observation.latency_ms = Some(84);
     observation.first_byte_ms = Some(21);
@@ -100,8 +109,19 @@ async fn append_test_log(pool: &sqlx::SqlitePool) {
 }
 
 async fn fetch_latest_log(pool: &sqlx::SqlitePool) -> StoredRequestLogRow {
-    let row = sqlx::query_as::<_, (Option<String>, Option<String>, Option<i64>, Option<i64>)>(
-        "SELECT model_requested, model_effective, input_tokens, cached_tokens FROM request_logs WHERE request_id = ?1",
+    let row = sqlx::query_as::<
+        _,
+        (
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+            Option<String>,
+            i64,
+            i64,
+        ),
+    >(
+        "SELECT model_requested, model_effective, input_tokens, cached_tokens, provider_id_initial, route_attempt_count, failover_performed FROM request_logs WHERE request_id = ?1",
     )
     .bind("req_forward_obs")
     .fetch_one(pool)
@@ -113,5 +133,8 @@ async fn fetch_latest_log(pool: &sqlx::SqlitePool) -> StoredRequestLogRow {
         model_effective: row.1,
         input_tokens: row.2,
         cached_tokens: row.3,
+        provider_id_initial: row.4,
+        route_attempt_count: row.5,
+        failover_performed: row.6 != 0,
     }
 }

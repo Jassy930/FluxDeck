@@ -9,12 +9,27 @@ use crate::service::provider_health_service::ProviderHealthService;
 use crate::upstream::anthropic_client::AnthropicClient;
 use crate::upstream::openai_client::OpenAiClient;
 
+#[derive(Debug, Clone)]
+pub struct RouteAttemptTrace {
+    pub provider_id_initial: Option<String>,
+    pub route_attempt_count: usize,
+}
+
+impl RouteAttemptTrace {
+    fn for_attempts(targets: &[ResolvedTarget], route_attempt_count: usize) -> Self {
+        Self {
+            provider_id_initial: targets.first().map(|target| target.provider_id.clone()),
+            route_attempt_count,
+        }
+    }
+}
+
 pub async fn execute_openai_json(
     pool: &SqlitePool,
     gateway_id: &str,
     client: &OpenAiClient,
     payload: &Value,
-) -> Result<(ResolvedTarget, StatusCode, Value)> {
+) -> Result<(ResolvedTarget, StatusCode, Value, RouteAttemptTrace)> {
     let targets = RouteSelector::new(pool.clone())
         .ordered_candidates(gateway_id)
         .await?;
@@ -42,7 +57,12 @@ pub async fn execute_openai_json(
                         .await;
                 }
 
-                return Ok((target.clone(), status, body));
+                return Ok((
+                    target.clone(),
+                    status,
+                    body,
+                    RouteAttemptTrace::for_attempts(&targets, index + 1),
+                ));
             }
             Err(err) => {
                 let message = err.to_string();
@@ -66,7 +86,12 @@ pub async fn execute_openai_stream(
     gateway_id: &str,
     client: &OpenAiClient,
     payload: &Value,
-) -> Result<(ResolvedTarget, StatusCode, reqwest::Response)> {
+) -> Result<(
+    ResolvedTarget,
+    StatusCode,
+    reqwest::Response,
+    RouteAttemptTrace,
+)> {
     let targets = RouteSelector::new(pool.clone())
         .ordered_candidates(gateway_id)
         .await?;
@@ -94,7 +119,12 @@ pub async fn execute_openai_stream(
                         .await;
                 }
 
-                return Ok((target.clone(), status, response));
+                return Ok((
+                    target.clone(),
+                    status,
+                    response,
+                    RouteAttemptTrace::for_attempts(&targets, index + 1),
+                ));
             }
             Err(err) => {
                 let message = err.to_string();

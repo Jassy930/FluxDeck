@@ -573,11 +573,29 @@ Run: `cargo test -q -p fluxd --test anthropic_forwarding_test`
 - Modify: `docs/contracts/admin-api-v1.md`
 - Modify: `docs/progress/2026-03-13-multi-provider-failover.md`
 
+**状态：已完成（2026-03-13）**
+
 **目标：**
 
 - 新增 `failover_performed`
 - 新增 `route_attempt_count`
 - 新增 `provider_id_initial`
+
+**完成说明：**
+
+- 已新增 migration，把 3 个字段落到 `request_logs`
+- `RequestLogService` 改为写稳定列，`GET /admin/logs` 已返回这些字段
+- 已覆盖 OpenAI direct、Anthropic direct、Anthropic `count_tokens`、OpenAI passthrough 的请求级 failover 观测
+
+**验证：**
+
+- `cargo test -q -p fluxd --test storage_migration_test migration_adds_request_log_forwarding_columns`
+- `cargo test -q -p fluxd --test request_log_service_test`
+- `cargo test -q -p fluxd --test admin_api_test admin_api_response_shape_is_stable`
+- `cargo test -q -p fluxd --test openai_forwarding_test`
+- `cargo test -q -p fluxd --test openai_passthrough_fallback_test fails_over_to_backup_provider_for_openai_passthrough_fallback`
+- `cargo test -q -p fluxd --test anthropic_forwarding_test anthropic_messages_fail_over_to_next_provider_on_upstream_5xx`
+- `cargo test -q -p fluxd --test anthropic_forwarding_test anthropic_count_tokens_fail_over_to_next_provider_on_upstream_5xx`
 
 ### Task 13: 强化 `HealthMonitor` 主动探测
 

@@ -315,6 +315,12 @@ async fn anthropic_messages_fail_over_to_next_provider_on_upstream_5xx() {
     let log = latest_request_log(&pool).await;
     assert_eq!(log.provider_id.as_deref(), Some("provider_openai_b"));
     assert_eq!(
+        log.provider_id_initial.as_deref(),
+        Some("provider_openai_a")
+    );
+    assert_eq!(log.route_attempt_count, 2);
+    assert!(log.failover_performed);
+    assert_eq!(
         provider_health_status(&pool, "provider_openai_a").await,
         Some("degraded".to_string())
     );
@@ -349,6 +355,12 @@ async fn anthropic_count_tokens_fail_over_to_next_provider_on_upstream_5xx() {
     let log = latest_request_log(&pool).await;
     assert_eq!(log.provider_id.as_deref(), Some("provider_openai_b"));
     assert_eq!(
+        log.provider_id_initial.as_deref(),
+        Some("provider_openai_a")
+    );
+    assert_eq!(log.route_attempt_count, 2);
+    assert!(log.failover_performed);
+    assert_eq!(
         provider_health_status(&pool, "provider_openai_a").await,
         Some("degraded".to_string())
     );
@@ -364,6 +376,9 @@ struct RequestLogRow {
     upstream_protocol: Option<String>,
     model_effective: Option<String>,
     input_tokens: Option<i64>,
+    provider_id_initial: Option<String>,
+    route_attempt_count: i64,
+    failover_performed: bool,
 }
 
 async fn spawn_upstream_mock() -> SpawnedServer {
@@ -634,9 +649,12 @@ async fn latest_request_log(pool: &sqlx::SqlitePool) -> RequestLogRow {
             Option<String>,
             Option<String>,
             Option<i64>,
+            Option<String>,
+            i64,
+            i64,
         ),
     >(
-        "SELECT provider_id, inbound_protocol, upstream_protocol, model_effective, input_tokens FROM request_logs ORDER BY created_at DESC LIMIT 1",
+        "SELECT provider_id, inbound_protocol, upstream_protocol, model_effective, input_tokens, provider_id_initial, route_attempt_count, failover_performed FROM request_logs ORDER BY created_at DESC LIMIT 1",
     )
     .fetch_one(pool)
     .await
@@ -648,6 +666,9 @@ async fn latest_request_log(pool: &sqlx::SqlitePool) -> RequestLogRow {
         upstream_protocol: row.2,
         model_effective: row.3,
         input_tokens: row.4,
+        provider_id_initial: row.5,
+        route_attempt_count: row.6,
+        failover_performed: row.7 != 0,
     }
 }
 

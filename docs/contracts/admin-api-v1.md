@@ -280,6 +280,7 @@
 - `request_id: string`
 - `gateway_id: string`
 - `provider_id: string`
+- `provider_id_initial: string | null`
 - `model: string | null`
 - `inbound_protocol: string | null`
 - `upstream_protocol: string | null`
@@ -296,6 +297,8 @@
 - `usage_json: string | null`
 - `error_stage: string | null`
 - `error_type: string | null`
+- `failover_performed: boolean`
+- `route_attempt_count: number`
 - `error: string | null`
 - `created_at: string`
 
@@ -310,6 +313,10 @@
 
 - `error` 字段在兼容模式相关路径下可能附带维度标签，格式示例：
   - `dimensions={"compatibility_mode":"compatible","event":"degraded_to_estimate"}`
+- `provider_id_initial / route_attempt_count / failover_performed` 用于表达请求级故障切流轨迹：
+  - `provider_id_initial`：本次请求最先尝试的 provider
+  - `route_attempt_count`：本次请求实际尝试过的 route target 数量
+  - `failover_performed=true` 表示本次请求在首个 target 失败后切到了后续 target
 - `inbound_protocol / upstream_protocol` 用于区分真实转发链路，例如 `anthropic -> openai`、`anthropic -> anthropic`
 - `model_requested / model_effective` 用于区分入站请求模型与最终发往上游的模型（例如发生了模型映射）
 - `cached_tokens` 是稳定聚合字段，用于表达缓存命中的 token；原始 provider usage 明细仍保留在 `usage_json`

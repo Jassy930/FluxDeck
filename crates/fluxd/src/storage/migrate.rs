@@ -50,7 +50,10 @@ async fn repair_request_log_resource_foreign_keys(pool: &SqlitePool) -> Result<(
             total_tokens INTEGER,
             usage_json TEXT,
             error_stage TEXT,
-            error_type TEXT
+            error_type TEXT,
+            failover_performed INTEGER NOT NULL DEFAULT 0,
+            route_attempt_count INTEGER NOT NULL DEFAULT 0,
+            provider_id_initial TEXT
         )
         "#,
     )
@@ -80,7 +83,10 @@ async fn repair_request_log_resource_foreign_keys(pool: &SqlitePool) -> Result<(
             total_tokens,
             usage_json,
             error_stage,
-            error_type
+            error_type,
+            failover_performed,
+            route_attempt_count,
+            provider_id_initial
         )
         SELECT
             request_id,
@@ -103,7 +109,10 @@ async fn repair_request_log_resource_foreign_keys(pool: &SqlitePool) -> Result<(
             total_tokens,
             usage_json,
             error_stage,
-            error_type
+            error_type,
+            0 AS failover_performed,
+            0 AS route_attempt_count,
+            NULL AS provider_id_initial
         FROM request_logs
         "#,
     )

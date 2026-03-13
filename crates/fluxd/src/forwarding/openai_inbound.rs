@@ -26,11 +26,13 @@ pub fn build_observation(
 ) -> ForwardObservation {
     let mut observation = ForwardObservation::new(request_id, gateway_id);
     observation.provider_id = Some(target.provider_id.clone());
+    observation.provider_id_initial = Some(target.provider_id.clone());
     observation.inbound_protocol = Some("openai".to_string());
     observation.upstream_protocol = Some(target.upstream_protocol.clone());
     observation.model_requested = requested_model.clone();
     observation.model_effective = target.effective_model.clone().or(requested_model);
     observation.is_stream = is_stream;
+    observation.route_attempt_count = 1;
     observation
 }
 

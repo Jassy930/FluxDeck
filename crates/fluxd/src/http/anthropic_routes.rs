@@ -19,7 +19,7 @@ use crate::forwarding::anthropic_inbound::{
     usage_from_input_tokens,
 };
 use crate::forwarding::route_selector::RouteSelector;
-use crate::forwarding::types::UsageSnapshot;
+use crate::forwarding::types::{ForwardObservation, UsageSnapshot};
 use crate::protocol::adapters::anthropic::{decode_anthropic_request, AnthropicSseEncoder};
 use crate::protocol::adapters::openai::{encode_openai_chat_request, OpenAiSseDecoder};
 use crate::protocol::ir::IrRequest;
@@ -208,6 +208,11 @@ async fn forward_messages(
                                         model.clone(),
                                         true,
                                     );
+                                    apply_route_attempts_to_observation(
+                                        &mut observation,
+                                        &targets,
+                                        index + 1,
+                                    );
                                     apply_anthropic_response(
                                         &mut observation,
                                         i64::from(status_code.as_u16()),
@@ -333,6 +338,11 @@ async fn forward_messages(
                                     requested_model.clone(),
                                     model.clone(),
                                     false,
+                                );
+                                apply_route_attempts_to_observation(
+                                    &mut observation,
+                                    &targets,
+                                    index + 1,
                                 );
                                 apply_anthropic_response(
                                     &mut observation,
@@ -503,6 +513,11 @@ async fn forward_messages(
                                     model.clone(),
                                     true,
                                 );
+                                apply_route_attempts_to_observation(
+                                    &mut observation,
+                                    &targets,
+                                    index + 1,
+                                );
                                 apply_anthropic_response(
                                     &mut observation,
                                     i64::from(status_code.as_u16()),
@@ -660,6 +675,11 @@ async fn forward_messages(
                                     requested_model.clone(),
                                     model.clone(),
                                     false,
+                                );
+                                apply_route_attempts_to_observation(
+                                    &mut observation,
+                                    &targets,
+                                    index + 1,
                                 );
                                 let effective_model = anthropic_response
                                     .get("model")
@@ -943,6 +963,11 @@ async fn count_tokens_handler(
                                     model.clone(),
                                     false,
                                 );
+                                apply_route_attempts_to_observation(
+                                    &mut observation,
+                                    &targets,
+                                    index + 1,
+                                );
                                 apply_anthropic_response(
                                     &mut observation,
                                     i64::from(StatusCode::OK.as_u16()),
@@ -1071,6 +1096,20 @@ async fn count_tokens_handler(
                             };
 
                             let counted = count_tokens_with_fallback(&ir, Some(upstream_tokens));
+                            let mut observation = build_anthropic_observation(
+                                &request_id,
+                                &state.gateway_id,
+                                &target.provider_id,
+                                &target.upstream_protocol,
+                                requested_model.clone(),
+                                model.clone(),
+                                false,
+                            );
+                            apply_route_attempts_to_observation(
+                                &mut observation,
+                                &targets,
+                                index + 1,
+                            );
                             append_log(
                                 &log_service,
                                 RequestLogEntry {
@@ -1081,7 +1120,7 @@ async fn count_tokens_handler(
                                     status_code: i64::from(StatusCode::OK.as_u16()),
                                     latency_ms: started_at.elapsed().as_millis() as i64,
                                     error: None,
-                                    observation: Default::default(),
+                                    observation,
                                     usage: Default::default(),
                                 },
                             )
@@ -1814,6 +1853,17 @@ async fn fetch_provider_targets(
 
 fn should_failover_status(status: StatusCode) -> bool {
     status.as_u16() == 429 || status.is_server_error()
+}
+
+fn apply_route_attempts_to_observation(
+    observation: &mut ForwardObservation,
+    targets: &[ProviderRoutingTarget],
+    attempt_count: usize,
+) {
+    observation.apply_route_attempts(
+        targets.first().map(|target| target.provider_id.clone()),
+        attempt_count,
+    );
 }
 
 fn apply_extension_passthrough(ir: &IrRequest, upstream_payload: &mut Value) {

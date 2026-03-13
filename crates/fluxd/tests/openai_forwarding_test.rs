@@ -143,13 +143,16 @@ async fn fails_over_to_second_provider_when_primary_returns_502() {
     assert_eq!(body["id"], "chatcmpl_mock_001");
     assert_eq!(body["object"], "chat.completion");
 
-    let provider_id: String = sqlx::query_scalar(
-        "SELECT provider_id FROM request_logs ORDER BY created_at DESC, request_id DESC LIMIT 1",
+    let row: (String, Option<String>, i64, i64) = sqlx::query_as(
+        "SELECT provider_id, provider_id_initial, route_attempt_count, failover_performed FROM request_logs ORDER BY created_at DESC, request_id DESC LIMIT 1",
     )
     .fetch_one(&pool)
     .await
-    .expect("fetch latest provider id");
-    assert_eq!(provider_id, "provider_openai_backup");
+    .expect("fetch latest routing log");
+    assert_eq!(row.0, "provider_openai_backup");
+    assert_eq!(row.1.as_deref(), Some("provider_openai_primary"));
+    assert_eq!(row.2, 2);
+    assert_eq!(row.3, 1);
 }
 
 struct SpawnedServer {

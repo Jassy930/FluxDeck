@@ -126,6 +126,9 @@ async fn migration_adds_request_log_forwarding_columns() {
         "usage_json",
         "error_stage",
         "error_type",
+        "failover_performed",
+        "route_attempt_count",
+        "provider_id_initial",
     ] {
         let found = sqlx::query_scalar::<_, String>(
             "SELECT name FROM pragma_table_info('request_logs') WHERE name = ?1",

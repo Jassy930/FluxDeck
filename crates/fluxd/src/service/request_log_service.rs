@@ -48,6 +48,20 @@ impl RequestLogService {
 
     pub async fn append_and_trim(&self, entry: RequestLogEntry, keep: i64) -> Result<()> {
         let mut tx = self.pool.begin().await?;
+        let provider_id_initial = entry
+            .observation
+            .provider_id_initial
+            .clone()
+            .or_else(|| entry.observation.provider_id.clone())
+            .or_else(|| (entry.provider_id != "unknown").then_some(entry.provider_id.clone()));
+        let route_attempt_count = if entry.observation.route_attempt_count > 0 {
+            entry.observation.route_attempt_count
+        } else if provider_id_initial.is_some() {
+            1
+        } else {
+            0
+        };
+        let failover_performed = entry.observation.failover_performed || route_attempt_count > 1;
 
         sqlx::query(
             r#"
@@ -55,9 +69,10 @@ impl RequestLogService {
                 request_id, gateway_id, provider_id, model, status_code, latency_ms, error,
                 inbound_protocol, upstream_protocol, model_requested, model_effective,
                 stream, first_byte_ms, input_tokens, output_tokens, cached_tokens,
-                total_tokens, usage_json, error_stage, error_type
+                total_tokens, usage_json, error_stage, error_type,
+                failover_performed, route_attempt_count, provider_id_initial
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
             "#,
         )
         .bind(&entry.request_id)
@@ -80,6 +95,9 @@ impl RequestLogService {
         .bind(entry.usage.usage_json.as_ref().map(Value::to_string))
         .bind(&entry.observation.error_stage)
         .bind(&entry.observation.error_type)
+        .bind(if failover_performed { 1_i64 } else { 0_i64 })
+        .bind(route_attempt_count)
+        .bind(provider_id_initial)
         .execute(&mut *tx)
         .await?;
 
