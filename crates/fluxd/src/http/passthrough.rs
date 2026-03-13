@@ -79,6 +79,7 @@ pub async fn handle_passthrough_request(
                 "unknown",
                 StatusCode::BAD_GATEWAY,
                 started_at,
+                None,
                 Some(format!("resolve gateway target failed: {err}")),
                 Some(("resolve_target", "config_error")),
                 Default::default(),
@@ -109,6 +110,7 @@ pub async fn handle_passthrough_request(
             &target.upstream_protocol,
             StatusCode::NOT_IMPLEMENTED,
             started_at,
+            None,
             Some(format!(
                 "passthrough fallback only supports same-protocol forwarding, got inbound `{inbound_protocol}` and upstream `{}`",
                 target.upstream_protocol
@@ -150,6 +152,7 @@ pub async fn handle_passthrough_request(
                 &target.upstream_protocol,
                 StatusCode::BAD_REQUEST,
                 started_at,
+                None,
                 Some(format!("read request body failed: {err}")),
                 Some(("read_body", "invalid_request_body")),
                 Default::default(),
@@ -202,6 +205,7 @@ pub async fn handle_passthrough_request(
                 &target.upstream_protocol,
                 StatusCode::BAD_GATEWAY,
                 started_at,
+                None,
                 Some(format!("passthrough upstream request failed: {err}")),
                 Some(("upstream_request", "upstream_error")),
                 Default::default(),
@@ -224,6 +228,7 @@ pub async fn handle_passthrough_request(
 
     let status = response.status();
     let headers = response.headers().clone();
+    let first_byte_ms = started_at.elapsed().as_millis() as i64;
     let is_stream = headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -244,6 +249,7 @@ pub async fn handle_passthrough_request(
             &target.upstream_protocol,
             status,
             started_at,
+            Some(first_byte_ms),
             None,
             None,
             stream_dimensions,
@@ -294,6 +300,7 @@ pub async fn handle_passthrough_request(
                 &target.upstream_protocol,
                 StatusCode::BAD_GATEWAY,
                 started_at,
+                None,
                 Some(format!("read passthrough upstream response failed: {err}")),
                 Some(("read_upstream_response", "upstream_response_error")),
                 Default::default(),
@@ -330,6 +337,7 @@ pub async fn handle_passthrough_request(
         &target.upstream_protocol,
         status,
         started_at,
+        Some(started_at.elapsed().as_millis() as i64),
         None,
         None,
         PassthroughLogDimensions {
@@ -388,6 +396,7 @@ async fn append_passthrough_log(
     upstream_protocol: &str,
     status_code: StatusCode,
     started_at: Instant,
+    first_byte_ms: Option<i64>,
     error: Option<String>,
     error_details: Option<(&str, &str)>,
     dimensions: PassthroughLogDimensions,
@@ -404,6 +413,7 @@ async fn append_passthrough_log(
     observation.is_stream = is_stream;
     observation.status_code = Some(i64::from(status_code.as_u16()));
     observation.latency_ms = Some(latency_ms);
+    observation.first_byte_ms = first_byte_ms;
     if let Some((stage, error_type)) = error_details {
         observation.error_stage = Some(stage.to_string());
         observation.error_type = Some(error_type.to_string());

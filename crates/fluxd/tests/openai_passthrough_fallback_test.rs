@@ -146,6 +146,34 @@ async fn persists_model_dimensions_for_non_stream_openai_responses_fallback() {
 }
 
 #[tokio::test]
+async fn persists_first_byte_for_non_stream_openai_responses_fallback() {
+    let upstream = spawn_upstream_mock().await;
+    let gateway = spawn_openai_gateway(format!("http://{}/v1", upstream.addr)).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/responses", gateway.addr))
+        .json(&json!({
+            "model": "gpt-5-codex",
+            "input": "ping"
+        }))
+        .send()
+        .await
+        .expect("call gateway /responses");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let row = sqlx::query_as::<_, (Option<i64>, Option<i64>)>(
+        "SELECT first_byte_ms, latency_ms FROM request_logs ORDER BY rowid DESC LIMIT 1",
+    )
+    .fetch_one(&gateway.pool)
+    .await
+    .expect("fetch fallback first byte log");
+
+    assert_eq!(row.0, row.1);
+    assert!(row.0.is_some());
+}
+
+#[tokio::test]
 async fn persists_usage_for_streaming_openai_responses_fallback_after_stream_finishes() {
     let upstream = spawn_upstream_mock().await;
     let gateway = spawn_openai_gateway(format!("http://{}/v1", upstream.addr)).await;
@@ -177,6 +205,38 @@ async fn persists_usage_for_streaming_openai_responses_fallback_after_stream_fin
     assert_eq!(row.1, Some(13));
     assert_eq!(row.2, Some(8));
     assert_eq!(row.3, Some(34));
+}
+
+#[tokio::test]
+async fn persists_first_byte_for_streaming_openai_responses_fallback() {
+    let upstream = spawn_upstream_mock().await;
+    let gateway = spawn_openai_gateway(format!("http://{}/v1", upstream.addr)).await;
+
+    let body = reqwest::Client::new()
+        .post(format!("http://{}/responses", gateway.addr))
+        .json(&json!({
+            "model": "gpt-5-codex",
+            "input": "ping",
+            "stream": true
+        }))
+        .send()
+        .await
+        .expect("call gateway /responses")
+        .text()
+        .await
+        .expect("read streaming fallback body");
+
+    assert!(body.contains("response.completed"));
+
+    let row = sqlx::query_as::<_, (Option<i64>, i64)>(
+        "SELECT first_byte_ms, latency_ms FROM request_logs ORDER BY rowid DESC LIMIT 1",
+    )
+    .fetch_one(&gateway.pool)
+    .await
+    .expect("fetch fallback streaming first byte log");
+
+    assert!(row.0.is_some());
+    assert!(row.1 >= row.0.unwrap_or_default());
 }
 
 struct SpawnedServer {
