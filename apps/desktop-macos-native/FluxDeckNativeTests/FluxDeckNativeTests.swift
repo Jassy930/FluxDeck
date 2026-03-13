@@ -232,6 +232,600 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(graph.edges.first?.requestCount, 2)
     }
 
+    func testTopologyGraphCoalescesDuplicateEntrypoints() {
+        let gateways = [
+            AdminGateway(
+                id: "gw_a",
+                name: "Gateway A",
+                listenHost: "127.0.0.1",
+                listenPort: 18081,
+                inboundProtocol: "openai",
+                defaultProviderId: "pv_a",
+                enabled: true,
+                autoStart: true,
+                runtimeStatus: "running",
+                lastError: nil
+            ),
+            AdminGateway(
+                id: "gw_b",
+                name: "Gateway B",
+                listenHost: "127.0.0.1",
+                listenPort: 18081,
+                inboundProtocol: "openai",
+                defaultProviderId: "pv_b",
+                enabled: true,
+                autoStart: true,
+                runtimeStatus: "running",
+                lastError: nil
+            )
+        ]
+
+        let graph = TopologyGraph.make(
+            gateways: gateways,
+            providers: [],
+            logs: [
+                AdminLog(
+                    requestID: "req_1",
+                    gatewayID: "gw_a",
+                    providerID: "pv_a",
+                    model: "gpt-4o-mini",
+                    statusCode: 200,
+                    latencyMs: 100,
+                    totalTokens: 120,
+                    createdAt: "2026-03-06T10:00:00Z"
+                ),
+                AdminLog(
+                    requestID: "req_2",
+                    gatewayID: "gw_b",
+                    providerID: "pv_b",
+                    model: "gpt-4o-mini",
+                    statusCode: 200,
+                    latencyMs: 120,
+                    totalTokens: 80,
+                    createdAt: "2026-03-06T10:01:00Z"
+                )
+            ]
+        )
+
+        XCTAssertEqual(graph.columns[0].nodes.count, 1)
+        XCTAssertEqual(graph.columns[0].nodes.first?.id, "entrypoint:127.0.0.1:18081")
+        XCTAssertEqual(graph.columns[0].nodes.first?.totalTokens, 200)
+        XCTAssertEqual(graph.columns[0].nodes.first?.requestCount, 2)
+    }
+
+    func testTopologyGraphAggregatesTokenSegmentsPerEdge() throws {
+        let graph = TopologyGraph.make(
+            gateways: [
+                AdminGateway(
+                    id: "gw",
+                    name: "Gateway",
+                    listenHost: "127.0.0.1",
+                    listenPort: 18080,
+                    inboundProtocol: "openai",
+                    defaultProviderId: "pv",
+                    enabled: true,
+                    autoStart: true,
+                    runtimeStatus: "running",
+                    lastError: nil
+                )
+            ],
+            providers: [
+                AdminProvider(
+                    id: "pv",
+                    name: "Provider",
+                    kind: "openai",
+                    baseURL: "https://api.openai.com/v1",
+                    apiKey: "sk",
+                    models: ["gpt-4o-mini", "gpt-4.1-mini"],
+                    enabled: true
+                )
+            ],
+            logs: [
+                AdminLog(
+                    requestID: "req_1",
+                    gatewayID: "gw",
+                    providerID: "pv",
+                    model: "fallback-model",
+                    modelEffective: "gpt-4o-mini",
+                    statusCode: 200,
+                    latencyMs: 120,
+                    inputTokens: 100,
+                    outputTokens: 50,
+                    cachedTokens: 10,
+                    totalTokens: 150,
+                    error: nil,
+                    createdAt: "2026-03-06T10:00:00Z"
+                ),
+                AdminLog(
+                    requestID: "req_2",
+                    gatewayID: "gw",
+                    providerID: "pv",
+                    model: "gpt-4o-mini",
+                    statusCode: 502,
+                    latencyMs: 800,
+                    inputTokens: 40,
+                    outputTokens: 20,
+                    cachedTokens: 5,
+                    totalTokens: 60,
+                    error: "bad gateway",
+                    createdAt: "2026-03-06T10:01:00Z"
+                ),
+                AdminLog(
+                    requestID: "req_3",
+                    gatewayID: "gw",
+                    providerID: "pv",
+                    model: "gpt-4.1-mini",
+                    statusCode: 200,
+                    latencyMs: 90,
+                    inputTokens: 60,
+                    outputTokens: 20,
+                    cachedTokens: 0,
+                    totalTokens: 80,
+                    error: nil,
+                    createdAt: "2026-03-06T10:02:00Z"
+                )
+            ]
+        )
+
+        let gatewayNode = try XCTUnwrap(graph.columns[1].nodes.first(where: { $0.id == "gw" }))
+        XCTAssertEqual(gatewayNode.totalTokens, 290)
+        XCTAssertEqual(gatewayNode.requestCount, 3)
+        XCTAssertEqual(gatewayNode.cachedTokens, 15)
+        XCTAssertEqual(gatewayNode.errorCount, 1)
+
+        let providerNode = try XCTUnwrap(graph.columns[2].nodes.first(where: { $0.id == "pv" }))
+        XCTAssertEqual(providerNode.totalTokens, 290)
+        XCTAssertEqual(providerNode.requestCount, 3)
+        XCTAssertEqual(providerNode.cachedTokens, 15)
+        XCTAssertEqual(providerNode.errorCount, 1)
+
+        let providerEdge = try XCTUnwrap(graph.edges.first(where: { $0.id == "gw->pv" }))
+        XCTAssertEqual(providerEdge.totalTokens, 290)
+        XCTAssertEqual(providerEdge.requestCount, 3)
+        XCTAssertEqual(providerEdge.cachedTokens, 15)
+        XCTAssertEqual(providerEdge.errorCount, 1)
+        XCTAssertEqual(providerEdge.segments.map(\.modelName), ["gpt-4o-mini", "gpt-4.1-mini"])
+        XCTAssertEqual(providerEdge.segments.map(\.totalTokens), [210, 80])
+        XCTAssertEqual(providerEdge.segments.map(\.requestCount), [2, 1])
+    }
+
+    func testTopologyGraphFallsBackForMissingTokenFields() throws {
+        let graph = TopologyGraph.make(
+            gateways: [
+                AdminGateway(
+                    id: "gw",
+                    name: "Gateway",
+                    listenHost: "0.0.0.0",
+                    listenPort: 18072,
+                    inboundProtocol: "openai",
+                    defaultProviderId: "pv_missing",
+                    enabled: true,
+                    autoStart: true,
+                    runtimeStatus: "running",
+                    lastError: nil
+                )
+            ],
+            providers: [],
+            logs: [
+                AdminLog(
+                    requestID: "req_1",
+                    gatewayID: "gw",
+                    providerID: "pv_missing",
+                    model: nil,
+                    statusCode: 200,
+                    latencyMs: 80,
+                    inputTokens: 70,
+                    outputTokens: 30,
+                    cachedTokens: 7,
+                    totalTokens: nil,
+                    error: nil,
+                    createdAt: "2026-03-06T10:00:00Z"
+                ),
+                AdminLog(
+                    requestID: "req_2",
+                    gatewayID: "gw",
+                    providerID: "pv_missing",
+                    model: nil,
+                    statusCode: 503,
+                    latencyMs: 500,
+                    inputTokens: nil,
+                    outputTokens: nil,
+                    cachedTokens: nil,
+                    totalTokens: nil,
+                    error: "upstream unavailable",
+                    createdAt: "2026-03-06T10:01:00Z"
+                )
+            ]
+        )
+
+        let providerNode = try XCTUnwrap(graph.columns[2].nodes.first(where: { $0.id == "pv_missing" }))
+        XCTAssertEqual(providerNode.title, "pv_missing")
+        XCTAssertEqual(providerNode.subtitle, "UNKNOWN PROVIDER")
+        XCTAssertEqual(providerNode.totalTokens, 100)
+        XCTAssertEqual(providerNode.requestCount, 2)
+        XCTAssertEqual(providerNode.cachedTokens, 7)
+        XCTAssertEqual(providerNode.errorCount, 1)
+
+        let providerEdge = try XCTUnwrap(graph.edges.first(where: { $0.id == "gw->pv_missing" }))
+        XCTAssertEqual(providerEdge.totalTokens, 100)
+        XCTAssertEqual(providerEdge.requestCount, 2)
+        XCTAssertEqual(providerEdge.cachedTokens, 7)
+        XCTAssertEqual(providerEdge.errorCount, 1)
+        XCTAssertEqual(providerEdge.segments.map(\.modelName), ["unknown"])
+        XCTAssertEqual(providerEdge.segments.map(\.totalTokens), [100])
+        XCTAssertEqual(providerEdge.segments.map(\.requestCount), [2])
+    }
+
+    func testTopologyGraphBuildsTopModelHighlightsAndOtherBucket() throws {
+        let graph = TopologyGraph.make(
+            gateways: [
+                AdminGateway(
+                    id: "gw",
+                    name: "Gateway",
+                    listenHost: "127.0.0.1",
+                    listenPort: 18080,
+                    inboundProtocol: "openai",
+                    defaultProviderId: "pv",
+                    enabled: true,
+                    autoStart: true,
+                    runtimeStatus: "running",
+                    lastError: nil
+                )
+            ],
+            providers: [
+                AdminProvider(
+                    id: "pv",
+                    name: "Provider",
+                    kind: "openai",
+                    baseURL: "https://api.openai.com/v1",
+                    apiKey: "sk",
+                    models: ["m1", "m2", "m3", "m4", "m5", "m6"],
+                    enabled: true
+                )
+            ],
+            logs: [
+                AdminLog(requestID: "req_1", gatewayID: "gw", providerID: "pv", model: "m1", statusCode: 200, latencyMs: 20, inputTokens: 400, outputTokens: 100, cachedTokens: 10, totalTokens: 500, error: nil, createdAt: "2026-03-06T10:00:00Z"),
+                AdminLog(requestID: "req_2", gatewayID: "gw", providerID: "pv", model: "m2", statusCode: 200, latencyMs: 20, inputTokens: 320, outputTokens: 80, cachedTokens: 8, totalTokens: 400, error: nil, createdAt: "2026-03-06T10:01:00Z"),
+                AdminLog(requestID: "req_3", gatewayID: "gw", providerID: "pv", model: "m3", statusCode: 200, latencyMs: 20, inputTokens: 240, outputTokens: 60, cachedTokens: 6, totalTokens: 300, error: nil, createdAt: "2026-03-06T10:02:00Z"),
+                AdminLog(requestID: "req_4", gatewayID: "gw", providerID: "pv", model: "m4", statusCode: 200, latencyMs: 20, inputTokens: 160, outputTokens: 40, cachedTokens: 4, totalTokens: 200, error: nil, createdAt: "2026-03-06T10:03:00Z"),
+                AdminLog(requestID: "req_5", gatewayID: "gw", providerID: "pv", model: "m5", statusCode: 200, latencyMs: 20, inputTokens: 96, outputTokens: 24, cachedTokens: 2, totalTokens: 120, error: nil, createdAt: "2026-03-06T10:04:00Z"),
+                AdminLog(requestID: "req_6", gatewayID: "gw", providerID: "pv", model: "m6", statusCode: 503, latencyMs: 20, inputTokens: 48, outputTokens: 12, cachedTokens: 1, totalTokens: 60, error: "upstream unavailable", createdAt: "2026-03-06T10:05:00Z")
+            ]
+        )
+
+        let defaultHighlighted = graph.applyingHighlightMode(.top5)
+        let topThree = graph.applyingHighlightMode(.top3)
+        let allModels = graph.applyingHighlightMode(.all)
+
+        let defaultProviderEdge = try XCTUnwrap(defaultHighlighted.edges.first(where: { $0.id == "gw->pv" }))
+        XCTAssertEqual(defaultProviderEdge.totalTokens, 1_580)
+        XCTAssertEqual(defaultProviderEdge.segments.map(\.modelName), ["m1", "m2", "m3", "m4", "m5", "Other"])
+        XCTAssertEqual(defaultProviderEdge.segments.map(\.totalTokens), [500, 400, 300, 200, 120, 60])
+        XCTAssertEqual(defaultProviderEdge.segments.last?.requestCount, 1)
+        XCTAssertEqual(defaultProviderEdge.segments.last?.cachedTokens, 1)
+        XCTAssertEqual(defaultProviderEdge.segments.last?.errorCount, 1)
+        XCTAssertEqual(defaultProviderEdge.segments.map(\.totalTokens).reduce(0, +), defaultProviderEdge.totalTokens)
+
+        let topThreeProviderEdge = try XCTUnwrap(topThree.edges.first(where: { $0.id == "gw->pv" }))
+        XCTAssertEqual(topThreeProviderEdge.segments.map(\.modelName), ["m1", "m2", "m3", "Other"])
+        XCTAssertEqual(topThreeProviderEdge.segments.map(\.totalTokens), [500, 400, 300, 380])
+        XCTAssertEqual(topThreeProviderEdge.segments.last?.requestCount, 3)
+        XCTAssertEqual(topThreeProviderEdge.segments.last?.cachedTokens, 7)
+        XCTAssertEqual(topThreeProviderEdge.segments.last?.errorCount, 1)
+        XCTAssertEqual(topThreeProviderEdge.segments.map(\.totalTokens).reduce(0, +), topThreeProviderEdge.totalTokens)
+
+        let allModelsProviderEdge = try XCTUnwrap(allModels.edges.first(where: { $0.id == "gw->pv" }))
+        XCTAssertEqual(allModelsProviderEdge.segments.map(\.modelName), ["m1", "m2", "m3", "m4", "m5", "m6"])
+        XCTAssertEqual(allModelsProviderEdge.segments.count, 6)
+        XCTAssertEqual(allModelsProviderEdge.segments.map(\.totalTokens).reduce(0, +), allModelsProviderEdge.totalTokens)
+    }
+
+    func testTopologyCanvasSummaryUsesTokenSemantics() throws {
+        let graph = TopologyGraph.make(
+            gateways: [
+                AdminGateway(
+                    id: "gw",
+                    name: "Gateway",
+                    listenHost: "127.0.0.1",
+                    listenPort: 18080,
+                    inboundProtocol: "openai",
+                    defaultProviderId: "pv",
+                    enabled: true,
+                    autoStart: true,
+                    runtimeStatus: "running",
+                    lastError: nil
+                )
+            ],
+            providers: [
+                AdminProvider(
+                    id: "pv",
+                    name: "Provider",
+                    kind: "openai-response",
+                    baseURL: "https://api.openai.com/v1",
+                    apiKey: "sk",
+                    models: ["m1", "m2", "m3", "m4"],
+                    enabled: true
+                )
+            ],
+            logs: [
+                AdminLog(requestID: "req_1", gatewayID: "gw", providerID: "pv", model: "m1", statusCode: 200, latencyMs: 20, inputTokens: 400, outputTokens: 100, cachedTokens: 10, totalTokens: 500, error: nil, createdAt: "2026-03-06T10:00:00Z"),
+                AdminLog(requestID: "req_2", gatewayID: "gw", providerID: "pv", model: "m2", statusCode: 200, latencyMs: 20, inputTokens: 240, outputTokens: 60, cachedTokens: 6, totalTokens: 300, error: nil, createdAt: "2026-03-06T10:01:00Z"),
+                AdminLog(requestID: "req_3", gatewayID: "gw", providerID: "pv", model: "m3", statusCode: 503, latencyMs: 20, inputTokens: 120, outputTokens: 30, cachedTokens: 2, totalTokens: 150, error: "upstream unavailable", createdAt: "2026-03-06T10:02:00Z"),
+                AdminLog(requestID: "req_4", gatewayID: "gw", providerID: "pv", model: "m4", statusCode: 200, latencyMs: 20, inputTokens: 64, outputTokens: 16, cachedTokens: 1, totalTokens: 80, error: nil, createdAt: "2026-03-06T10:03:00Z")
+            ]
+        )
+
+        let byModel = TopologyCanvasScreenModel.make(
+            graph: graph,
+            metricMode: .tokens,
+            flowMode: .byModel,
+            highlightMode: .top3
+        )
+        let totalOnly = TopologyCanvasScreenModel.make(
+            graph: graph,
+            metricMode: .tokens,
+            flowMode: .totalOnly,
+            highlightMode: .top3
+        )
+
+        XCTAssertEqual(byModel.summaryTitle, "Hot Paths")
+        XCTAssertEqual(byModel.mixTitle, "Model Mix")
+        XCTAssertNil(byModel.emptyStateText)
+        XCTAssertEqual(byModel.hotPaths.first?.tokenText, "1,030 tok")
+        XCTAssertEqual(byModel.hotPaths.first?.requestText, "4 req")
+        XCTAssertEqual(byModel.hotPaths.first?.topModelText, "Top model m1")
+        XCTAssertEqual(byModel.modelMix.map(\.title), ["m1", "m2", "m3", "Other"])
+        XCTAssertEqual(byModel.modelMix.map(\.valueText), ["500 tok", "300 tok", "150 tok", "80 tok"])
+
+        let gatewayNode = try XCTUnwrap(graph.columns[1].nodes.first(where: { $0.id == "gw" }))
+        let gatewayCard = TopologyNodeCardModel.make(node: gatewayNode)
+        XCTAssertEqual(gatewayCard.primaryMetricText, "1,030 tok")
+        XCTAssertEqual(gatewayCard.secondaryMetricText, "4 req")
+
+        let byModelEdge = try XCTUnwrap(byModel.canvasEdges.first(where: { $0.id == "gw->pv" }))
+        XCTAssertEqual(byModelEdge.segments.map(\.title), ["m1", "m2", "m3", "Other"])
+        XCTAssertEqual(byModelEdge.segments.map(\.emphasisValue), [500, 300, 150, 80])
+
+        let totalOnlyEdge = try XCTUnwrap(totalOnly.canvasEdges.first(where: { $0.id == "gw->pv" }))
+        XCTAssertEqual(totalOnlyEdge.segments.map(\.title), ["Total"])
+        XCTAssertEqual(totalOnlyEdge.segments.map(\.emphasisValue), [1_030])
+    }
+
+    func testTopologyCanvasScreenModelExposesEmptyState() {
+        let emptyGraph = TopologyGraph(
+            columns: [
+                TopologyColumn(title: "Entrypoints", nodes: []),
+                TopologyColumn(title: "Gateways", nodes: []),
+                TopologyColumn(title: "Providers", nodes: [])
+            ],
+            edges: []
+        )
+
+        let screen = TopologyCanvasScreenModel.make(
+            graph: emptyGraph,
+            metricMode: .tokens,
+            flowMode: .byModel,
+            highlightMode: .top5
+        )
+
+        XCTAssertEqual(screen.emptyStateText, "No active token routes yet.")
+        XCTAssertTrue(screen.hotPaths.isEmpty)
+        XCTAssertTrue(screen.modelMix.isEmpty)
+        XCTAssertTrue(screen.canvasEdges.isEmpty)
+    }
+
+    func testTopologyFlowUsesStableModelPalette() throws {
+        let modelA = DesignTokens.topologyModelColor(for: "gpt-4o-mini")
+        let modelARepeat = DesignTokens.topologyModelColor(for: "gpt-4o-mini")
+        let other = DesignTokens.topologyModelColor(for: "Other")
+        let unknown = DesignTokens.topologyModelColor(for: "unknown")
+        let warningModel = DesignTokens.topologyModelColor(for: "gemini-2.5-pro")
+
+        XCTAssertEqual(modelA.accessibilityName, modelARepeat.accessibilityName)
+        XCTAssertEqual(modelA.fill.description, modelARepeat.fill.description)
+        XCTAssertEqual(other.accessibilityName, DesignTokens.statusColors.inactive.accessibilityName)
+        XCTAssertEqual(unknown.accessibilityName, DesignTokens.statusColors.inactive.accessibilityName)
+        XCTAssertNotEqual(warningModel.accessibilityName, DesignTokens.statusColors.error.accessibilityName)
+
+        let graph = TopologyGraph.make(
+            gateways: [
+                AdminGateway(
+                    id: "gw",
+                    name: "Gateway",
+                    listenHost: "127.0.0.1",
+                    listenPort: 18080,
+                    inboundProtocol: "openai",
+                    defaultProviderId: "pv",
+                    enabled: true,
+                    autoStart: true,
+                    runtimeStatus: "running",
+                    lastError: nil
+                )
+            ],
+            providers: [
+                AdminProvider(
+                    id: "pv",
+                    name: "Provider",
+                    kind: "openai",
+                    baseURL: "https://api.openai.com/v1",
+                    apiKey: "sk",
+                    models: ["gpt-4o-mini", "gemini-2.5-pro", "unknown"],
+                    enabled: true
+                )
+            ],
+            logs: [
+                AdminLog(requestID: "req_1", gatewayID: "gw", providerID: "pv", model: "gpt-4o-mini", statusCode: 200, latencyMs: 20, inputTokens: 400, outputTokens: 100, cachedTokens: 10, totalTokens: 500, error: nil, createdAt: "2026-03-06T10:00:00Z"),
+                AdminLog(requestID: "req_2", gatewayID: "gw", providerID: "pv", model: "gemini-2.5-pro", statusCode: 503, latencyMs: 20, inputTokens: 120, outputTokens: 30, cachedTokens: 2, totalTokens: 150, error: "upstream unavailable", createdAt: "2026-03-06T10:01:00Z"),
+                AdminLog(requestID: "req_3", gatewayID: "gw", providerID: "pv", model: nil, statusCode: 200, latencyMs: 20, inputTokens: 64, outputTokens: 16, cachedTokens: 1, totalTokens: 80, error: nil, createdAt: "2026-03-06T10:02:00Z")
+            ]
+        )
+
+        let screen = TopologyCanvasScreenModel.make(
+            graph: graph,
+            metricMode: .tokens,
+            flowMode: .byModel,
+            highlightMode: .all
+        )
+        let edge = try XCTUnwrap(screen.canvasEdges.first(where: { $0.id == "gw->pv" }))
+
+        XCTAssertEqual(edge.segments.map(\.semanticColor.accessibilityName), ["running", "cyan", "inactive"])
+    }
+
+    func testTopologyFlowAssignsDistinctColorsToRankedModelsWithoutHardcodedNames() throws {
+        let graph = TopologyGraph.make(
+            gateways: [
+                AdminGateway(
+                    id: "gw",
+                    name: "Gateway",
+                    listenHost: "127.0.0.1",
+                    listenPort: 18080,
+                    inboundProtocol: "openai",
+                    defaultProviderId: "pv",
+                    enabled: true,
+                    autoStart: true,
+                    runtimeStatus: "running",
+                    lastError: nil
+                )
+            ],
+            providers: [
+                AdminProvider(
+                    id: "pv",
+                    name: "Provider",
+                    kind: "openai",
+                    baseURL: "https://api.openai.com/v1",
+                    apiKey: "sk",
+                    models: ["m4", "m5", "m6"],
+                    enabled: true
+                )
+            ],
+            logs: [
+                AdminLog(requestID: "req_1", gatewayID: "gw", providerID: "pv", model: "m4", statusCode: 200, latencyMs: 20, inputTokens: 320, outputTokens: 80, cachedTokens: 4, totalTokens: 400, error: nil, createdAt: "2026-03-06T10:00:00Z"),
+                AdminLog(requestID: "req_2", gatewayID: "gw", providerID: "pv", model: "m5", statusCode: 200, latencyMs: 20, inputTokens: 240, outputTokens: 60, cachedTokens: 3, totalTokens: 300, error: nil, createdAt: "2026-03-06T10:01:00Z"),
+                AdminLog(requestID: "req_3", gatewayID: "gw", providerID: "pv", model: "m6", statusCode: 200, latencyMs: 20, inputTokens: 160, outputTokens: 40, cachedTokens: 2, totalTokens: 200, error: nil, createdAt: "2026-03-06T10:02:00Z")
+            ]
+        )
+
+        let screen = TopologyCanvasScreenModel.make(
+            graph: graph,
+            metricMode: .tokens,
+            flowMode: .byModel,
+            highlightMode: .all
+        )
+        let edge = try XCTUnwrap(screen.canvasEdges.first(where: { $0.id == "gw->pv" }))
+
+        XCTAssertEqual(edge.segments.map(\.title), ["m4", "m5", "m6"])
+        XCTAssertEqual(edge.segments.map(\.semanticColor.accessibilityName), ["running", "cyan", "warning"])
+    }
+
+    func testTopologyCanvasBuildsLightweightNodeSummaries() throws {
+        let graph = makeSankeyFixtureGraph()
+
+        let screen = TopologyCanvasScreenModel.make(
+            graph: graph,
+            metricMode: .tokens,
+            flowMode: .byModel,
+            highlightMode: .top5
+        )
+
+        let gatewaySummary = try XCTUnwrap(screen.nodeSummaries["gw_core"])
+        XCTAssertEqual(gatewaySummary.metricLine, "730 tok · 4 req")
+        XCTAssertEqual(gatewaySummary.detailLine, "12 cached · 1 err")
+        XCTAssertEqual(gatewaySummary.hoverSummary.topModelName, "gpt-4o-mini")
+        XCTAssertEqual(gatewaySummary.hoverSummary.errorCount, 1)
+
+        let edgeHover = try XCTUnwrap(
+            screen.hoverPayload(
+                for: .segment(edgeID: "gw_core->pv_openai", segmentID: "gw_core->pv_openai#gpt-4o-mini")
+            )
+        )
+        XCTAssertEqual(edgeHover.title, "Core Gateway -> OpenAI")
+        XCTAssertEqual(edgeHover.rows, ["Model gpt-4o-mini", "640 tok", "3 req", "10 cached", "0 err"])
+
+        XCTAssertEqual(screen.hotPaths.first?.routeText, "Core Gateway -> OpenAI")
+        XCTAssertEqual(screen.modelMix.map(\.title), ["gpt-4o-mini", "gemini-2.5-pro", "claude-3-7-sonnet"])
+    }
+
+    func testTopologyCanvasAppliesMinimumReadableBandWidth() {
+        let tokenSmallWidth = TopologyBandScale.readableWidth(
+            value: 8,
+            maxValue: 640,
+            maxRenderedWidth: 34,
+            minReadableWidth: 10
+        )
+        let tokenLargeWidth = TopologyBandScale.readableWidth(
+            value: 640,
+            maxValue: 640,
+            maxRenderedWidth: 34,
+            minReadableWidth: 10
+        )
+
+        let requestSmallWidth = TopologyBandScale.readableWidth(
+            value: 1,
+            maxValue: 3,
+            maxRenderedWidth: 34,
+            minReadableWidth: 10
+        )
+        let requestLargeWidth = TopologyBandScale.readableWidth(
+            value: 3,
+            maxValue: 3,
+            maxRenderedWidth: 34,
+            minReadableWidth: 10
+        )
+
+        XCTAssertEqual(tokenSmallWidth, 10, accuracy: 0.001)
+        XCTAssertGreaterThan(tokenLargeWidth, tokenSmallWidth)
+        XCTAssertEqual(requestSmallWidth, 10, accuracy: 0.001)
+        XCTAssertGreaterThan(requestLargeWidth, requestSmallWidth)
+    }
+
+    func testTopologyCanvasPrioritizesBandStageOverHeavyCards() throws {
+        let graph = makeSankeyFixtureGraph()
+        let screen = TopologyCanvasScreenModel.make(
+            graph: graph,
+            metricMode: .tokens,
+            flowMode: .byModel,
+            highlightMode: .top5
+        )
+        let stage = TopologyCanvasStageLayout.sankey
+
+        XCTAssertEqual(stage.minReadableBandWidth, 10)
+        XCTAssertEqual(stage.maxRenderedBandWidth, 34)
+        XCTAssertEqual(stage.columnSpacing, 28)
+        XCTAssertEqual(stage.rowPitch, 96)
+        XCTAssertGreaterThan(stage.gatewayNodeWidth, stage.nodeWidth)
+
+        let providerSummary = try XCTUnwrap(screen.nodeSummaries["pv_openai"])
+        XCTAssertEqual(providerSummary.metricLine, "730 tok · 4 req")
+        XCTAssertEqual(providerSummary.detailLine, "12 cached · 1 err")
+        XCTAssertFalse(providerSummary.metricLine.contains("cached"))
+        XCTAssertFalse(providerSummary.metricLine.contains("err"))
+    }
+
+    func testTopologyCanvasBuildsHoverTooltipPayloads() throws {
+        let graph = makeSankeyFixtureGraph()
+        let screen = TopologyCanvasScreenModel.make(
+            graph: graph,
+            metricMode: .tokens,
+            flowMode: .byModel,
+            highlightMode: .top5
+        )
+
+        let edgeHoverState = screen.hoverState(
+            for: .segment(edgeID: "gw_core->pv_openai", segmentID: "gw_core->pv_openai#gpt-4o-mini")
+        )
+        XCTAssertEqual(edgeHoverState.tooltip?.rows, ["Model gpt-4o-mini", "640 tok", "3 req", "10 cached", "0 err"])
+        XCTAssertEqual(edgeHoverState.edgeOpacity(edgeID: "gw_core->pv_openai", segmentID: "gw_core->pv_openai#gpt-4o-mini"), 1)
+        XCTAssertEqual(edgeHoverState.edgeOpacity(edgeID: "gw_aux->pv_anthropic", segmentID: "gw_aux->pv_anthropic#gemini-2.5-pro"), 0.16)
+
+        let nodeHoverState = screen.hoverState(for: .node(nodeID: "gw_core"))
+        XCTAssertEqual(nodeHoverState.tooltip?.title, "Core Gateway")
+        XCTAssertEqual(nodeHoverState.tooltip?.rows, ["730 tok", "4 req", "Top model gpt-4o-mini", "1 err"])
+        XCTAssertEqual(nodeHoverState.nodeOpacity(nodeID: "gw_core"), 1)
+        XCTAssertEqual(nodeHoverState.nodeOpacity(nodeID: "pv_anthropic"), 0.38)
+        XCTAssertEqual(nodeHoverState.edgeOpacity(edgeID: "gw_core->pv_openai", segmentID: "gw_core->pv_openai#gpt-4o-mini"), 1)
+        XCTAssertEqual(nodeHoverState.edgeOpacity(edgeID: "gw_aux->pv_anthropic", segmentID: "gw_aux->pv_anthropic#gemini-2.5-pro"), 0.16)
+    }
+
     func testOverviewDashboardModelBuildsRunningAndTrafficCards() {
         let model = OverviewDashboardModel.make(
             providers: [
@@ -1810,6 +2404,64 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(
             GatewayFormSupport.protocolTitle(for: "provider_default", kind: .upstream),
             "Provider Default"
+        )
+    }
+
+    private func makeSankeyFixtureGraph() -> TopologyGraph {
+        TopologyGraph.make(
+            gateways: [
+                AdminGateway(
+                    id: "gw_core",
+                    name: "Core Gateway",
+                    listenHost: "127.0.0.1",
+                    listenPort: 18080,
+                    inboundProtocol: "openai",
+                    defaultProviderId: "pv_openai",
+                    enabled: true,
+                    autoStart: true,
+                    runtimeStatus: "running",
+                    lastError: nil
+                ),
+                AdminGateway(
+                    id: "gw_aux",
+                    name: "Aux Gateway",
+                    listenHost: "127.0.0.1",
+                    listenPort: 18081,
+                    inboundProtocol: "openai",
+                    defaultProviderId: "pv_anthropic",
+                    enabled: true,
+                    autoStart: true,
+                    runtimeStatus: "running",
+                    lastError: nil
+                )
+            ],
+            providers: [
+                AdminProvider(
+                    id: "pv_openai",
+                    name: "OpenAI",
+                    kind: "openai",
+                    baseURL: "https://api.openai.com/v1",
+                    apiKey: "sk-openai",
+                    models: ["gpt-4o-mini", "claude-3-7-sonnet"],
+                    enabled: true
+                ),
+                AdminProvider(
+                    id: "pv_anthropic",
+                    name: "Anthropic",
+                    kind: "anthropic",
+                    baseURL: "https://api.anthropic.com/v1",
+                    apiKey: "sk-anthropic",
+                    models: ["gemini-2.5-pro"],
+                    enabled: true
+                )
+            ],
+            logs: [
+                AdminLog(requestID: "req_1", gatewayID: "gw_core", providerID: "pv_openai", model: "gpt-4o-mini", statusCode: 200, latencyMs: 120, inputTokens: 400, outputTokens: 160, cachedTokens: 6, totalTokens: 560, error: nil, createdAt: "2026-03-06T10:00:00Z"),
+                AdminLog(requestID: "req_2", gatewayID: "gw_core", providerID: "pv_openai", model: "gpt-4o-mini", statusCode: 200, latencyMs: 100, inputTokens: 60, outputTokens: 20, cachedTokens: 4, totalTokens: 80, error: nil, createdAt: "2026-03-06T10:01:00Z"),
+                AdminLog(requestID: "req_3", gatewayID: "gw_core", providerID: "pv_openai", model: "claude-3-7-sonnet", statusCode: 503, latencyMs: 520, inputTokens: 60, outputTokens: 30, cachedTokens: 2, totalTokens: 90, error: "upstream unavailable", createdAt: "2026-03-06T10:02:00Z"),
+                AdminLog(requestID: "req_4", gatewayID: "gw_aux", providerID: "pv_anthropic", model: "gemini-2.5-pro", statusCode: 200, latencyMs: 140, inputTokens: 220, outputTokens: 90, cachedTokens: 0, totalTokens: 310, error: nil, createdAt: "2026-03-06T10:03:00Z"),
+                AdminLog(requestID: "req_5", gatewayID: "gw_core", providerID: "pv_openai", model: "gpt-4o-mini", statusCode: 200, latencyMs: 90, inputTokens: 0, outputTokens: 0, cachedTokens: 0, totalTokens: 0, error: nil, createdAt: "2026-03-06T10:04:00Z")
+            ]
         )
     }
 }
