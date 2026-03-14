@@ -247,6 +247,45 @@
     - Traffic `Other` 聚合桶稳定 key 与冲突展示名
     - Topology 显式 locale 渲染
 
+## 第七批实现进展（2026-03-14：rebase 本地 main 后补齐 failover / health i18n）
+
+### 背景
+
+- 本地 `main` 相对 `feat/native-i18n` 额外前进了 6 个提交，新增了多 Provider failover、Provider health 探测与 Gateway route target 相关 UI / 数据结构。
+- `git rebase main` 时，冲突集中出现在：
+  - `ContentView.swift`
+  - `ProviderListView.swift`
+  - `GatewayListView.swift`
+  - `ResourceWorkspaceModels.swift`
+  - `FluxDeckNativeTests.swift`
+
+### 本轮处理
+
+- 保留本地 `main` 引入的 failover / health 能力，同时继续沿用原生字符串目录与 `L10n` helper 体系。
+- 将新增用户可见文案迁移到字符串目录：
+  - Provider 页新增 `Health`、`Last Failure`、`Probe`
+  - Gateway 页新增 `Active`、`Routes`、`Health`、`Idle`
+  - Gateway form 新增 route target 预览 / 编辑文案
+  - Provider probe notice 改为本地化模板
+  - Provider / Gateway health 状态统一走本地化 key，而不是直接显示原始状态值
+- `ResourceWorkspaceModels.swift` 保留稳定数据形状：
+  - `ProviderWorkspaceCard` 暴露 `modelCount`、`isEnabled`、`healthStatus`、`healthDetailText`
+  - `GatewayWorkspaceCard` 暴露 `runtimeState`、`activeProviderText`、`routeTargets`、`healthSummary`、`autoStartEnabled`
+  - 视图层再通过 `L10n` 生成最终展示文案，避免把新的英文短语继续固化到模型层
+
+### 本轮验证
+
+- `jq empty apps/desktop-macos-native/FluxDeckNative/Resources/Localizable.xcstrings`
+  - 结果：通过
+- `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -derivedDataPath /tmp/FluxDeckNativeDD-rebase-i18n-20260314 -quiet`
+  - 结果：通过，原生端全量测试通过
+
+### 当前状态
+
+- rebase 冲突内容已经合并并通过测试验证。
+- `feat/native-i18n` 已成功 rebase 到本地 `main`。
+- 当前 worktree 仅保留本轮新增的计划 / 进展文档更新，等待提交收口。
+
 ### 本批验证
 
 - 命令：`jq empty apps/desktop-macos-native/FluxDeckNative/Resources/Localizable.xcstrings`
