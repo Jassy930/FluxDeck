@@ -187,7 +187,8 @@ async fn forward_messages(
 
                                 if should_failover_status(status_code) && !is_last_target {
                                     let _ = health_service
-                                        .record_failure(
+                                        .record_failure_for_gateway(
+                                            &state.gateway_id,
                                             &target.provider_id,
                                             &format!("status {}", status_code.as_u16()),
                                         )
@@ -196,8 +197,12 @@ async fn forward_messages(
                                 }
 
                                 if status_code.is_success() {
-                                    let _ =
-                                        health_service.record_success(&target.provider_id).await;
+                                    let _ = health_service
+                                        .record_success_for_gateway(
+                                            &state.gateway_id,
+                                            &target.provider_id,
+                                        )
+                                        .await;
                                     let latency_ms = started_at.elapsed().as_millis() as i64;
                                     let mut observation = build_anthropic_observation(
                                         &request_id,
@@ -255,7 +260,8 @@ async fn forward_messages(
 
                                 if should_failover_status(status_code) {
                                     let _ = health_service
-                                        .record_failure(
+                                        .record_failure_for_gateway(
+                                            &state.gateway_id,
                                             &target.provider_id,
                                             &format!("status {}", status_code.as_u16()),
                                         )
@@ -274,7 +280,11 @@ async fn forward_messages(
                             Err(err) => {
                                 let message = err.to_string();
                                 let _ = health_service
-                                    .record_failure(&target.provider_id, &message)
+                                    .record_failure_for_gateway(
+                                        &state.gateway_id,
+                                        &target.provider_id,
+                                        &message,
+                                    )
                                     .await;
                                 if !is_last_target {
                                     continue;
@@ -319,7 +329,8 @@ async fn forward_messages(
 
                             if should_failover_status(status_code) && !is_last_target {
                                 let _ = health_service
-                                    .record_failure(
+                                    .record_failure_for_gateway(
+                                        &state.gateway_id,
                                         &target.provider_id,
                                         &format!("status {}", status_code.as_u16()),
                                     )
@@ -328,7 +339,12 @@ async fn forward_messages(
                             }
 
                             if status_code.is_success() {
-                                let _ = health_service.record_success(&target.provider_id).await;
+                                let _ = health_service
+                                    .record_success_for_gateway(
+                                        &state.gateway_id,
+                                        &target.provider_id,
+                                    )
+                                    .await;
                                 let latency_ms = started_at.elapsed().as_millis() as i64;
                                 let mut observation = build_anthropic_observation(
                                     &request_id,
@@ -375,7 +391,8 @@ async fn forward_messages(
 
                             if should_failover_status(status_code) {
                                 let _ = health_service
-                                    .record_failure(
+                                    .record_failure_for_gateway(
+                                        &state.gateway_id,
                                         &target.provider_id,
                                         &format!("status {}", status_code.as_u16()),
                                     )
@@ -396,7 +413,11 @@ async fn forward_messages(
                         Err(err) => {
                             let message = err.to_string();
                             let _ = health_service
-                                .record_failure(&target.provider_id, &message)
+                                .record_failure_for_gateway(
+                                    &state.gateway_id,
+                                    &target.provider_id,
+                                    &message,
+                                )
                                 .await;
                             if !is_last_target {
                                 continue;
@@ -493,7 +514,8 @@ async fn forward_messages(
 
                             if should_failover_status(status_code) && !is_last_target {
                                 let _ = health_service
-                                    .record_failure(
+                                    .record_failure_for_gateway(
+                                        &state.gateway_id,
                                         &target.provider_id,
                                         &format!("status {}", status_code.as_u16()),
                                     )
@@ -502,7 +524,12 @@ async fn forward_messages(
                             }
 
                             if status_code.is_success() {
-                                let _ = health_service.record_success(&target.provider_id).await;
+                                let _ = health_service
+                                    .record_success_for_gateway(
+                                        &state.gateway_id,
+                                        &target.provider_id,
+                                    )
+                                    .await;
                                 let latency_ms = started_at.elapsed().as_millis() as i64;
                                 let mut observation = build_anthropic_observation(
                                     &request_id,
@@ -559,7 +586,8 @@ async fn forward_messages(
 
                             if should_failover_status(status_code) {
                                 let _ = health_service
-                                    .record_failure(
+                                    .record_failure_for_gateway(
+                                        &state.gateway_id,
                                         &target.provider_id,
                                         &format!("status {}", status_code.as_u16()),
                                     )
@@ -600,7 +628,11 @@ async fn forward_messages(
                         Err(err) => {
                             let message = err.to_string();
                             let _ = health_service
-                                .record_failure(&target.provider_id, &message)
+                                .record_failure_for_gateway(
+                                    &state.gateway_id,
+                                    &target.provider_id,
+                                    &message,
+                                )
                                 .await;
                             if !is_last_target {
                                 continue;
@@ -652,7 +684,8 @@ async fn forward_messages(
 
                             if should_failover_status(status_code) && !is_last_target {
                                 let _ = health_service
-                                    .record_failure(
+                                    .record_failure_for_gateway(
+                                        &state.gateway_id,
                                         &target.provider_id,
                                         &format!("status {}", status_code.as_u16()),
                                     )
@@ -661,7 +694,12 @@ async fn forward_messages(
                             }
 
                             if status_code.is_success() {
-                                let _ = health_service.record_success(&target.provider_id).await;
+                                let _ = health_service
+                                    .record_success_for_gateway(
+                                        &state.gateway_id,
+                                        &target.provider_id,
+                                    )
+                                    .await;
                                 let latency_ms = started_at.elapsed().as_millis() as i64;
                                 let anthropic_response =
                                 crate::forwarding::response_mapping::map_openai_to_anthropic_message(
@@ -713,7 +751,8 @@ async fn forward_messages(
 
                             if should_failover_status(status_code) {
                                 let _ = health_service
-                                    .record_failure(
+                                    .record_failure_for_gateway(
+                                        &state.gateway_id,
                                         &target.provider_id,
                                         &format!("status {}", status_code.as_u16()),
                                     )
@@ -757,7 +796,11 @@ async fn forward_messages(
                         Err(err) => {
                             let message = err.to_string();
                             let _ = health_service
-                                .record_failure(&target.provider_id, &message)
+                                .record_failure_for_gateway(
+                                    &state.gateway_id,
+                                    &target.provider_id,
+                                    &message,
+                                )
                                 .await;
                             if !is_last_target {
                                 continue;
@@ -929,7 +972,8 @@ async fn count_tokens_handler(
 
                             if should_failover_status(status_code) && !is_last_target {
                                 let _ = health_service
-                                    .record_failure(
+                                    .record_failure_for_gateway(
+                                        &state.gateway_id,
                                         &target.provider_id,
                                         &format!("status {}", status_code.as_u16()),
                                     )
@@ -938,7 +982,12 @@ async fn count_tokens_handler(
                             }
 
                             if status_code.is_success() {
-                                let _ = health_service.record_success(&target.provider_id).await;
+                                let _ = health_service
+                                    .record_success_for_gateway(
+                                        &state.gateway_id,
+                                        &target.provider_id,
+                                    )
+                                    .await;
                                 let Some(upstream_tokens) =
                                     extract_upstream_input_tokens(body.as_ref())
                                 else {
@@ -1003,7 +1052,8 @@ async fn count_tokens_handler(
 
                             if should_failover_status(status_code) {
                                 let _ = health_service
-                                    .record_failure(
+                                    .record_failure_for_gateway(
+                                        &state.gateway_id,
                                         &target.provider_id,
                                         &format!("status {}", status_code.as_u16()),
                                     )
@@ -1023,7 +1073,11 @@ async fn count_tokens_handler(
                         Err(err) => {
                             let message = err.to_string();
                             let _ = health_service
-                                .record_failure(&target.provider_id, &message)
+                                .record_failure_for_gateway(
+                                    &state.gateway_id,
+                                    &target.provider_id,
+                                    &message,
+                                )
                                 .await;
                             if !is_last_target {
                                 continue;
@@ -1052,7 +1106,8 @@ async fn count_tokens_handler(
 
                         if should_failover_status(status_code) && !is_last_target {
                             let _ = health_service
-                                .record_failure(
+                                .record_failure_for_gateway(
+                                    &state.gateway_id,
                                     &target.provider_id,
                                     &format!("status {}", status_code.as_u16()),
                                 )
@@ -1061,7 +1116,12 @@ async fn count_tokens_handler(
                         }
 
                         if status_code.is_success() {
-                            let _ = health_service.record_success(&target.provider_id).await;
+                            let _ = health_service
+                                .record_success_for_gateway(
+                                    &state.gateway_id,
+                                    &target.provider_id,
+                                )
+                                .await;
                             let Some(upstream_tokens) =
                                 extract_upstream_input_tokens(body.as_ref())
                             else {
@@ -1207,7 +1267,8 @@ async fn count_tokens_handler(
 
                         if should_failover_status(status_code) {
                             let _ = health_service
-                                .record_failure(
+                                .record_failure_for_gateway(
+                                    &state.gateway_id,
                                     &target.provider_id,
                                     &format!("status {}", status_code.as_u16()),
                                 )
@@ -1244,7 +1305,11 @@ async fn count_tokens_handler(
                     Err(err) => {
                         let message = err.to_string();
                         let _ = health_service
-                            .record_failure(&target.provider_id, &message)
+                            .record_failure_for_gateway(
+                                &state.gateway_id,
+                                &target.provider_id,
+                                &message,
+                            )
                             .await;
                         if !is_last_target {
                             continue;

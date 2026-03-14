@@ -1,14 +1,17 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
+use reqwest::StatusCode;
 use sqlx::SqlitePool;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use crate::domain::provider::Provider;
 use crate::repo::provider_repo::ProviderRepo;
 use crate::service::provider_health_service::ProviderHealthService;
 
 const DEFAULT_HEALTH_MONITOR_INTERVAL: Duration = Duration::from_secs(30);
+const DEFAULT_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct HealthMonitorTickSummary {
@@ -35,6 +38,7 @@ pub struct HealthMonitor {
     provider_repo: ProviderRepo,
     health_service: ProviderHealthService,
     interval: Duration,
+    client: reqwest::Client,
 }
 
 impl HealthMonitor {
@@ -43,6 +47,10 @@ impl HealthMonitor {
             provider_repo: ProviderRepo::new(pool.clone()),
             health_service: ProviderHealthService::new(pool),
             interval,
+            client: reqwest::Client::builder()
+                .timeout(DEFAULT_PROBE_TIMEOUT)
+                .build()
+                .expect("build health monitor client"),
         }
     }
 
@@ -84,12 +92,68 @@ impl HealthMonitor {
             let state = self.health_service.ensure_provider(&provider.id).await?;
             summary.ensured += 1;
 
-            if state.status == "unhealthy" {
-                self.health_service.probe_provider(&provider.id).await?;
-                summary.probed += 1;
+            if state.status != "unhealthy" || !recover_after_due(state.recover_after.as_deref()) {
+                continue;
             }
+
+            self.run_probe(&provider).await?;
+            summary.probed += 1;
         }
 
         Ok(summary)
     }
+
+    async fn run_probe(&self, provider: &Provider) -> Result<()> {
+        match self
+            .client
+            .get(&provider.base_url)
+            .bearer_auth(&provider.api_key)
+            .send()
+            .await
+        {
+            Ok(response) if probe_success(response.status()) => {
+                self.health_service
+                    .mark_probe_result(&provider.id, true, None)
+                    .await?;
+            }
+            Ok(response) => {
+                self.health_service
+                    .mark_probe_result(
+                        &provider.id,
+                        false,
+                        Some(&format!("probe status {}", response.status().as_u16())),
+                    )
+                    .await?;
+            }
+            Err(err) => {
+                self.health_service
+                    .mark_probe_result(&provider.id, false, Some(&err.to_string()))
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn probe_success(status: StatusCode) -> bool {
+    !(status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS)
+}
+
+fn recover_after_due(recover_after: Option<&str>) -> bool {
+    let Some(recover_after) = recover_after else {
+        return true;
+    };
+
+    recover_after
+        .parse::<u128>()
+        .map(|deadline| deadline <= now_nanos())
+        .unwrap_or(true)
+}
+
+fn now_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0)
 }

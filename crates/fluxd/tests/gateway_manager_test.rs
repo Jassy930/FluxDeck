@@ -1,4 +1,8 @@
 use std::net::TcpListener as StdTcpListener;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use std::time::Duration;
 
 use fluxd::domain::gateway::CreateGatewayInput;
@@ -11,7 +15,9 @@ use fluxd::runtime::health_monitor::HealthMonitor;
 use fluxd::service::provider_health_service::ProviderHealthService;
 use fluxd::service::provider_service::ProviderService;
 use fluxd::storage::migrate::run_migrations;
+use axum::{http::StatusCode, routing::get, Router};
 use serde_json::json;
+use tokio::net::TcpListener;
 
 #[tokio::test]
 async fn starts_multiple_gateways_on_different_ports() {
@@ -392,13 +398,14 @@ async fn health_monitor_probes_unhealthy_providers_on_run_once() {
         .expect("connect sqlite memory db");
     run_migrations(&pool).await.expect("run migrations");
 
+    let upstream = spawn_probe_target(StatusCode::UNAUTHORIZED).await;
     let provider_service = ProviderService::new(pool.clone());
     provider_service
         .create_provider(CreateProviderInput {
             id: "provider_monitor_probe".to_string(),
             name: "Provider Monitor Probe".to_string(),
             kind: "openai".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
+            base_url: format!("http://{}", upstream),
             api_key: "sk-monitor-probe".to_string(),
             models: vec!["gpt-4o-mini".to_string()],
             enabled: true,
@@ -414,8 +421,17 @@ async fn health_monitor_probes_unhealthy_providers_on_run_once() {
             .expect("record failure");
     }
 
+    sqlx::query(
+        "UPDATE provider_health_states SET recover_after = '0', circuit_open_until = '0' WHERE provider_id = ?1 AND scope = 'global' AND gateway_id = '' AND model = ''",
+    )
+    .bind("provider_monitor_probe")
+    .execute(&pool)
+    .await
+    .expect("force recover_after due");
+
     let monitor = HealthMonitor::new(pool.clone(), Duration::from_millis(50));
-    monitor.run_once().await.expect("run health monitor once");
+    let summary = monitor.run_once().await.expect("run health monitor once");
+    assert_eq!(summary.probed, 1);
 
     let state = health_service
         .get_state("provider_monitor_probe")
@@ -423,4 +439,219 @@ async fn health_monitor_probes_unhealthy_providers_on_run_once() {
         .expect("get provider health")
         .expect("provider health exists");
     assert_eq!(state.status, "probing");
+}
+
+#[tokio::test]
+async fn health_monitor_respects_recover_after_before_running_real_probe() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let probe_hits = Arc::new(AtomicUsize::new(0));
+    let upstream_addr = spawn_probe_server(StatusCode::UNAUTHORIZED, probe_hits.clone()).await;
+
+    let provider_service = ProviderService::new(pool.clone());
+    provider_service
+        .create_provider(CreateProviderInput {
+            id: "provider_monitor_delayed".to_string(),
+            name: "Provider Monitor Delayed".to_string(),
+            kind: "openai".to_string(),
+            base_url: format!("http://{}/v1", upstream_addr),
+            api_key: "sk-monitor-delayed".to_string(),
+            models: vec!["gpt-4o-mini".to_string()],
+            enabled: true,
+        })
+        .await
+        .expect("create provider");
+
+    let health_service = ProviderHealthService::new(pool.clone());
+    for _ in 0..3 {
+        health_service
+            .record_failure("provider_monitor_delayed", "timeout")
+            .await
+            .expect("record failure");
+    }
+
+    sqlx::query(
+        "UPDATE provider_health_states SET recover_after = '9999999999999999999', circuit_open_until = '9999999999999999999' WHERE provider_id = ?1",
+    )
+    .bind("provider_monitor_delayed")
+    .execute(&pool)
+    .await
+    .expect("delay recover_after");
+
+    let monitor = HealthMonitor::new(pool.clone(), Duration::from_millis(50));
+    let first_summary = monitor.run_once().await.expect("run health monitor once");
+    assert_eq!(first_summary.probed, 0);
+    assert_eq!(probe_hits.load(Ordering::SeqCst), 0);
+
+    sqlx::query(
+        "UPDATE provider_health_states SET recover_after = '0', circuit_open_until = '0' WHERE provider_id = ?1",
+    )
+    .bind("provider_monitor_delayed")
+    .execute(&pool)
+    .await
+    .expect("expire recover_after");
+
+    let second_summary = monitor.run_once().await.expect("run health monitor second tick");
+    assert_eq!(second_summary.probed, 1);
+    assert_eq!(probe_hits.load(Ordering::SeqCst), 1);
+
+    let state = health_service
+        .get_state("provider_monitor_delayed")
+        .await
+        .expect("get delayed provider health")
+        .expect("delayed provider health exists");
+    assert_eq!(state.status, "probing");
+}
+
+#[tokio::test]
+async fn health_monitor_backoffs_failed_real_probe() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let probe_hits = Arc::new(AtomicUsize::new(0));
+    let upstream_addr = spawn_probe_server(StatusCode::BAD_GATEWAY, probe_hits.clone()).await;
+
+    let provider_service = ProviderService::new(pool.clone());
+    provider_service
+        .create_provider(CreateProviderInput {
+            id: "provider_monitor_backoff".to_string(),
+            name: "Provider Monitor Backoff".to_string(),
+            kind: "openai".to_string(),
+            base_url: format!("http://{}/v1", upstream_addr),
+            api_key: "sk-monitor-backoff".to_string(),
+            models: vec!["gpt-4o-mini".to_string()],
+            enabled: true,
+        })
+        .await
+        .expect("create provider");
+
+    let health_service = ProviderHealthService::new(pool.clone());
+    for _ in 0..3 {
+        health_service
+            .record_failure("provider_monitor_backoff", "timeout")
+            .await
+            .expect("record failure");
+    }
+
+    sqlx::query(
+        "UPDATE provider_health_states SET recover_after = '0', circuit_open_until = '0' WHERE provider_id = ?1",
+    )
+    .bind("provider_monitor_backoff")
+    .execute(&pool)
+    .await
+    .expect("expire recover_after");
+
+    let monitor = HealthMonitor::new(pool.clone(), Duration::from_millis(50));
+    let summary = monitor.run_once().await.expect("run health monitor once");
+    assert_eq!(summary.probed, 1);
+    assert_eq!(probe_hits.load(Ordering::SeqCst), 1);
+
+    let state = health_service
+        .get_state("provider_monitor_backoff")
+        .await
+        .expect("get backoff provider health")
+        .expect("backoff provider health exists");
+    assert_eq!(state.status, "unhealthy");
+    assert_eq!(state.last_failure_reason.as_deref(), Some("probe status 502"));
+    assert_ne!(state.recover_after.as_deref(), Some("0"));
+}
+
+async fn spawn_probe_server(
+    status: StatusCode,
+    hits: Arc<AtomicUsize>,
+) -> std::net::SocketAddr {
+    let app = Router::new().route(
+        "/v1",
+        get({
+            let hits = hits.clone();
+            move || {
+                let hits = hits.clone();
+                async move {
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    status
+                }
+            }
+        }),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind random port");
+    let addr = listener.local_addr().expect("read local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve probe app");
+    });
+    addr
+}
+
+#[tokio::test]
+async fn health_monitor_respects_recover_after_before_probing() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let upstream = spawn_probe_target(StatusCode::UNAUTHORIZED).await;
+    let provider_service = ProviderService::new(pool.clone());
+    provider_service
+        .create_provider(CreateProviderInput {
+            id: "provider_monitor_cooldown".to_string(),
+            name: "Provider Monitor Cooldown".to_string(),
+            kind: "openai".to_string(),
+            base_url: format!("http://{}", upstream),
+            api_key: "sk-monitor-cooldown".to_string(),
+            models: vec!["gpt-4o-mini".to_string()],
+            enabled: true,
+        })
+        .await
+        .expect("create provider");
+
+    let health_service = ProviderHealthService::new(pool.clone());
+    for _ in 0..3 {
+        health_service
+            .record_failure("provider_monitor_cooldown", "timeout")
+            .await
+            .expect("record failure");
+    }
+
+    let monitor = HealthMonitor::new(pool.clone(), Duration::from_millis(50));
+    let summary = monitor.run_once().await.expect("run health monitor once");
+    assert_eq!(summary.probed, 0);
+
+    let state = health_service
+        .get_state("provider_monitor_cooldown")
+        .await
+        .expect("get provider health")
+        .expect("provider health exists");
+    assert_eq!(state.status, "unhealthy");
+}
+
+async fn spawn_probe_target(status: StatusCode) -> std::net::SocketAddr {
+    async fn probe_ok() -> StatusCode {
+        StatusCode::UNAUTHORIZED
+    }
+
+    async fn probe_bad() -> StatusCode {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
+
+    let app = if status == StatusCode::UNAUTHORIZED {
+        Router::new().route("/", get(probe_ok))
+    } else {
+        Router::new().route("/", get(probe_bad))
+    };
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind probe target");
+    let addr = listener.local_addr().expect("probe target addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve probe target");
+    });
+    addr
 }

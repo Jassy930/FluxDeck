@@ -625,6 +625,122 @@ async fn admin_api_exposes_provider_health_and_manual_probe() {
 }
 
 #[tokio::test]
+async fn admin_api_exposes_gateway_health_summary_and_active_provider() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool.clone()));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    create_test_provider(&client, &base, "provider_gateway_health_a").await;
+    create_test_provider(&client, &base, "provider_gateway_health_b").await;
+
+    let create_resp = client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_health_view",
+            "name": "Gateway Health View",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "default_provider_id": "provider_gateway_health_a",
+            "route_targets": [
+                {"provider_id": "provider_gateway_health_a", "priority": 0, "enabled": true},
+                {"provider_id": "provider_gateway_health_b", "priority": 1, "enabled": true}
+            ],
+            "default_model": "gpt-4o-mini",
+            "enabled": true,
+            "auto_start": false
+        }))
+        .send()
+        .await
+        .expect("create gateway request");
+    assert_eq!(create_resp.status(), reqwest::StatusCode::CREATED);
+
+    sqlx::query(
+        r#"
+        INSERT INTO provider_health_states (
+            id, provider_id, scope, gateway_id, model, status, failure_streak, success_streak, last_failure_reason
+        )
+        VALUES (?1, ?2, 'gateway', ?3, '', 'degraded', 1, 0, 'rate limited')
+        "#,
+    )
+    .bind("provider_gateway_health_a:gateway_health_view")
+    .bind("provider_gateway_health_a")
+    .bind("gateway_health_view")
+    .execute(&pool)
+    .await
+    .expect("insert scoped degraded state");
+
+    sqlx::query(
+        r#"
+        INSERT INTO request_logs (
+            request_id, gateway_id, provider_id, provider_id_initial, route_attempt_count, failover_performed,
+            model, status_code, latency_ms, error
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        "#,
+    )
+    .bind("req_gateway_health_view")
+    .bind("gateway_health_view")
+    .bind("provider_gateway_health_b")
+    .bind("provider_gateway_health_a")
+    .bind(2_i64)
+    .bind(1_i64)
+    .bind("gpt-4o-mini")
+    .bind(200_i64)
+    .bind(18_i64)
+    .bind(Option::<String>::None)
+    .execute(&pool)
+    .await
+    .expect("insert request log");
+
+    let gateways: serde_json::Value = client
+        .get(format!("{base}/admin/gateways"))
+        .send()
+        .await
+        .expect("list gateways request")
+        .json()
+        .await
+        .expect("decode gateways");
+
+    let gateway = gateways
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("gateways contains one item");
+
+    assert_eq!(
+        gateway.get("active_provider_id"),
+        Some(&json!("provider_gateway_health_b"))
+    );
+    assert_eq!(gateway.get("routing_mode"), Some(&json!("ordered_failover")));
+    assert_eq!(
+        gateway.pointer("/health_summary/degraded_count"),
+        Some(&json!(1))
+    );
+    assert_eq!(
+        gateway.pointer("/health_summary/healthy_count"),
+        Some(&json!(1))
+    );
+    assert_eq!(
+        gateway.pointer("/route_targets/0/health_status"),
+        Some(&json!("degraded"))
+    );
+    assert_eq!(
+        gateway.pointer("/route_targets/0/last_failure_reason"),
+        Some(&json!("rate limited"))
+    );
+    assert_eq!(
+        gateway.pointer("/route_targets/1/health_status"),
+        Some(&json!("healthy"))
+    );
+}
+
+#[tokio::test]
 async fn admin_api_restarts_running_gateway_when_config_changes() {
     let pool = sqlx::SqlitePool::connect("sqlite::memory:")
         .await

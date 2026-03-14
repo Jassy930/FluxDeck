@@ -105,3 +105,56 @@ async fn provider_health_service_moves_from_probing_to_healthy_after_probe_and_s
     assert_eq!(recovered.success_streak, 2);
     assert_eq!(recovered.failure_streak, 0);
 }
+
+#[tokio::test]
+async fn provider_health_service_tracks_gateway_scoped_failures_without_touching_other_gateways() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let provider_service = ProviderService::new(pool.clone());
+    provider_service
+        .create_provider(CreateProviderInput {
+            id: "provider_health_scope".to_string(),
+            name: "Provider Health Scope".to_string(),
+            kind: "openai".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: "sk-health-scope".to_string(),
+            models: vec!["gpt-4o-mini".to_string()],
+            enabled: true,
+        })
+        .await
+        .expect("create provider");
+
+    let service = ProviderHealthService::new(pool.clone());
+
+    for _ in 0..3 {
+        service
+            .record_failure_for_gateway("gw_scope_a", "provider_health_scope", "timeout")
+            .await
+            .expect("record scoped failure");
+    }
+
+    let scoped = service
+        .get_scoped_state("provider_health_scope", Some("gw_scope_a"), None)
+        .await
+        .expect("get scoped health state")
+        .expect("scoped health state exists");
+    assert_eq!(scoped.status, "unhealthy");
+    assert_eq!(scoped.gateway_id.as_deref(), Some("gw_scope_a"));
+    assert!(scoped.recover_after.is_some());
+
+    let other_gateway = service
+        .get_scoped_state("provider_health_scope", Some("gw_scope_b"), None)
+        .await
+        .expect("get other gateway state");
+    assert!(other_gateway.is_none());
+
+    let global = service
+        .get_state("provider_health_scope")
+        .await
+        .expect("get global state")
+        .expect("global state exists");
+    assert_eq!(global.scope, "global");
+}

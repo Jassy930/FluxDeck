@@ -57,7 +57,8 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider probe provide
 
 - `provider health list` 对应 Admin API `GET /admin/providers/health`
 - `provider probe <id>` 对应 Admin API `POST /admin/providers/{id}/probe`
-- 当前 probe 主要用于把 `unhealthy` Provider 推进到 `probing`，不是完整的真实上游拨测
+- 后台 `HealthMonitor` 现在会在 `recover_after` 到期后对 `unhealthy` Provider 发起真实轻量 HTTP probe
+- `provider probe <id>` 仍然保留为管理端手动干预入口，会把目标 Provider 的全局状态直接推进到 `probing`
 
 ## 创建并启动网关
 

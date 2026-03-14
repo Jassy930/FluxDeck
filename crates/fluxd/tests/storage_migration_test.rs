@@ -225,6 +225,18 @@ async fn migration_backfills_gateway_route_targets_from_default_provider() {
     .expect("query provider_health_states table");
     assert_eq!(health_table.as_deref(), Some("provider_health_states"));
 
+    for column in ["gateway_id", "model"] {
+        let found = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_table_info('provider_health_states') WHERE name = ?1",
+        )
+        .bind(column)
+        .fetch_optional(&pool)
+        .await
+        .expect("query provider_health_states columns");
+
+        assert_eq!(found.as_deref(), Some(column));
+    }
+
     let route_target = sqlx::query_as::<_, (String, i64, i64)>(
         r#"
         SELECT provider_id, priority, enabled

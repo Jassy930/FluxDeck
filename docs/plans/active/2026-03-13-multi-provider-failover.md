@@ -612,6 +612,12 @@ Run: `cargo test -q -p fluxd --test anthropic_forwarding_test`
 - 引入冷却窗口后的 probe 调度
 - 引入最小退避策略
 
+**结果（2026-03-14）：**
+
+- 已完成：`HealthMonitor` 现已基于 Provider `base_url` 发起真实 HTTP 轻量探测
+- 已完成：仅在 `recover_after` 到期后才会 probe，失败后会基于 failure streak 延长下一次 `recover_after`
+- 已完成：`gateway_manager_test` 已覆盖真实 probe、冷却窗口与失败退避路径
+
 ### Task 14: 健康状态细化到 `gateway + provider (+ model)` 维度
 
 **Files:**
@@ -628,6 +634,13 @@ Run: `cargo test -q -p fluxd --test anthropic_forwarding_test`
 - 避免单个异常模型拖累整个 Provider
 - 为更细粒度回切策略打基础
 
+**结果（2026-03-14）：**
+
+- 已完成：新增 `010_provider_health_scope.sql`，把 `provider_health_states` 升级为 `global + gateway_provider (+ model 预留)` 结构
+- 已完成：`ProviderHealthRepo / ProviderHealthService / RouteSelector` 已支持 `gateway_provider` 作用域
+- 已完成：OpenAI direct、OpenAI passthrough、Anthropic `messages`、Anthropic `count_tokens` 的健康回写均改为优先写 Gateway 级状态
+- 未完成：当前 `model` 字段仍以结构预留为主，尚未做独立模型选路
+
 ### Task 15: 原生 macOS 端补齐链路与健康视图
 
 **Files:**
@@ -642,9 +655,22 @@ Run: `cargo test -q -p fluxd --test anthropic_forwarding_test`
 - 支持手动 probe
 - 支持原生端编辑有序链路
 
+**结果（2026-03-14）：**
+
+- 已完成：macOS Native `AdminApiClient` 已支持 `route_targets`、`active_provider_id`、`health_summary`、Provider health、manual probe
+- 已完成：Provider/Gateway 列表页已展示 route targets、active provider、health summary 与最近失败原因
+- 已完成：Provider 列表页已提供 manual probe 操作
+- 已完成：Gateway 编辑表单已在保存时保留既有 `route_targets`，且默认 Provider 改动会同步第一跳 target
+- 未完成：原生端仍未提供完整的可视化多 target 拖拽/上下移动编辑器；当前为“保留并展示已有链路 + 同步第一跳”的最小闭环
+
 ### Phase 2 完成条件
 
 - Anthropic `messages` 与 `count_tokens` 都具备请求级 failover
 - Request logs 能明确表达切流过程
 - 后台主动探测不再只是骨架
 - 原生端能展示并操作多 Provider 链路与健康状态
+
+当前结论（2026-03-14）：
+
+- 上述完成条件已满足最小闭环版本
+- 唯一保留项是原生端链路编辑器仍未做完整排序交互，这被保留为后续体验增强，不阻塞 Phase 2 收口

@@ -2,12 +2,14 @@ import SwiftUI
 
 struct ProviderListView: View {
     let providers: [AdminProvider]
+    let providerHealthStates: [AdminProviderHealthState]
     let isLoading: Bool
     let isSubmitting: Bool
     let error: String?
     let onCreate: () -> Void
     let onConfigure: (AdminProvider) -> Void
     let onToggleEnabled: (AdminProvider) -> Void
+    let onProbe: (AdminProvider) -> Void
     let onDelete: (AdminProvider) -> Void
 
     var body: some View {
@@ -54,7 +56,10 @@ struct ProviderListView: View {
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
                         ForEach(providers) { provider in
-                            let card = ProviderWorkspaceCard.make(provider: provider)
+                            let card = ProviderWorkspaceCard.make(
+                                provider: provider,
+                                healthStates: providerHealthStates
+                            )
 
                             SurfaceCard {
                                 VStack(alignment: .leading, spacing: 14) {
@@ -76,10 +81,20 @@ struct ProviderListView: View {
 
                                     resourceRow(label: "Endpoint", value: card.endpointText)
                                     resourceRow(label: "Models", value: card.modelCountText)
+                                    resourceRow(label: "Health", value: card.healthStatusText)
+
+                                    if let healthDetail = card.healthDetailText, !healthDetail.isEmpty {
+                                        resourceRow(label: "Last Failure", value: healthDetail)
+                                    }
 
                                     StatusPill(
                                         text: card.statusText,
                                         semanticColor: provider.enabled ? DesignTokens.statusColors.running : DesignTokens.statusColors.inactive
+                                    )
+
+                                    StatusPill(
+                                        text: card.healthStatusText,
+                                        semanticColor: healthColor(for: card.healthStatusText)
                                     )
 
                                     HStack(spacing: 12) {
@@ -97,6 +112,14 @@ struct ProviderListView: View {
                                         .buttonStyle(.plain)
                                         .focusable(false)
                                         .foregroundStyle(DesignTokens.textSecondary)
+                                        .disabled(isSubmitting)
+
+                                        Button("Probe") {
+                                            onProbe(provider)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .focusable(false)
+                                        .foregroundStyle(DesignTokens.statusColors.warning.fill)
                                         .disabled(isSubmitting)
 
                                         Button("Delete") {
@@ -141,6 +164,19 @@ struct ProviderListView: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(DesignTokens.textPrimary)
                 .lineLimit(1)
+        }
+    }
+
+    private func healthColor(for status: String) -> DesignTokens.SemanticColor {
+        switch status.lowercased() {
+        case "degraded":
+            return DesignTokens.statusColors.warning
+        case "unhealthy":
+            return DesignTokens.statusColors.error
+        case "probing":
+            return DesignTokens.statusColors.warning
+        default:
+            return DesignTokens.statusColors.running
         }
     }
 }

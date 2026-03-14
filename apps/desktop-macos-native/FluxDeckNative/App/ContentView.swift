@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @AppStorage("fluxdeck.native.admin_base_url") private var persistedAdminBaseURL = defaultAdminBaseURL
     @State private var providers: [AdminProvider] = []
+    @State private var providerHealthStates: [AdminProviderHealthState] = []
     @State private var gateways: [AdminGateway] = []
     @State private var dashboardLogs: [AdminLog] = []
     @State private var logsPageItems: [AdminLog] = []
@@ -259,6 +260,7 @@ struct ContentView: View {
         case .providers:
             ProviderListView(
                 providers: providers,
+                providerHealthStates: providerHealthStates,
                 isLoading: isLoading,
                 isSubmitting: isSubmitting,
                 error: loadError,
@@ -277,6 +279,11 @@ struct ContentView: View {
                             enabled: !provider.enabled
                         )
                         await updateProvider(id: provider.id, input: input)
+                    }
+                },
+                onProbe: { provider in
+                    Task {
+                        await probeProvider(provider)
                     }
                 },
                 onDelete: { provider in
@@ -411,14 +418,17 @@ struct ContentView: View {
 
         do {
             async let providerTask = client.fetchProviders()
+            async let providerHealthTask = client.fetchProviderHealth()
             async let gatewayTask = client.fetchGateways()
             async let dashboardLogsTask = client.fetchDashboardLogs(limit: Self.dashboardLogLimit)
 
             let nextProviders = try await providerTask
+            let nextProviderHealthStates = try await providerHealthTask
             let nextGateways = try await gatewayTask
             let nextDashboardLogs = try await dashboardLogsTask
 
             providers = nextProviders
+            providerHealthStates = nextProviderHealthStates
             gateways = nextGateways
             dashboardLogs = nextDashboardLogs
             normalizeLogFilters()
@@ -484,6 +494,23 @@ struct ContentView: View {
             }
             loadError = nil
             operationNotice = "Provider 已删除。"
+            await refreshAll()
+        } catch {
+            loadError = error.localizedDescription
+        }
+
+        isSubmitting = false
+    }
+
+    @MainActor
+    private func probeProvider(_ provider: AdminProvider) async {
+        isSubmitting = true
+        operationNotice = nil
+
+        do {
+            let result = try await client.probeProvider(id: provider.id)
+            loadError = nil
+            operationNotice = "Provider \(provider.id) 已进入 \(result.status) 探测状态。"
             await refreshAll()
         } catch {
             loadError = error.localizedDescription
@@ -1880,6 +1907,7 @@ private struct GatewayFormSheet: View {
     @State private var upstreamProtocol = "provider_default"
     @State private var protocolConfigJSON = JSONValue.prettyPrinted(["compatibility_mode": .string("compatible")])
     @State private var defaultProviderID = ""
+    @State private var routeTargets: [AdminRouteTargetInput] = []
     @State private var defaultModel = "gpt-4o-mini"
     @State private var enabled = true
     @State private var autoStart = false
@@ -1908,6 +1936,7 @@ private struct GatewayFormSheet: View {
             _upstreamProtocol = State(initialValue: "provider_default")
             _protocolConfigJSON = State(initialValue: JSONValue.prettyPrinted(["compatibility_mode": .string("compatible")]))
             _defaultProviderID = State(initialValue: "")
+            _routeTargets = State(initialValue: [])
             _defaultModel = State(initialValue: "gpt-4o-mini")
             _enabled = State(initialValue: true)
             _autoStart = State(initialValue: false)
@@ -1920,6 +1949,11 @@ private struct GatewayFormSheet: View {
             _upstreamProtocol = State(initialValue: gateway.upstreamProtocol)
             _protocolConfigJSON = State(initialValue: JSONValue.prettyPrinted(gateway.protocolConfigJSON))
             _defaultProviderID = State(initialValue: gateway.defaultProviderId)
+            _routeTargets = State(
+                initialValue: gateway.routeTargets
+                    .sorted { $0.priority < $1.priority }
+                    .map { AdminRouteTargetInput(providerId: $0.providerId, priority: $0.priority, enabled: $0.enabled) }
+            )
             _defaultModel = State(initialValue: gateway.defaultModel ?? "")
             _enabled = State(initialValue: gateway.enabled)
             _autoStart = State(initialValue: gateway.autoStart)
@@ -1956,6 +1990,10 @@ private struct GatewayFormSheet: View {
 
                                 gatewayField(title: "Default Provider", caption: "Choose the upstream provider that receives unmatched traffic.") {
                                     providerPicker
+                                }
+
+                                gatewayField(title: "Route Targets", caption: "Primary target follows Default Provider. Existing backups are preserved on save.") {
+                                    routeTargetPreview
                                 }
 
                                 gatewayField(title: "Default Model", caption: "Optional model hint for clients that omit the model field.") {
@@ -2245,6 +2283,7 @@ private struct GatewayFormSheet: View {
                 upstreamProtocol: normalizedUpstreamProtocol,
                 protocolConfigJSON: parsedProtocolConfig,
                 defaultProviderId: normalizedProviderID,
+                routeTargets: normalizedRouteTargets(primaryProviderID: normalizedProviderID),
                 defaultModel: normalizedModel.isEmpty ? nil : normalizedModel,
                 enabled: enabled,
                 autoStart: autoStart
@@ -2262,6 +2301,7 @@ private struct GatewayFormSheet: View {
                 upstreamProtocol: normalizedUpstreamProtocol,
                 protocolConfigJSON: parsedProtocolConfig,
                 defaultProviderId: normalizedProviderID,
+                routeTargets: normalizedRouteTargets(primaryProviderID: normalizedProviderID),
                 defaultModel: normalizedModel.isEmpty ? nil : normalizedModel,
                 enabled: enabled,
                 autoStart: autoStart
@@ -2294,6 +2334,62 @@ private struct GatewayFormSheet: View {
             protocolConfigJSON: protocolConfigJSON,
             providers: providers
         )
+    }
+
+    private var routeTargetPreview: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(normalizedRouteTargets(primaryProviderID: defaultProviderID)) { target in
+                HStack(spacing: 8) {
+                    Text("#\(target.priority)")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(DesignTokens.textSecondary)
+                    Text(target.providerId)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(DesignTokens.textPrimary)
+                    Spacer()
+                    Text(target.enabled ? "enabled" : "disabled")
+                        .font(.caption2)
+                        .foregroundStyle(DesignTokens.textSecondary)
+                }
+            }
+        }
+    }
+
+    private func normalizedRouteTargets(primaryProviderID: String) -> [AdminRouteTargetInput] {
+        let normalizedPrimary = primaryProviderID.trimmingCharacters(in: .whitespacesAndNewlines)
+        var workingTargets = routeTargets
+
+        if workingTargets.isEmpty, !normalizedPrimary.isEmpty {
+            workingTargets = [
+                AdminRouteTargetInput(providerId: normalizedPrimary, priority: 0, enabled: true)
+            ]
+        } else if !normalizedPrimary.isEmpty, !workingTargets.isEmpty {
+            workingTargets[0] = AdminRouteTargetInput(
+                providerId: normalizedPrimary,
+                priority: workingTargets[0].priority,
+                enabled: true
+            )
+        }
+
+        var normalizedTargets: [AdminRouteTargetInput] = []
+        var seenProviderIDs = Set<String>()
+
+        for target in workingTargets.sorted(by: { $0.priority < $1.priority }) {
+            let providerID = target.providerId.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !providerID.isEmpty, seenProviderIDs.insert(providerID).inserted else {
+                continue
+            }
+
+            normalizedTargets.append(
+                AdminRouteTargetInput(
+                    providerId: providerID,
+                    priority: normalizedTargets.count,
+                    enabled: target.enabled || normalizedTargets.isEmpty
+                )
+            )
+        }
+
+        return normalizedTargets
     }
 
     private var providerOptions: [GatewayPickerOption] {

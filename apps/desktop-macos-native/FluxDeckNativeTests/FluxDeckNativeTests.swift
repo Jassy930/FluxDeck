@@ -86,7 +86,20 @@ final class FluxDeckNativeTests: XCTestCase {
                 apiKey: "sk",
                 models: ["gpt-4o-mini", "gpt-4.1-mini"],
                 enabled: true
-            )
+            ),
+            healthStates: [
+                AdminProviderHealthState(
+                    providerId: "pv",
+                    scope: "global",
+                    gatewayId: nil,
+                    model: nil,
+                    status: "degraded",
+                    failureStreak: 1,
+                    successStreak: 0,
+                    lastFailureReason: "rate limited",
+                    recoverAfter: nil
+                )
+            ]
         )
         let gatewayCard = GatewayWorkspaceCard.make(
             gateway: AdminGateway(
@@ -96,16 +109,49 @@ final class FluxDeckNativeTests: XCTestCase {
                 listenPort: 18080,
                 inboundProtocol: "openai",
                 defaultProviderId: "pv",
+                routeTargets: [
+                    AdminRouteTarget(
+                        id: "gw__route__0",
+                        gatewayId: "gw",
+                        providerId: "pv",
+                        priority: 0,
+                        enabled: true,
+                        healthStatus: "degraded",
+                        lastFailureReason: "rate limited"
+                    ),
+                    AdminRouteTarget(
+                        id: "gw__route__1",
+                        gatewayId: "gw",
+                        providerId: "pv_backup",
+                        priority: 1,
+                        enabled: true,
+                        healthStatus: "healthy",
+                        lastFailureReason: nil
+                    )
+                ],
                 enabled: true,
                 autoStart: true,
                 runtimeStatus: "running",
-                lastError: nil
+                lastError: nil,
+                activeProviderId: "pv_backup",
+                routingMode: "ordered_failover",
+                healthSummary: AdminGatewayHealthSummary(
+                    healthyCount: 1,
+                    degradedCount: 1,
+                    unhealthyCount: 0,
+                    probingCount: 0
+                )
             )
         )
 
         XCTAssertEqual(providerCard.modelCountText, "2 models")
+        XCTAssertEqual(providerCard.healthStatusText, "DEGRADED")
+        XCTAssertEqual(providerCard.healthDetailText, "rate limited")
         XCTAssertEqual(gatewayCard.endpointText, "127.0.0.1:18080")
         XCTAssertEqual(gatewayCard.runtimeBadge, "RUNNING")
+        XCTAssertEqual(gatewayCard.activeProviderText, "pv_backup")
+        XCTAssertEqual(gatewayCard.routeSummaryText, "pv [degraded] -> pv_backup [healthy]")
+        XCTAssertEqual(gatewayCard.healthSummaryText, "1 healthy · 1 degraded · 0 unhealthy")
         XCTAssertEqual(gatewayCard.autoStartText, "ON")
     }
 
@@ -969,7 +1015,26 @@ final class FluxDeckNativeTests: XCTestCase {
             "listen_host": "127.0.0.1",
             "listen_port": 18080,
             "inbound_protocol": "openai",
+            "route_targets": [
+              {
+                "id": "gateway_main__route__0",
+                "gateway_id": "gateway_main",
+                "provider_id": "provider_main",
+                "priority": 0,
+                "enabled": true,
+                "health_status": "degraded",
+                "last_failure_reason": "rate limited"
+              }
+            ],
             "default_provider_id": "provider_main",
+            "active_provider_id": "provider_backup",
+            "routing_mode": "ordered_failover",
+            "health_summary": {
+              "healthy_count": 1,
+              "degraded_count": 1,
+              "unhealthy_count": 0,
+              "probing_count": 0
+            },
             "enabled": true,
             "auto_start": true
           }
@@ -984,7 +1049,35 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(providers.first?.apiKey, "sk-main")
         XCTAssertEqual(gateways.count, 1)
         XCTAssertEqual(gateways.first?.defaultProviderId, "provider_main")
+        XCTAssertEqual(gateways.first?.routeTargets.first?.providerId, "provider_main")
+        XCTAssertEqual(gateways.first?.activeProviderId, "provider_backup")
+        XCTAssertEqual(gateways.first?.healthSummary?.degradedCount, 1)
         XCTAssertEqual(gateways.first?.autoStart, true)
+    }
+
+    func testDecodesProviderHealthPayload() throws {
+        let healthData = """
+        [
+          {
+            "provider_id": "provider_main",
+            "scope": "global",
+            "gateway_id": null,
+            "model": null,
+            "status": "probing",
+            "failure_streak": 3,
+            "success_streak": 0,
+            "last_failure_reason": "probe status 502",
+            "recover_after": "12345"
+          }
+        ]
+        """.data(using: .utf8)!
+
+        let healthStates = try AdminApiClient.decodeProviderHealth(from: healthData)
+
+        XCTAssertEqual(healthStates.count, 1)
+        XCTAssertEqual(healthStates.first?.providerId, "provider_main")
+        XCTAssertEqual(healthStates.first?.status, "probing")
+        XCTAssertEqual(healthStates.first?.lastFailureReason, "probe status 502")
     }
 
     func testDecodesGatewayUpdateResultPayload() throws {
@@ -1288,6 +1381,10 @@ final class FluxDeckNativeTests: XCTestCase {
             upstreamProtocol: "provider_default",
             protocolConfigJSON: ["compatibility_mode": .string("compatible")],
             defaultProviderId: "provider_ui",
+            routeTargets: [
+                AdminRouteTargetInput(providerId: "provider_ui", priority: 0, enabled: true),
+                AdminRouteTargetInput(providerId: "provider_backup", priority: 1, enabled: true)
+            ],
             defaultModel: "gpt-4o-mini",
             enabled: true,
             autoStart: true
@@ -1323,6 +1420,9 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(gatewayJSON["listen_port"] as? Int, 18080)
         XCTAssertEqual(gatewayJSON["upstream_protocol"] as? String, "provider_default")
         XCTAssertEqual(gatewayJSON["default_provider_id"] as? String, "provider_ui")
+        let createRouteTargets = gatewayJSON["route_targets"] as? [[String: Any]]
+        XCTAssertEqual(createRouteTargets?.count, 2)
+        XCTAssertEqual(createRouteTargets?.first?["provider_id"] as? String, "provider_ui")
         XCTAssertEqual(gatewayJSON["default_model"] as? String, "gpt-4o-mini")
         XCTAssertEqual(gatewayJSON["auto_start"] as? Bool, true)
         let createProtocolConfig = gatewayJSON["protocol_config_json"] as? [String: String]
@@ -1343,6 +1443,10 @@ final class FluxDeckNativeTests: XCTestCase {
             upstreamProtocol: "provider_default",
             protocolConfigJSON: ["compatibility_mode": .string("strict")],
             defaultProviderId: "provider_ui",
+            routeTargets: [
+                AdminRouteTargetInput(providerId: "provider_ui", priority: 0, enabled: true),
+                AdminRouteTargetInput(providerId: "provider_backup", priority: 1, enabled: true)
+            ],
             defaultModel: "gpt-4.1-mini",
             enabled: false,
             autoStart: true
@@ -1357,6 +1461,9 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(gatewayJSON["listen_port"] as? Int, 19090)
         XCTAssertEqual(gatewayJSON["upstream_protocol"] as? String, "provider_default")
         XCTAssertEqual(gatewayJSON["default_provider_id"] as? String, "provider_ui")
+        let updateRouteTargets = gatewayJSON["route_targets"] as? [[String: Any]]
+        XCTAssertEqual(updateRouteTargets?.count, 2)
+        XCTAssertEqual(updateRouteTargets?.last?["provider_id"] as? String, "provider_backup")
         XCTAssertEqual(gatewayJSON["auto_start"] as? Bool, true)
         XCTAssertEqual(gatewayJSON["enabled"] as? Bool, false)
         let protocolConfig = gatewayJSON["protocol_config_json"] as? [String: String]

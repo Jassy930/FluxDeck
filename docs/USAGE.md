@@ -91,6 +91,11 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider health list
 cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider probe provider_main
 ```
 
+补充说明：
+
+- `provider health list` 会同时返回 `global` 与 `gateway_provider` 两类健康快照
+- macOS Native 工作台现在也会展示 Provider health、Gateway route targets、`active_provider_id`，并支持手动 probe
+
 更新 Provider 配置（Admin API）：
 
 ```bash

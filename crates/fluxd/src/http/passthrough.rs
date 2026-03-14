@@ -216,7 +216,7 @@ pub async fn handle_passthrough_request(
             Err(err) => {
                 let message = format!("passthrough upstream request failed: {err}");
                 let _ = health_service
-                    .record_failure(&target.provider_id, &message)
+                    .record_failure_for_gateway(gateway_id, &target.provider_id, &message)
                     .await;
                 if index + 1 < targets.len() {
                     continue;
@@ -257,7 +257,9 @@ pub async fn handle_passthrough_request(
         let is_stream = is_event_stream_content_type(&headers);
 
         if is_stream {
-            let _ = health_service.record_success(&target.provider_id).await;
+            let _ = health_service
+                .record_success_for_gateway(gateway_id, &target.provider_id)
+                .await;
             let stream_dimensions = PassthroughLogDimensions {
                 model: request_model.clone(),
                 model_requested: request_model.clone(),
@@ -319,7 +321,7 @@ pub async fn handle_passthrough_request(
             Err(err) => {
                 let message = format!("read passthrough upstream response failed: {err}");
                 let _ = health_service
-                    .record_failure(&target.provider_id, &message)
+                    .record_failure_for_gateway(gateway_id, &target.provider_id, &message)
                     .await;
                 if index + 1 < targets.len() {
                     continue;
@@ -356,16 +358,26 @@ pub async fn handle_passthrough_request(
 
         if should_failover_status(status) && index + 1 < targets.len() {
             let _ = health_service
-                .record_failure(&target.provider_id, &format!("status {}", status.as_u16()))
+                .record_failure_for_gateway(
+                    gateway_id,
+                    &target.provider_id,
+                    &format!("status {}", status.as_u16()),
+                )
                 .await;
             continue;
         }
 
         if status.is_success() {
-            let _ = health_service.record_success(&target.provider_id).await;
+            let _ = health_service
+                .record_success_for_gateway(gateway_id, &target.provider_id)
+                .await;
         } else if should_failover_status(status) {
             let _ = health_service
-                .record_failure(&target.provider_id, &format!("status {}", status.as_u16()))
+                .record_failure_for_gateway(
+                    gateway_id,
+                    &target.provider_id,
+                    &format!("status {}", status.as_u16()),
+                )
                 .await;
         }
 

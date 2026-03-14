@@ -50,11 +50,21 @@ impl RouteSelector {
                 g.upstream_protocol,
                 g.protocol_config_json,
                 g.default_model,
-                COALESCE(ph.status, 'healthy') AS health_status
+                rt.priority,
+                COALESCE(scoped.status, global.status, 'healthy') AS health_status
             FROM gateways g
             JOIN configured_targets rt ON rt.gateway_id = g.id
             JOIN providers p ON p.id = rt.provider_id
-            LEFT JOIN provider_health_states ph ON ph.provider_id = p.id
+            LEFT JOIN provider_health_states scoped
+              ON scoped.provider_id = p.id
+             AND scoped.scope <> 'global'
+             AND scoped.gateway_id = g.id
+             AND scoped.model = ''
+            LEFT JOIN provider_health_states global
+              ON global.provider_id = p.id
+             AND global.scope = 'global'
+             AND global.gateway_id = ''
+             AND global.model = ''
             WHERE g.id = ?1
               AND rt.enabled = 1
               AND p.enabled = 1
@@ -89,14 +99,18 @@ impl RouteSelector {
                 serde_json::from_str(&row.get::<String, _>("protocol_config_json"))
                     .unwrap_or_else(|_| json!({}));
 
-            available.push(ResolvedTarget {
-                provider_id: row.get("provider_id"),
-                upstream_protocol,
-                base_url: row.get("base_url"),
-                api_key: row.get("api_key"),
-                effective_model: row.get("default_model"),
-                protocol_config,
-            });
+            available.push((
+                health_rank(&health_status),
+                row.get::<i64, _>("priority"),
+                ResolvedTarget {
+                    provider_id: row.get("provider_id"),
+                    upstream_protocol,
+                    base_url: row.get("base_url"),
+                    api_key: row.get("api_key"),
+                    effective_model: row.get("default_model"),
+                    protocol_config,
+                },
+            ));
         }
 
         if available.is_empty() {
@@ -105,6 +119,20 @@ impl RouteSelector {
             ));
         }
 
-        Ok(available)
+        available.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
+        Ok(available
+            .into_iter()
+            .map(|(_, _, target)| target)
+            .collect())
+    }
+}
+
+fn health_rank(status: &str) -> i32 {
+    match status {
+        "healthy" => 0,
+        "probing" => 1,
+        "degraded" => 2,
+        "unhealthy" => 3,
+        _ => 0,
     }
 }

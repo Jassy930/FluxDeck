@@ -190,8 +190,10 @@
 
 建议字段：
 
-- `provider_id TEXT PRIMARY KEY`
+- `provider_id TEXT NOT NULL`
 - `scope TEXT NOT NULL DEFAULT 'global'`
+- `gateway_id TEXT NOT NULL DEFAULT ''`
+- `model TEXT NOT NULL DEFAULT ''`
 - `status TEXT NOT NULL`
 - `failure_streak INTEGER NOT NULL DEFAULT 0`
 - `success_streak INTEGER NOT NULL DEFAULT 0`
@@ -202,11 +204,14 @@
 - `circuit_open_until TEXT`
 - `recover_after TEXT`
 - `updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP`
+- `PRIMARY KEY(provider_id, scope, gateway_id, model)`
 
 语义：
 
-- 当前版本健康状态先按 Provider 全局维度维护
-- 不细分到 `gateway + provider + model + protocol`
+- 当前版本同时维护：
+  - `global`：Provider 全局默认快照
+  - `gateway_provider`：Gateway + Provider 维度快照
+- `model` 字段先作为结构预留，不立即做按模型独立选路
 - `circuit_open_until` 表示摘除窗口
 - `recover_after` 表示冷却后回切的最早时间
 
@@ -518,7 +523,7 @@
 
 ### 精度债务
 
-- 健康状态先按 Provider 全局维度维护，未细化到 `gateway + provider + model + protocol`
+- 健康状态已细化到 `global + gateway_provider` 两级，但尚未真正做到按 `model` 维度独立选路与恢复
 
 ### 观测债务
 
@@ -537,14 +542,20 @@
 
 以下内容明确归入后续阶段追踪，不计入当前阶段性提交完成范围：
 
-- `HealthMonitor` 真实主动探测、冷却窗口调度与退避
-- 健康状态从 Provider 全局维度细化到更小作用域
-- 原生 macOS 端的链路编辑、健康状态展示与手动 probe 闭环
+- 原生 macOS 端的完整链路排序交互（例如上下移动/拖拽）
+- 健康状态进一步细化到按模型独立选路
+- 更复杂的主动探测策略（例如 provider-specific probe endpoint / richer backoff policy）
 
 更新（2026-03-13）：
 
 - Anthropic `count_tokens` 请求级 failover 已在 Phase 2 跟进中补齐，不再属于未完成范围
 - failover 观测字段已在 Phase 2 跟进中补齐，不再属于未完成范围
+
+更新（2026-03-14）：
+
+- `HealthMonitor` 已补真实 HTTP probe、冷却窗口与最小失败退避
+- 健康状态已从单纯 Provider 全局维度细化到 `gateway_provider`
+- macOS Native 已补 route targets / active provider / provider health / manual probe 的最小闭环
 
 ## 推荐实施顺序
 

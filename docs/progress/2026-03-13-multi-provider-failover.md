@@ -166,6 +166,63 @@
 - `cargo test -q -p fluxd --test anthropic_forwarding_test anthropic_count_tokens_fail_over_to_next_provider_on_upstream_5xx`
   - PASS
 
+### Task 13 已完成：`HealthMonitor` 真实主动探测
+
+- `HealthMonitor` 不再直接把 `unhealthy` 推到 `probing`
+- 当前已落真实主动探测闭环：
+  - 仅在 `recover_after` 到期后才对 `unhealthy` Provider 发起 probe
+  - probe 成功会把全局状态推进到 `probing`
+  - probe 失败会保持 `unhealthy`，并基于 `failure_streak` 延长下一次 `recover_after`
+- 当前 probe 采用对 `provider.base_url` 的轻量 HTTP GET：
+  - `429` / `5xx` 视为 probe 失败
+  - 其他 HTTP 状态（例如 `401`）视为 upstream 可达
+
+验证：
+
+- `cargo test -q -p fluxd --test gateway_manager_test`
+
+### Task 14 已完成：健康状态细化到 Gateway 作用域
+
+- 新增 `crates/fluxd/migrations/010_provider_health_scope.sql`
+- `provider_health_states` 已升级为：
+  - `global`
+  - `gateway_provider`
+  - `model` 字段预留
+- `ProviderHealthRepo / ProviderHealthService / RouteSelector` 已支持 Gateway 级快照读取与回写
+- 请求路径健康回写已切到 Gateway 作用域：
+  - OpenAI direct forwarding
+  - OpenAI passthrough fallback
+  - Anthropic `/v1/messages`
+  - Anthropic `/v1/messages/count_tokens`
+- `GET /admin/gateways` 现在会基于 Gateway 级健康状态返回：
+  - `route_targets[*].health_status`
+  - `route_targets[*].last_failure_reason`
+  - `active_provider_id`
+  - `health_summary`
+
+验证：
+
+- `cargo test -q -p fluxd --test provider_health_service_test`
+- `cargo test -q -p fluxd --test route_selector_test`
+- `cargo test -q -p fluxd --test admin_api_test admin_api_exposes_gateway_health_summary_and_active_provider`
+- `cargo test -q -p fluxd --test openai_forwarding_test`
+- `cargo test -q -p fluxd --test openai_passthrough_fallback_test`
+- `cargo test -q -p fluxd --test anthropic_forwarding_test --test anthropic_count_tokens_test`
+
+### Task 15 已完成：原生端链路与健康视图最小闭环
+
+- `apps/desktop-macos-native` 已补：
+  - `AdminApiClient`：解码 `route_targets`、`active_provider_id`、`health_summary`、Provider health，并新增 manual probe API
+  - `ProviderListView`：展示 Provider health / 最近失败原因，并支持 manual probe
+  - `GatewayListView`：展示 route target 顺序、active provider、health summary
+  - `GatewayFormSheet`：保存时保留既有 `route_targets`，默认 Provider 改动会同步第一跳 target
+- 当前仍保留的 UI 技术债：
+  - 原生端尚未提供完整的 route target 排序编辑器，只做到“展示 + 保留 + 同步第一跳”
+
+验证：
+
+- `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -destination 'platform=macOS'`
+
 ### 当前剩余缺口
 
 - Task 7 已完成最小 CLI 闭环：
@@ -176,12 +233,10 @@
   - 新增 `GET /admin/providers/health`
   - 新增 `POST /admin/providers/{id}/probe`
   - `fluxd` 启动时会拉起后台 `HealthMonitor`
-  - `HealthMonitor` 当前会周期性补齐健康快照，并把 `unhealthy` Provider 推进到 `probing`
 - 为兼容 `provider_health_states -> providers` 外键约束，Provider 删除路径已调整为先删健康快照、再删 Provider 实体
-- 后台主动探测仍是保守骨架：
-  - 还没有真实上游网络探测
-  - 还没有独立冷却窗口调度与探测退避
-  - 还没有按 Gateway / 模型维度维护健康状态
+- 当前仍保留的技术债：
+  - `provider_health_states.model` 虽已入库，但还没有独立模型选路
+  - 原生端 route target 编辑仍未提供完整排序交互
 
 ## Phase 2 跟踪
 
@@ -189,9 +244,9 @@
 |------|------|------|----------|
 | 11 | Anthropic `count_tokens` 请求级 failover | 已完成 | 已支持网络错误 / `429` / `5xx` 顺序切流，并回写 Provider 健康状态 |
 | 12 | failover 观测字段与日志维度 | 已完成 | `request_logs` 与 `GET /admin/logs` 已稳定返回 3 个 failover 观测字段 |
-| 13 | `HealthMonitor` 真实主动探测 | 未开始 | 当前仍为保守骨架，只做快照补齐和 `probing` 推进 |
-| 14 | 健康状态粒度细化 | 未开始 | 当前仍为 Provider 全局维度 |
-| 15 | 原生端链路与健康视图 | 未开始 | 需要在 macOS 原生端补 route targets / health / probe UI |
+| 13 | `HealthMonitor` 真实主动探测 | 已完成 | 已补真实 HTTP probe、冷却窗口与最小失败退避 |
+| 14 | 健康状态粒度细化 | 已完成 | 已升级到 `global + gateway_provider (+ model 预留)`，请求路径改为 Gateway 级健康回写 |
+| 15 | 原生端链路与健康视图 | 已完成 | Native 已支持 route targets / active provider / provider health / manual probe 的最小闭环 |
 
 ### 跟踪更新规则
 

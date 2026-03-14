@@ -199,6 +199,7 @@ struct CreateGatewayInput: Encodable {
     let upstreamProtocol: String
     let protocolConfigJSON: [String: JSONValue]
     let defaultProviderId: String
+    let routeTargets: [AdminRouteTargetInput]
     let defaultModel: String?
     let enabled: Bool
     let autoStart: Bool
@@ -212,6 +213,7 @@ struct CreateGatewayInput: Encodable {
         case upstreamProtocol = "upstream_protocol"
         case protocolConfigJSON = "protocol_config_json"
         case defaultProviderId = "default_provider_id"
+        case routeTargets = "route_targets"
         case defaultModel = "default_model"
         case enabled
         case autoStart = "auto_start"
@@ -226,6 +228,7 @@ struct UpdateGatewayInput: Encodable {
     let upstreamProtocol: String
     let protocolConfigJSON: [String: JSONValue]
     let defaultProviderId: String
+    let routeTargets: [AdminRouteTargetInput]
     let defaultModel: String?
     let enabled: Bool
     let autoStart: Bool
@@ -238,9 +241,91 @@ struct UpdateGatewayInput: Encodable {
         case upstreamProtocol = "upstream_protocol"
         case protocolConfigJSON = "protocol_config_json"
         case defaultProviderId = "default_provider_id"
+        case routeTargets = "route_targets"
         case defaultModel = "default_model"
         case enabled
         case autoStart = "auto_start"
+    }
+}
+
+struct AdminRouteTargetInput: Codable, Identifiable, Equatable {
+    let providerId: String
+    let priority: Int
+    let enabled: Bool
+
+    var id: String { "\(priority):\(providerId)" }
+
+    enum CodingKeys: String, CodingKey {
+        case providerId = "provider_id"
+        case priority
+        case enabled
+    }
+}
+
+struct AdminRouteTarget: Decodable, Identifiable, Equatable {
+    let id: String
+    let gatewayId: String
+    let providerId: String
+    let priority: Int
+    let enabled: Bool
+    let healthStatus: String?
+    let lastFailureReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case gatewayId = "gateway_id"
+        case providerId = "provider_id"
+        case priority
+        case enabled
+        case healthStatus = "health_status"
+        case lastFailureReason = "last_failure_reason"
+    }
+}
+
+struct AdminGatewayHealthSummary: Decodable, Equatable {
+    let healthyCount: Int
+    let degradedCount: Int
+    let unhealthyCount: Int
+    let probingCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case healthyCount = "healthy_count"
+        case degradedCount = "degraded_count"
+        case unhealthyCount = "unhealthy_count"
+        case probingCount = "probing_count"
+    }
+}
+
+struct AdminProviderHealthState: Decodable, Identifiable, Equatable {
+    let providerId: String
+    let scope: String
+    let gatewayId: String?
+    let model: String?
+    let status: String
+    let failureStreak: Int
+    let successStreak: Int
+    let lastFailureReason: String?
+    let recoverAfter: String?
+
+    var id: String {
+        [
+            providerId,
+            scope,
+            gatewayId ?? "",
+            model ?? ""
+        ].joined(separator: ":")
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case providerId = "provider_id"
+        case scope
+        case gatewayId = "gateway_id"
+        case model
+        case status
+        case failureStreak = "failure_streak"
+        case successStreak = "success_streak"
+        case lastFailureReason = "last_failure_reason"
+        case recoverAfter = "recover_after"
     }
 }
 
@@ -282,11 +367,15 @@ struct AdminGateway: Decodable, Identifiable {
     let upstreamProtocol: String
     let protocolConfigJSON: [String: JSONValue]
     let defaultProviderId: String
+    let routeTargets: [AdminRouteTarget]
     let defaultModel: String?
     let enabled: Bool
     let autoStart: Bool
     let runtimeStatus: String?
     let lastError: String?
+    let activeProviderId: String?
+    let routingMode: String?
+    let healthSummary: AdminGatewayHealthSummary?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -297,11 +386,15 @@ struct AdminGateway: Decodable, Identifiable {
         case upstreamProtocol = "upstream_protocol"
         case protocolConfigJSON = "protocol_config_json"
         case defaultProviderId = "default_provider_id"
+        case routeTargets = "route_targets"
         case defaultModel = "default_model"
         case enabled
         case autoStart = "auto_start"
         case runtimeStatus = "runtime_status"
         case lastError = "last_error"
+        case activeProviderId = "active_provider_id"
+        case routingMode = "routing_mode"
+        case healthSummary = "health_summary"
     }
 
     init(
@@ -313,11 +406,15 @@ struct AdminGateway: Decodable, Identifiable {
         upstreamProtocol: String = "provider_default",
         protocolConfigJSON: [String: JSONValue] = [:],
         defaultProviderId: String,
+        routeTargets: [AdminRouteTarget] = [],
         defaultModel: String? = nil,
         enabled: Bool,
         autoStart: Bool,
         runtimeStatus: String?,
-        lastError: String?
+        lastError: String?,
+        activeProviderId: String? = nil,
+        routingMode: String? = nil,
+        healthSummary: AdminGatewayHealthSummary? = nil
     ) {
         self.id = id
         self.name = name
@@ -327,11 +424,15 @@ struct AdminGateway: Decodable, Identifiable {
         self.upstreamProtocol = upstreamProtocol
         self.protocolConfigJSON = protocolConfigJSON
         self.defaultProviderId = defaultProviderId
+        self.routeTargets = routeTargets
         self.defaultModel = defaultModel
         self.enabled = enabled
         self.autoStart = autoStart
         self.runtimeStatus = runtimeStatus
         self.lastError = lastError
+        self.activeProviderId = activeProviderId
+        self.routingMode = routingMode
+        self.healthSummary = healthSummary
     }
 
     init(from decoder: any Decoder) throws {
@@ -344,11 +445,15 @@ struct AdminGateway: Decodable, Identifiable {
         upstreamProtocol = try container.decodeIfPresent(String.self, forKey: .upstreamProtocol) ?? "provider_default"
         protocolConfigJSON = try container.decodeIfPresent([String: JSONValue].self, forKey: .protocolConfigJSON) ?? [:]
         defaultProviderId = try container.decode(String.self, forKey: .defaultProviderId)
+        routeTargets = try container.decodeIfPresent([AdminRouteTarget].self, forKey: .routeTargets) ?? []
         defaultModel = try container.decodeIfPresent(String.self, forKey: .defaultModel)
         enabled = try container.decode(Bool.self, forKey: .enabled)
         autoStart = try container.decodeIfPresent(Bool.self, forKey: .autoStart) ?? false
         runtimeStatus = try container.decodeIfPresent(String.self, forKey: .runtimeStatus)
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
+        activeProviderId = try container.decodeIfPresent(String.self, forKey: .activeProviderId)
+        routingMode = try container.decodeIfPresent(String.self, forKey: .routingMode)
+        healthSummary = try container.decodeIfPresent(AdminGatewayHealthSummary.self, forKey: .healthSummary)
     }
 }
 
@@ -903,6 +1008,11 @@ struct AdminApiClient {
         return try Self.decodeGateways(from: data)
     }
 
+    func fetchProviderHealth() async throws -> [AdminProviderHealthState] {
+        let data = try await get(path: "/admin/providers/health")
+        return try Self.decodeProviderHealth(from: data)
+    }
+
     func fetchLogs() async throws -> [AdminLog] {
         let page = try await fetchLogsPage(limit: 50)
         return page.items
@@ -977,6 +1087,11 @@ struct AdminApiClient {
         return try JSONDecoder().decode(AdminDeleteResponse.self, from: data)
     }
 
+    func probeProvider(id: String) async throws -> AdminProviderHealthState {
+        let data = try await post(path: "/admin/providers/\(id)/probe", body: EmptyRequest())
+        return try JSONDecoder().decode(AdminProviderHealthState.self, from: data)
+    }
+
     func createGateway(_ input: CreateGatewayInput) async throws -> AdminGateway {
         let data = try await post(path: "/admin/gateways", body: input)
         return try JSONDecoder().decode(AdminGateway.self, from: data)
@@ -1018,6 +1133,10 @@ struct AdminApiClient {
 
     static func decodeGateways(from data: Data) throws -> [AdminGateway] {
         try JSONDecoder().decode([AdminGateway].self, from: data)
+    }
+
+    static func decodeProviderHealth(from data: Data) throws -> [AdminProviderHealthState] {
+        try JSONDecoder().decode([AdminProviderHealthState].self, from: data)
     }
 
     static func decodeLogs(from data: Data) throws -> [AdminLog] {

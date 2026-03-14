@@ -82,7 +82,10 @@ struct GatewayListView: View {
                                     }
 
                                     resourceRow(label: "Endpoint", value: card.endpointText)
-                                    resourceRow(label: "Provider", value: card.providerText)
+                                    resourceRow(label: "Primary", value: card.providerText)
+                                    resourceRow(label: "Active", value: card.activeProviderText)
+                                    resourceRow(label: "Routes", value: card.routeSummaryText)
+                                    resourceRow(label: "Health", value: card.healthSummaryText)
                                     resourceRow(label: "Auto Start", value: card.autoStartText)
 
                                     if let lastError = card.lastErrorText, !lastError.isEmpty {
@@ -164,7 +167,8 @@ struct GatewayListView: View {
             Text(value)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(DesignTokens.textPrimary)
-                .lineLimit(1)
+                .lineLimit(2)
+                .multilineTextAlignment(.trailing)
         }
     }
 }

@@ -89,7 +89,9 @@
 
 - `provider_id: string`
 - `scope: string`
-  - 当前固定为 `global`
+  - 当前可能值：`global | gateway_provider`
+- `gateway_id: string | null`
+- `model: string | null`
 - `status: string`
   - 当前可能值：`healthy | degraded | unhealthy | probing`
 - `failure_streak: number`
@@ -104,11 +106,16 @@
 说明：
 
 - 创建 Provider 后，服务端会自动创建一条默认健康快照，初始状态为 `healthy`
-- 当前一阶段健康快照按 Provider 全局维度维护，不区分 Gateway、模型或协议
+- 当前同时存在两类健康快照：
+  - `scope=global`：Provider 全局默认快照
+  - `scope=gateway_provider`：Gateway + Provider 维度的局部快照
+- 当前 `model` 字段已预留到表结构与契约里，但运行时主要仍使用 `global` 与 `gateway_provider` 两级，不额外按模型拆分选路
 - `fluxd` 进程内会启动后台 `HealthMonitor`：
   - 周期性补齐启用中 Provider 的默认健康快照
-  - 对状态为 `unhealthy` 的 Provider 发起轻量探测，并把状态推进到 `probing`
-- 当前后台探测仍为保守骨架，不直接发起真实上游 API 探针；真实请求成功/失败依旧是主要健康信号来源
+  - 仅在 `recover_after` 到期后，对状态为 `unhealthy` 的 Provider 发起真实 HTTP 轻量探测
+  - Probe 成功后把全局状态推进到 `probing`
+  - Probe 失败后保持 `unhealthy`，并按失败次数延长下一次 `recover_after`
+- 请求级转发会优先回写 `gateway_provider` 作用域的健康状态，避免单个 Gateway 的异常污染其他 Gateway
 
 ### `POST /admin/providers/{id}/probe`
 
@@ -121,7 +128,7 @@
 
 说明：
 
-- 当前手动 probe 会把目标 Provider 的状态推进到 `probing`
+- 当前手动 probe 会把目标 Provider 的全局健康状态直接推进到 `probing`
 - 若 Provider 不存在或健康状态写入失败，返回 `400`
 
 ## 2) Gateway
@@ -140,12 +147,15 @@
 - 允许值：`provider_default | openai | openai-response | gemini | anthropic | azure-openai | new-api | ollama`
 - `protocol_config_json: object`
 - `default_provider_id: string`
-- `route_targets: Array<{ id: string, gateway_id: string, provider_id: string, priority: number, enabled: boolean }>`
+- `route_targets: Array<{ id: string, gateway_id: string, provider_id: string, priority: number, enabled: boolean, health_status?: string, last_failure_reason?: string | null }>`
 - `default_model: string | null`
 - `enabled: boolean`
 - `auto_start: boolean`
 - `runtime_status: "running" | "stopped" | string`
 - `last_error: string | null`
+- `active_provider_id: string | null`
+- `routing_mode: "ordered_failover" | string | null`
+- `health_summary: { healthy_count: number, degraded_count: number, unhealthy_count: number, probing_count: number } | null`
 
 ### `POST /admin/gateways`
 
@@ -159,6 +169,12 @@
   - 每项字段：`provider_id`、`priority`、`enabled`
   - 若未提供 `route_targets`，服务端会基于 `default_provider_id` 自动生成一条 `priority=0` 的默认 target
   - 服务端会同步维护 `default_provider_id` 为第一条启用 target 的 `provider_id`，用于旧客户端兼容
+- `GET /admin/gateways` 返回的 `route_targets` 会附带面向管理端的视图字段：
+  - `health_status`：当前 target 的生效健康状态（优先取 `gateway_provider` scope，再回退到 `global`）
+  - `last_failure_reason`：当前生效健康快照里的最近失败原因
+- `active_provider_id` 基于该 Gateway 最近一次请求日志推断当前活跃上游
+- `routing_mode` 当前固定返回 `ordered_failover`
+- `health_summary` 汇总该 Gateway 当前 route targets 的健康状态计数
 - 当 `inbound_protocol == upstream_protocol` 且请求路径没有命中专门 handler 时，Gateway 会启用同协议 passthrough fallback
   - 默认透传原始方法、路径、查询串、请求头与请求体
   - 当前 OpenAI 系已兼容 `/responses` 与 `/v1/responses`

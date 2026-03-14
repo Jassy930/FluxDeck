@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
-use crate::domain::gateway::{CreateGatewayInput, Gateway, UpdateGatewayInput};
+use crate::domain::gateway::{CreateGatewayInput, Gateway, GatewayRouteTarget, UpdateGatewayInput};
+use crate::domain::provider_health::ProviderHealthState;
 use crate::domain::provider::{CreateProviderInput, Provider, UpdateProviderInput};
 use crate::http::dto::BasicOk;
 use crate::repo::gateway_repo::GatewayRepo;
@@ -393,14 +394,50 @@ async fn list_gateways(
 ) -> (StatusCode, Json<Vec<GatewayWithRuntime>>) {
     match state.gateway_repo.list().await {
         Ok(items) => {
+            let health_states = state
+                .provider_health_service
+                .list_states()
+                .await
+                .unwrap_or_default();
+            let health_lookup = ProviderHealthLookup::from_states(&health_states);
             let mut gateways = Vec::with_capacity(items.len());
             for gateway in items {
+                let gateway_id = gateway.id.clone();
                 let runtime_status = state.gateway_manager.status(&gateway.id).await;
                 let last_error = state.gateway_manager.last_error(&gateway.id).await;
+                let route_targets = gateway
+                    .route_targets
+                    .iter()
+                    .map(|route_target| GatewayRouteTargetView::from_target(
+                        route_target,
+                        effective_health_state(
+                            &health_lookup,
+                            &gateway.id,
+                            &route_target.provider_id,
+                        ),
+                    ))
+                    .collect::<Vec<_>>();
+                let health_summary = GatewayHealthSummary::from_targets(&route_targets);
                 gateways.push(GatewayWithRuntime {
-                    gateway,
+                    id: gateway_id.clone(),
+                    name: gateway.name,
+                    listen_host: gateway.listen_host,
+                    listen_port: gateway.listen_port,
+                    inbound_protocol: gateway.inbound_protocol,
+                    upstream_protocol: gateway.upstream_protocol,
+                    protocol_config_json: gateway.protocol_config_json,
+                    default_provider_id: gateway.default_provider_id,
+                    route_targets,
+                    default_model: gateway.default_model,
+                    enabled: gateway.enabled,
+                    auto_start: gateway.auto_start,
                     runtime_status: runtime_status.as_str().to_string(),
                     last_error,
+                    active_provider_id: latest_active_provider_id(&state.pool, &gateway_id)
+                        .await
+                        .unwrap_or(None),
+                    routing_mode: "ordered_failover".to_string(),
+                    health_summary,
                 });
             }
             (StatusCode::OK, Json(gateways))
@@ -411,10 +448,23 @@ async fn list_gateways(
 
 #[derive(Debug, Serialize)]
 struct GatewayWithRuntime {
-    #[serde(flatten)]
-    gateway: Gateway,
+    id: String,
+    name: String,
+    listen_host: String,
+    listen_port: i64,
+    inbound_protocol: String,
+    upstream_protocol: String,
+    protocol_config_json: Value,
+    default_provider_id: String,
+    route_targets: Vec<GatewayRouteTargetView>,
+    default_model: Option<String>,
+    enabled: bool,
+    auto_start: bool,
     runtime_status: String,
     last_error: Option<String>,
+    active_provider_id: Option<String>,
+    routing_mode: String,
+    health_summary: GatewayHealthSummary,
 }
 
 #[derive(Debug, Serialize)]
@@ -425,6 +475,107 @@ struct GatewayUpdateResult {
     restart_performed: bool,
     config_changed: bool,
     user_notice: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct GatewayRouteTargetView {
+    id: String,
+    gateway_id: String,
+    provider_id: String,
+    priority: i64,
+    enabled: bool,
+    health_status: String,
+    last_failure_reason: Option<String>,
+}
+
+impl GatewayRouteTargetView {
+    fn from_target(target: &GatewayRouteTarget, state: Option<&ProviderHealthState>) -> Self {
+        Self {
+            id: target.id.clone(),
+            gateway_id: target.gateway_id.clone(),
+            provider_id: target.provider_id.clone(),
+            priority: target.priority,
+            enabled: target.enabled,
+            health_status: state
+                .map(|item| item.status.clone())
+                .unwrap_or_else(|| "healthy".to_string()),
+            last_failure_reason: state.and_then(|item| item.last_failure_reason.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize)]
+struct GatewayHealthSummary {
+    healthy_count: usize,
+    degraded_count: usize,
+    unhealthy_count: usize,
+    probing_count: usize,
+}
+
+impl GatewayHealthSummary {
+    fn from_targets(route_targets: &[GatewayRouteTargetView]) -> Self {
+        let mut summary = Self::default();
+        for target in route_targets {
+            match target.health_status.as_str() {
+                "degraded" => summary.degraded_count += 1,
+                "unhealthy" => summary.unhealthy_count += 1,
+                "probing" => summary.probing_count += 1,
+                _ => summary.healthy_count += 1,
+            }
+        }
+        summary
+    }
+}
+
+#[derive(Default)]
+struct ProviderHealthLookup {
+    global: HashMap<String, ProviderHealthState>,
+    scoped: HashMap<(String, String), ProviderHealthState>,
+}
+
+impl ProviderHealthLookup {
+    fn from_states(states: &[ProviderHealthState]) -> Self {
+        let mut lookup = Self::default();
+        for state in states {
+            if let Some(gateway_id) = state.gateway_id.as_deref() {
+                lookup.scoped.insert(
+                    (gateway_id.to_string(), state.provider_id.clone()),
+                    state.clone(),
+                );
+            } else {
+                lookup
+                    .global
+                    .insert(state.provider_id.clone(), state.clone());
+            }
+        }
+        lookup
+    }
+}
+
+fn effective_health_state<'a>(
+    lookup: &'a ProviderHealthLookup,
+    gateway_id: &str,
+    provider_id: &str,
+) -> Option<&'a ProviderHealthState> {
+    lookup
+        .scoped
+        .get(&(gateway_id.to_string(), provider_id.to_string()))
+        .or_else(|| lookup.global.get(provider_id))
+}
+
+async fn latest_active_provider_id(pool: &SqlitePool, gateway_id: &str) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"
+        SELECT provider_id
+        FROM request_logs
+        WHERE gateway_id = ?1
+        ORDER BY created_at DESC, request_id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(gateway_id)
+    .fetch_optional(pool)
+    .await
 }
 
 fn gateway_differs_from_update(gateway: &Gateway, input: &UpdateGatewayInput) -> bool {

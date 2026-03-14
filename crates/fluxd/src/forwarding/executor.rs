@@ -44,16 +44,26 @@ pub async fn execute_openai_json(
             Ok((status, body)) => {
                 if should_failover_status(status) && index + 1 < targets.len() {
                     let _ = health_service
-                        .record_failure(&target.provider_id, &format!("status {}", status.as_u16()))
+                        .record_failure_for_gateway(
+                            gateway_id,
+                            &target.provider_id,
+                            &format!("status {}", status.as_u16()),
+                        )
                         .await;
                     continue;
                 }
 
                 if status.is_success() {
-                    let _ = health_service.record_success(&target.provider_id).await;
+                    let _ = health_service
+                        .record_success_for_gateway(gateway_id, &target.provider_id)
+                        .await;
                 } else if should_failover_status(status) {
                     let _ = health_service
-                        .record_failure(&target.provider_id, &format!("status {}", status.as_u16()))
+                        .record_failure_for_gateway(
+                            gateway_id,
+                            &target.provider_id,
+                            &format!("status {}", status.as_u16()),
+                        )
                         .await;
                 }
 
@@ -67,7 +77,7 @@ pub async fn execute_openai_json(
             Err(err) => {
                 let message = err.to_string();
                 let _ = health_service
-                    .record_failure(&target.provider_id, &message)
+                    .record_failure_for_gateway(gateway_id, &target.provider_id, &message)
                     .await;
                 if index + 1 < targets.len() {
                     last_request_error = Some(anyhow!(message));
@@ -106,16 +116,26 @@ pub async fn execute_openai_stream(
             Ok((status, response)) => {
                 if should_failover_status(status) && index + 1 < targets.len() {
                     let _ = health_service
-                        .record_failure(&target.provider_id, &format!("status {}", status.as_u16()))
+                        .record_failure_for_gateway(
+                            gateway_id,
+                            &target.provider_id,
+                            &format!("status {}", status.as_u16()),
+                        )
                         .await;
                     continue;
                 }
 
                 if status.is_success() {
-                    let _ = health_service.record_success(&target.provider_id).await;
+                    let _ = health_service
+                        .record_success_for_gateway(gateway_id, &target.provider_id)
+                        .await;
                 } else if should_failover_status(status) {
                     let _ = health_service
-                        .record_failure(&target.provider_id, &format!("status {}", status.as_u16()))
+                        .record_failure_for_gateway(
+                            gateway_id,
+                            &target.provider_id,
+                            &format!("status {}", status.as_u16()),
+                        )
                         .await;
                 }
 
@@ -129,7 +149,7 @@ pub async fn execute_openai_stream(
             Err(err) => {
                 let message = err.to_string();
                 let _ = health_service
-                    .record_failure(&target.provider_id, &message)
+                    .record_failure_for_gateway(gateway_id, &target.provider_id, &message)
                     .await;
                 if index + 1 < targets.len() {
                     last_request_error = Some(anyhow!(message));
@@ -163,16 +183,26 @@ pub async fn execute_anthropic_json(
             Ok((status, body)) => {
                 if should_failover_status(status) && index + 1 < targets.len() {
                     let _ = health_service
-                        .record_failure(&target.provider_id, &format!("status {}", status.as_u16()))
+                        .record_failure_for_gateway(
+                            gateway_id,
+                            &target.provider_id,
+                            &format!("status {}", status.as_u16()),
+                        )
                         .await;
                     continue;
                 }
 
                 if status.is_success() {
-                    let _ = health_service.record_success(&target.provider_id).await;
+                    let _ = health_service
+                        .record_success_for_gateway(gateway_id, &target.provider_id)
+                        .await;
                 } else if should_failover_status(status) {
                     let _ = health_service
-                        .record_failure(&target.provider_id, &format!("status {}", status.as_u16()))
+                        .record_failure_for_gateway(
+                            gateway_id,
+                            &target.provider_id,
+                            &format!("status {}", status.as_u16()),
+                        )
                         .await;
                 }
 
@@ -181,7 +211,7 @@ pub async fn execute_anthropic_json(
             Err(err) => {
                 let message = err.to_string();
                 let _ = health_service
-                    .record_failure(&target.provider_id, &message)
+                    .record_failure_for_gateway(gateway_id, &target.provider_id, &message)
                     .await;
                 if index + 1 < targets.len() {
                     last_request_error = Some(anyhow!(message));
@@ -215,16 +245,26 @@ pub async fn execute_anthropic_stream(
             Ok((status, response)) => {
                 if should_failover_status(status) && index + 1 < targets.len() {
                     let _ = health_service
-                        .record_failure(&target.provider_id, &format!("status {}", status.as_u16()))
+                        .record_failure_for_gateway(
+                            gateway_id,
+                            &target.provider_id,
+                            &format!("status {}", status.as_u16()),
+                        )
                         .await;
                     continue;
                 }
 
                 if status.is_success() {
-                    let _ = health_service.record_success(&target.provider_id).await;
+                    let _ = health_service
+                        .record_success_for_gateway(gateway_id, &target.provider_id)
+                        .await;
                 } else if should_failover_status(status) {
                     let _ = health_service
-                        .record_failure(&target.provider_id, &format!("status {}", status.as_u16()))
+                        .record_failure_for_gateway(
+                            gateway_id,
+                            &target.provider_id,
+                            &format!("status {}", status.as_u16()),
+                        )
                         .await;
                 }
 
@@ -233,7 +273,7 @@ pub async fn execute_anthropic_stream(
             Err(err) => {
                 let message = err.to_string();
                 let _ = health_service
-                    .record_failure(&target.provider_id, &message)
+                    .record_failure_for_gateway(gateway_id, &target.provider_id, &message)
                     .await;
                 if index + 1 < targets.len() {
                     last_request_error = Some(anyhow!(message));
