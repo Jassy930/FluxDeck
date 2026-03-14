@@ -2191,9 +2191,13 @@ async fn admin_stats_trend_includes_bucket_model_token_breakdown() {
         .get("data")
         .and_then(serde_json::Value::as_array)
         .expect("stats trend data array");
-    assert_eq!(trend_data.len(), 1);
+    let non_empty_buckets: Vec<&serde_json::Value> = trend_data
+        .iter()
+        .filter(|point| point.get("request_count") != Some(&json!(0)))
+        .collect();
+    assert_eq!(non_empty_buckets.len(), 1);
 
-    let by_model = trend_data[0]
+    let by_model = non_empty_buckets[0]
         .get("by_model")
         .and_then(serde_json::Value::as_array)
         .expect("bucket by_model array");
@@ -2341,9 +2345,13 @@ async fn admin_stats_trend_groups_model_tokens_per_bucket() {
         .get("data")
         .and_then(serde_json::Value::as_array)
         .expect("stats trend data array");
-    assert_eq!(trend_data.len(), 2);
+    let non_empty_buckets: Vec<&serde_json::Value> = trend_data
+        .iter()
+        .filter(|point| point.get("request_count") != Some(&json!(0)))
+        .collect();
+    assert_eq!(non_empty_buckets.len(), 2);
 
-    let first_bucket_models = trend_data[0]
+    let first_bucket_models = non_empty_buckets[0]
         .get("by_model")
         .and_then(serde_json::Value::as_array)
         .expect("first bucket by_model array");
@@ -2357,7 +2365,7 @@ async fn admin_stats_trend_groups_model_tokens_per_bucket() {
         Some(&json!(160))
     );
 
-    let second_bucket_models = trend_data[1]
+    let second_bucket_models = non_empty_buckets[1]
         .get("by_model")
         .and_then(serde_json::Value::as_array)
         .expect("second bucket by_model array");
@@ -2375,6 +2383,130 @@ async fn admin_stats_trend_groups_model_tokens_per_bucket() {
         Some(&json!("Unknown model"))
     );
     assert_eq!(second_bucket_models[1].get("error_count"), Some(&json!(1)));
+}
+
+#[tokio::test]
+async fn admin_stats_trend_returns_continuous_buckets_with_zero_value_gaps() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool.clone()));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{base}/admin/providers"))
+        .json(&json!({
+            "id": "provider_stats_continuous",
+            "name": "Stats Continuous Provider",
+            "kind": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-stats-continuous",
+            "models": ["gpt-4o-mini"],
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create provider request");
+
+    client
+        .post(format!("{base}/admin/gateways"))
+        .json(&json!({
+            "id": "gateway_stats_continuous",
+            "name": "Stats Continuous Gateway",
+            "listen_host": "127.0.0.1",
+            "listen_port": next_free_port(),
+            "inbound_protocol": "openai",
+            "default_provider_id": "provider_stats_continuous",
+            "default_model": "gpt-4o-mini",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .expect("create gateway request");
+
+    sqlx::query(
+        r#"
+        INSERT INTO request_logs (
+            request_id, gateway_id, provider_id, model, model_effective, status_code, latency_ms,
+            input_tokens, output_tokens, cached_tokens, total_tokens, created_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now', '-11 minutes'))
+        "#,
+    )
+    .bind("req_stats_continuous_1")
+    .bind("gateway_stats_continuous")
+    .bind("provider_stats_continuous")
+    .bind("gpt-4o-mini")
+    .bind("gpt-4o-mini")
+    .bind(200_i64)
+    .bind(120_i64)
+    .bind(60_i64)
+    .bind(40_i64)
+    .bind(0_i64)
+    .bind(100_i64)
+    .execute(&pool)
+    .await
+    .expect("insert first continuous trend log");
+
+    sqlx::query(
+        r#"
+        INSERT INTO request_logs (
+            request_id, gateway_id, provider_id, model, model_effective, status_code, latency_ms,
+            input_tokens, output_tokens, cached_tokens, total_tokens, created_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now', '-1 minutes'))
+        "#,
+    )
+    .bind("req_stats_continuous_2")
+    .bind("gateway_stats_continuous")
+    .bind("provider_stats_continuous")
+    .bind("gpt-4o-mini")
+    .bind("gpt-4o-mini")
+    .bind(200_i64)
+    .bind(180_i64)
+    .bind(80_i64)
+    .bind(50_i64)
+    .bind(0_i64)
+    .bind(130_i64)
+    .execute(&pool)
+    .await
+    .expect("insert second continuous trend log");
+
+    let trend: serde_json::Value = client
+        .get(format!("{base}/admin/stats/trend?period=1h&interval=5m"))
+        .send()
+        .await
+        .expect("fetch stats trend")
+        .json()
+        .await
+        .expect("decode stats trend");
+
+    let trend_data = trend
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .expect("stats trend data array");
+
+    assert!(
+        trend_data.len() > 2,
+        "expected filled gap buckets, got {} buckets: {trend_data:?}",
+        trend_data.len()
+    );
+
+    let zero_bucket = trend_data
+        .iter()
+        .find(|point| point.get("request_count") == Some(&json!(0)))
+        .expect("zero-value gap bucket");
+
+    assert_eq!(zero_bucket.get("avg_latency"), Some(&json!(0)));
+    assert_eq!(zero_bucket.get("error_count"), Some(&json!(0)));
+    assert_eq!(zero_bucket.get("input_tokens"), Some(&json!(0)));
+    assert_eq!(zero_bucket.get("output_tokens"), Some(&json!(0)));
+    assert_eq!(zero_bucket.get("cached_tokens"), Some(&json!(0)));
+    assert_eq!(zero_bucket.get("by_model"), Some(&json!([])));
 }
 
 async fn insert_request_log(

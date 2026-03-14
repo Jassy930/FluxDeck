@@ -1176,7 +1176,6 @@ async fn get_stats_trend(
         }
     };
 
-    // Query aggregated by time buckets using strftime
     let interval_seconds = interval_minutes * 60;
     let bucket_expr = format!(
         "datetime((strftime('%s', created_at) / {}) * {}, 'unixepoch')",
@@ -1186,21 +1185,41 @@ async fn get_stats_trend(
 
     let rows = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64, i64)>(
         &format!(
-            "SELECT
-                {} as time_bucket,
-                COUNT(*) as request_count,
-                CAST(ROUND(COALESCE(AVG(latency_ms), 0)) AS INTEGER) as avg_latency,
-                SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count,
-                COALESCE(SUM(input_tokens), 0) as input_tokens,
-                COALESCE(SUM(output_tokens), 0) as output_tokens,
-                COALESCE(SUM(cached_tokens), 0) as cached_tokens
-             FROM request_logs
-             WHERE created_at >= ?
-             GROUP BY time_bucket
-             ORDER BY time_bucket ASC",
-            bucket_expr
+            "WITH RECURSIVE buckets(bucket_epoch) AS (
+                SELECT (CAST(strftime('%s', ?) AS INTEGER) / {interval_seconds}) * {interval_seconds}
+                UNION ALL
+                SELECT bucket_epoch + {interval_seconds}
+                FROM buckets
+                WHERE bucket_epoch + {interval_seconds}
+                    <= (CAST(strftime('%s', 'now') AS INTEGER) / {interval_seconds}) * {interval_seconds}
+             )
+             SELECT
+                datetime(buckets.bucket_epoch, 'unixepoch') as time_bucket,
+                COALESCE(aggregated.request_count, 0) as request_count,
+                COALESCE(aggregated.avg_latency, 0) as avg_latency,
+                COALESCE(aggregated.error_count, 0) as error_count,
+                COALESCE(aggregated.input_tokens, 0) as input_tokens,
+                COALESCE(aggregated.output_tokens, 0) as output_tokens,
+                COALESCE(aggregated.cached_tokens, 0) as cached_tokens
+             FROM buckets
+             LEFT JOIN (
+                SELECT
+                    {bucket_expr} as time_bucket,
+                    COUNT(*) as request_count,
+                    CAST(ROUND(COALESCE(AVG(latency_ms), 0)) AS INTEGER) as avg_latency,
+                    SUM(CASE WHEN status_code >= 400 OR error IS NOT NULL THEN 1 ELSE 0 END) as error_count,
+                    COALESCE(SUM(input_tokens), 0) as input_tokens,
+                    COALESCE(SUM(output_tokens), 0) as output_tokens,
+                    COALESCE(SUM(cached_tokens), 0) as cached_tokens
+                FROM request_logs
+                WHERE created_at >= ?
+                GROUP BY time_bucket
+             ) aggregated
+                ON aggregated.time_bucket = datetime(buckets.bucket_epoch, 'unixepoch')
+             ORDER BY buckets.bucket_epoch ASC",
         ),
     )
+    .bind(&since)
     .bind(&since)
     .fetch_all(&state.pool)
     .await
