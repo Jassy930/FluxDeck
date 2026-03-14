@@ -154,7 +154,10 @@ struct TrafficAnalyticsModel {
                 title: L10n.string("traffic.kpi.total_tokens", locale: locale),
                 value: totalTokensText,
                 detailRows: [
-                    TrafficKpiSupplementRow(label: L10n.string("traffic.kpi.input", locale: locale), value: formatInteger(totalInputTokens)),
+                    TrafficKpiSupplementRow(
+                        label: L10n.string("traffic.kpi.input", locale: locale),
+                        value: formatInteger(max(totalInputTokens - totalCachedTokens, 0))
+                    ),
                     TrafficKpiSupplementRow(label: L10n.string("traffic.kpi.output", locale: locale), value: formatInteger(totalOutputTokens)),
                     TrafficKpiSupplementRow(label: L10n.string("traffic.kpi.cached", locale: locale), value: formatInteger(totalCachedTokens))
                 ]

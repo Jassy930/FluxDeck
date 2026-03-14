@@ -2437,7 +2437,7 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(
             model.kpiStripItems[3].detailRows,
             [
-                TrafficKpiSupplementRow(label: "Input", value: "2,200"),
+                TrafficKpiSupplementRow(label: "Input", value: "1,300"),
                 TrafficKpiSupplementRow(label: "Output", value: "3,300"),
                 TrafficKpiSupplementRow(label: "Cached", value: "900")
             ]
