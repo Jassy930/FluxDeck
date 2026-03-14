@@ -126,8 +126,13 @@ async fn route_selector_prefers_healthy_provider_over_higher_priority_degraded_t
 
     insert_provider(&pool, "provider_primary", "https://primary.example/v1").await;
     insert_provider(&pool, "provider_backup", "https://backup.example/v1").await;
-    insert_gateway_with_backup(&pool, "gw_route_degraded", "provider_primary", "provider_backup")
-        .await;
+    insert_gateway_with_backup(
+        &pool,
+        "gw_route_degraded",
+        "provider_primary",
+        "provider_backup",
+    )
+    .await;
 
     sqlx::query(
         r#"
@@ -314,7 +319,11 @@ async fn route_selector_only_applies_unhealthy_state_within_current_gateway_scop
         .bind(gateway_id)
         .bind(format!("Gateway {gateway_id}"))
         .bind("127.0.0.1")
-        .bind(if gateway_id == "gw_scope_a" { 18091_i64 } else { 18092_i64 })
+        .bind(if gateway_id == "gw_scope_a" {
+            18091_i64
+        } else {
+            18092_i64
+        })
         .bind("openai")
         .bind("provider_default")
         .bind(json!({}).to_string())

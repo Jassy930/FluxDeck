@@ -128,7 +128,8 @@
 
 说明：
 
-- 当前手动 probe 会把目标 Provider 的全局健康状态直接推进到 `probing`
+- 当前手动 probe 会把目标 Provider 的全局健康状态推进到 `probing`
+- 若该 Provider 存在仍处于 `unhealthy` 的 `gateway_provider` 快照，手动 probe 也会一并把这些局部快照推进到 `probing`，避免单个 Gateway 的 scoped failover 长时间卡死
 - 若 Provider 不存在或健康状态写入失败，返回 `400`
 
 ## 2) Gateway

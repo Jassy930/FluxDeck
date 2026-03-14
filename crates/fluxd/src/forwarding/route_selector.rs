@@ -120,10 +120,7 @@ impl RouteSelector {
         }
 
         available.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
-        Ok(available
-            .into_iter()
-            .map(|(_, _, target)| target)
-            .collect())
+        Ok(available.into_iter().map(|(_, _, target)| target).collect())
     }
 }
 

@@ -617,6 +617,7 @@ Run: `cargo test -q -p fluxd --test anthropic_forwarding_test`
 - 已完成：`HealthMonitor` 现已基于 Provider `base_url` 发起真实 HTTP 轻量探测
 - 已完成：仅在 `recover_after` 到期后才会 probe，失败后会基于 failure streak 延长下一次 `recover_after`
 - 已完成：`gateway_manager_test` 已覆盖真实 probe、冷却窗口与失败退避路径
+- 已完成：后台 probe 现已覆盖到期的 `gateway_provider` scoped `unhealthy` 快照，并把结果分别回写到对应作用域
 
 ### Task 14: 健康状态细化到 `gateway + provider (+ model)` 维度
 
@@ -660,8 +661,141 @@ Run: `cargo test -q -p fluxd --test anthropic_forwarding_test`
 - 已完成：macOS Native `AdminApiClient` 已支持 `route_targets`、`active_provider_id`、`health_summary`、Provider health、manual probe
 - 已完成：Provider/Gateway 列表页已展示 route targets、active provider、health summary 与最近失败原因
 - 已完成：Provider 列表页已提供 manual probe 操作
-- 已完成：Gateway 编辑表单已在保存时保留既有 `route_targets`，且默认 Provider 改动会同步第一跳 target
-- 未完成：原生端仍未提供完整的可视化多 target 拖拽/上下移动编辑器；当前为“保留并展示已有链路 + 同步第一跳”的最小闭环
+- 已完成：Gateway 编辑表单已在保存时保留既有 `route_targets`；默认 Provider 改动时，旧 primary target 会保留并下沉为 backup
+- 后续体验增强：
+  - 如需拖拽排序，可在 Task 16 之后另开独立 UX 优化项；当前阶段先以“上下移动 + 显式配置”完成闭环
+
+### Task 16: 原生 macOS 端补齐 `route_targets` 可配置能力
+
+**Files:**
+- Modify: `apps/desktop-macos-native/FluxDeckNative/App/ContentView.swift`
+- Modify: `apps/desktop-macos-native/FluxDeckNative/Networking/AdminApiClient.swift`
+- Modify: `apps/desktop-macos-native/FluxDeckNative/Features/ResourceWorkspaceModels.swift`
+- Test: `apps/desktop-macos-native/FluxDeckNativeTests/FluxDeckNativeTests.swift`
+- Modify: `docs/USAGE.md`
+- Modify: `docs/ops/local-runbook.md`
+- Modify: `docs/progress/2026-03-13-multi-provider-failover.md`
+
+**目标：**
+
+- 在原生端 `GatewayFormSheet` 内提供完整的 `route_targets` 配置闭环
+- 支持新增 target、删除 target、启用/禁用 target、上下移动排序
+- 保持 `Default Provider` 与第一跳 target 的同步语义，但不再把它作为唯一编辑入口
+- 保存时总是显式发送完整 `route_targets`
+
+**方案：**
+
+- 采用方案 B：在现有 Gateway 表单内增加可编辑的 `Route Targets` 区块
+- 每行 target 提供：
+  - Provider 选择器
+  - Enabled 开关
+  - Move Up / Move Down
+  - 删除按钮
+- 区块底部提供 `Add Target`
+- `Default Provider` 仍保留，但语义调整为：
+  - 反映第一跳 target
+  - 变更时同步第一跳 target 的 provider
+  - 若第一跳 provider 改变，原第一跳会保留并顺延
+
+**`fluxctl` 评估：**
+
+- 当前 `fluxctl gateway create/update` 已支持重复 `--route-target provider_id:priority[:enabled]`
+- 当前 CLI 已能覆盖：
+  - 显式配置完整 route target 列表
+  - 启用/禁用 target
+  - 手工控制 priority
+- 结论：
+  - 本轮不需要为 `fluxctl` 再补同类能力
+  - 若后续需要提升易用性，可再单列增强项，例如：
+    - `gateway route-target add/remove/move`
+    - `gateway get --pretty` 的链路摘要输出
+
+**实施步骤：**
+
+**Step 1: 写失败测试，覆盖可编辑 route target 列表**
+
+在 `apps/desktop-macos-native/FluxDeckNativeTests/FluxDeckNativeTests.swift` 新增测试：
+
+- `GatewayFormSupport` 能对 target 列表做：
+  - 新增一条默认 backup
+  - 删除非第一跳 target
+  - 上移 / 下移时保持 priority 连续
+  - 禁用 backup target 但强制保持第一跳启用
+- `Default Provider` 改动后：
+  - 第一跳 provider 被替换
+  - 原第一跳保留并顺延
+  - 其他 backup 保持原相对顺序
+
+**Step 2: 运行测试确认失败**
+
+Run: `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -destination 'platform=macOS' -only-testing:FluxDeckNativeTests`
+
+Expected:
+
+- FAIL，当前缺少 route target 编辑辅助逻辑
+
+**Step 3: 抽离表单辅助逻辑**
+
+- 在 `GatewayFormSupport` 中集中实现：
+  - normalize
+  - add
+  - remove
+  - move up/down
+  - toggle enabled
+- 保持这些逻辑可直接由 XCTest 调用，而不是埋进 SwiftUI 视图闭包
+
+**Step 4: 实现表单 UI**
+
+- 在 `GatewayFormSheet` 增加 `Route Targets` 可编辑列表
+- 每行展示：
+  - 排序号
+  - Provider Picker
+  - Enabled Toggle
+  - 上下移动按钮
+  - 删除按钮
+- 新增 `Add Target` 操作
+- 约束：
+  - 第一跳不能删除到列表为空
+  - 第一跳始终 `enabled=true`
+  - Provider 不允许重复
+
+**Step 5: 保持保存语义稳定**
+
+- create/update 时继续通过 `normalizedRouteTargets(...)` 统一出 payload
+- 若用户显式编辑了 target 列表，`Default Provider` 必须始终回填为第一跳 provider
+- 若第一跳 target 被改动，预览区和摘要区同步刷新
+
+**Step 6: 更新展示模型与文档**
+
+- 如有必要，更新 `ResourceWorkspaceModels` 的 route summary 文案，使 disabled target 的展示更清楚
+- 在 `docs/USAGE.md` / `docs/ops/local-runbook.md` 补充：
+  - 原生端已可配置 route targets
+  - `fluxctl` 已具备等价 CLI 能力，因此本轮无新增 CLI 参数
+
+**Step 7: 运行验证**
+
+Run:
+
+- `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -destination 'platform=macOS'`
+- `cargo test -q`
+- `./scripts/e2e/smoke.sh`
+
+Expected:
+
+- PASS
+
+**Step 8: 文档同步与提交**
+
+```bash
+git add apps/desktop-macos-native/FluxDeckNative/App/ContentView.swift \
+  apps/desktop-macos-native/FluxDeckNative/Networking/AdminApiClient.swift \
+  apps/desktop-macos-native/FluxDeckNative/Features/ResourceWorkspaceModels.swift \
+  apps/desktop-macos-native/FluxDeckNativeTests/FluxDeckNativeTests.swift \
+  docs/USAGE.md docs/ops/local-runbook.md \
+  docs/plans/active/2026-03-13-multi-provider-failover.md \
+  docs/progress/2026-03-13-multi-provider-failover.md
+git commit -m "feat(native): add route target editor to gateway form"
+```
 
 ### Phase 2 完成条件
 
@@ -673,4 +807,5 @@ Run: `cargo test -q -p fluxd --test anthropic_forwarding_test`
 当前结论（2026-03-14）：
 
 - 上述完成条件已满足最小闭环版本
-- 唯一保留项是原生端链路编辑器仍未做完整排序交互，这被保留为后续体验增强，不阻塞 Phase 2 收口
+- 原生端已支持新增 / 删除 / 启停 / 上下移动 `route_targets`
+- `fluxctl` 已具备等价 CLI 能力，本轮无需新增参数

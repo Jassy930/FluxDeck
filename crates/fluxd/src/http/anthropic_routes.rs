@@ -1117,10 +1117,7 @@ async fn count_tokens_handler(
 
                         if status_code.is_success() {
                             let _ = health_service
-                                .record_success_for_gateway(
-                                    &state.gateway_id,
-                                    &target.provider_id,
-                                )
+                                .record_success_for_gateway(&state.gateway_id, &target.provider_id)
                                 .await;
                             let Some(upstream_tokens) =
                                 extract_upstream_input_tokens(body.as_ref())

@@ -1859,6 +1859,163 @@ enum GatewayFormSupport {
         return defaultProtocolOptions(for: kind).first(where: { $0.id == normalizedRawValue })?.title ?? normalizedRawValue
     }
 
+    static func normalizedRouteTargets(
+        routeTargets: [AdminRouteTargetInput],
+        primaryProviderID: String
+    ) -> [AdminRouteTargetInput] {
+        let normalizedPrimary = primaryProviderID.trimmingCharacters(in: .whitespacesAndNewlines)
+        var workingTargets = routeTargets.sorted(by: { $0.priority < $1.priority })
+
+        if !normalizedPrimary.isEmpty {
+            if let existingPrimaryIndex = workingTargets.firstIndex(where: {
+                $0.providerId.trimmingCharacters(in: .whitespacesAndNewlines) == normalizedPrimary
+            }) {
+                workingTargets.remove(at: existingPrimaryIndex)
+            }
+
+            workingTargets.insert(
+                AdminRouteTargetInput(providerId: normalizedPrimary, priority: 0, enabled: true),
+                at: 0
+            )
+        }
+
+        var normalizedTargets: [AdminRouteTargetInput] = []
+        var seenProviderIDs = Set<String>()
+
+        for target in workingTargets {
+            let providerID = target.providerId.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !providerID.isEmpty, seenProviderIDs.insert(providerID).inserted else {
+                continue
+            }
+
+            normalizedTargets.append(
+                AdminRouteTargetInput(
+                    providerId: providerID,
+                    priority: normalizedTargets.count,
+                    enabled: normalizedTargets.isEmpty ? true : target.enabled
+                )
+            )
+        }
+
+        return normalizedTargets
+    }
+
+    static func addRouteTarget(
+        routeTargets: [AdminRouteTargetInput],
+        availableProviderIDs: [String],
+        primaryProviderID: String
+    ) -> [AdminRouteTargetInput] {
+        let normalizedTargets = normalizedRouteTargets(
+            routeTargets: routeTargets,
+            primaryProviderID: primaryProviderID
+        )
+        let usedProviderIDs = Set(normalizedTargets.map(\.providerId))
+        guard let nextProviderID = availableProviderIDs.first(where: { usedProviderIDs.contains($0) == false }) else {
+            return normalizedTargets
+        }
+
+        return normalizedRouteTargets(
+            routeTargets: normalizedTargets + [
+                AdminRouteTargetInput(
+                    providerId: nextProviderID,
+                    priority: normalizedTargets.count,
+                    enabled: true
+                )
+            ],
+            primaryProviderID: primaryProviderID
+        )
+    }
+
+    static func removeRouteTarget(
+        routeTargets: [AdminRouteTargetInput],
+        index: Int,
+        primaryProviderID: String
+    ) -> [AdminRouteTargetInput] {
+        var normalizedTargets = normalizedRouteTargets(
+            routeTargets: routeTargets,
+            primaryProviderID: primaryProviderID
+        )
+        guard normalizedTargets.indices.contains(index) else {
+            return normalizedTargets
+        }
+
+        normalizedTargets.remove(at: index)
+        let nextPrimary = normalizedTargets.first?.providerId ?? primaryProviderID
+        return normalizedRouteTargets(routeTargets: normalizedTargets, primaryProviderID: nextPrimary)
+    }
+
+    static func moveRouteTarget(
+        routeTargets: [AdminRouteTargetInput],
+        from: Int,
+        to: Int,
+        primaryProviderID: String
+    ) -> [AdminRouteTargetInput] {
+        var normalizedTargets = normalizedRouteTargets(
+            routeTargets: routeTargets,
+            primaryProviderID: primaryProviderID
+        )
+        guard normalizedTargets.indices.contains(from), normalizedTargets.indices.contains(to), from != to else {
+            return normalizedTargets
+        }
+
+        let item = normalizedTargets.remove(at: from)
+        normalizedTargets.insert(item, at: to)
+        normalizedTargets = normalizedTargets.enumerated().map { index, target in
+            AdminRouteTargetInput(
+                providerId: target.providerId,
+                priority: index,
+                enabled: index == 0 ? true : target.enabled
+            )
+        }
+        let nextPrimary = normalizedTargets.first?.providerId ?? primaryProviderID
+        return normalizedRouteTargets(routeTargets: normalizedTargets, primaryProviderID: nextPrimary)
+    }
+
+    static func updateRouteTargetEnabled(
+        routeTargets: [AdminRouteTargetInput],
+        index: Int,
+        enabled: Bool,
+        primaryProviderID: String
+    ) -> [AdminRouteTargetInput] {
+        var normalizedTargets = normalizedRouteTargets(
+            routeTargets: routeTargets,
+            primaryProviderID: primaryProviderID
+        )
+        guard normalizedTargets.indices.contains(index) else {
+            return normalizedTargets
+        }
+
+        normalizedTargets[index] = AdminRouteTargetInput(
+            providerId: normalizedTargets[index].providerId,
+            priority: normalizedTargets[index].priority,
+            enabled: index == 0 ? true : enabled
+        )
+        return normalizedRouteTargets(routeTargets: normalizedTargets, primaryProviderID: primaryProviderID)
+    }
+
+    static func updateRouteTargetProvider(
+        routeTargets: [AdminRouteTargetInput],
+        index: Int,
+        providerID: String,
+        primaryProviderID: String
+    ) -> [AdminRouteTargetInput] {
+        var normalizedTargets = normalizedRouteTargets(
+            routeTargets: routeTargets,
+            primaryProviderID: primaryProviderID
+        )
+        guard normalizedTargets.indices.contains(index) else {
+            return normalizedTargets
+        }
+
+        normalizedTargets[index] = AdminRouteTargetInput(
+            providerId: providerID,
+            priority: normalizedTargets[index].priority,
+            enabled: normalizedTargets[index].enabled
+        )
+        let nextPrimary = index == 0 ? providerID : normalizedTargets.first?.providerId ?? primaryProviderID
+        return normalizedRouteTargets(routeTargets: normalizedTargets, primaryProviderID: nextPrimary)
+    }
+
     private static func defaultProtocolOptions(for kind: GatewayProtocolKind) -> [GatewayPickerOption] {
         switch kind {
         case .inbound:
@@ -1992,7 +2149,7 @@ private struct GatewayFormSheet: View {
                                     providerPicker
                                 }
 
-                                gatewayField(title: "Route Targets", caption: "Primary target follows Default Provider. Existing backups are preserved on save.") {
+                                gatewayField(title: "Route Targets", caption: "Review the ordered failover chain here. Detailed editing lives in the Routing Targets panel.") {
                                     routeTargetPreview
                                 }
 
@@ -2095,47 +2252,20 @@ private struct GatewayFormSheet: View {
 
                         SurfaceCard(title: "Routing Targets") {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text("Use this reference list to confirm the provider selected as the default upstream target.")
+                                Text("Configure the ordered failover chain used by this gateway. The first target is the active default upstream.")
                                     .font(.caption)
                                     .foregroundStyle(DesignTokens.textSecondary)
 
-                                if providerOptions.isEmpty {
+                                if providers.isEmpty {
                                     Text("No providers available yet.")
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(DesignTokens.textPrimary)
                                 } else {
-                                    ForEach(providerOptions) { option in
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack {
-                                                Text(option.title)
-                                                    .font(.subheadline.weight(.semibold))
-                                                    .foregroundStyle(DesignTokens.textPrimary)
-                                                Spacer()
-                                                if let provider = providers.first(where: { $0.id == option.id }) {
-                                                    StatusPill(
-                                                        text: provider.enabled ? "Enabled" : "Disabled",
-                                                        semanticColor: provider.enabled ? DesignTokens.statusColors.running : DesignTokens.statusColors.inactive
-                                                    )
-                                                } else if option.isFallback {
-                                                    StatusPill(
-                                                        text: "Fallback",
-                                                        semanticColor: DesignTokens.statusColors.warning
-                                                    )
-                                                }
-                                            }
-
-                                            if let subtitle = option.subtitle {
-                                                Text(subtitle)
-                                                    .font(.caption)
-                                                    .foregroundStyle(DesignTokens.textSecondary)
-                                            }
-                                        }
-                                        .padding(.bottom, option.id == providerOptions.last?.id ? 0 : 6)
-                                    }
+                                    routeTargetEditor
                                 }
                             }
                         }
-                        .frame(width: 240)
+                        .frame(width: 320)
                     }
 
                     if let validationError {
@@ -2336,9 +2466,13 @@ private struct GatewayFormSheet: View {
         )
     }
 
+    private var editableRouteTargets: [AdminRouteTargetInput] {
+        normalizedRouteTargets(primaryProviderID: defaultProviderID)
+    }
+
     private var routeTargetPreview: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(normalizedRouteTargets(primaryProviderID: defaultProviderID)) { target in
+            ForEach(editableRouteTargets) { target in
                 HStack(spacing: 8) {
                     Text("#\(target.priority)")
                         .font(.caption.monospaced())
@@ -2355,41 +2489,233 @@ private struct GatewayFormSheet: View {
         }
     }
 
-    private func normalizedRouteTargets(primaryProviderID: String) -> [AdminRouteTargetInput] {
-        let normalizedPrimary = primaryProviderID.trimmingCharacters(in: .whitespacesAndNewlines)
-        var workingTargets = routeTargets
+    private var routeTargetEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(editableRouteTargets.enumerated()), id: \.offset) { index, target in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Text(index == 0 ? "Primary" : "Backup #\(index)")
+                            .font(.caption2.weight(.semibold))
+                            .textCase(.uppercase)
+                            .foregroundStyle(DesignTokens.textSecondary)
+                        Spacer()
+                        if index == 0 {
+                            StatusPill(
+                                text: "Default",
+                                semanticColor: DesignTokens.statusColors.running
+                            )
+                        }
+                    }
 
-        if workingTargets.isEmpty, !normalizedPrimary.isEmpty {
-            workingTargets = [
-                AdminRouteTargetInput(providerId: normalizedPrimary, priority: 0, enabled: true)
-            ]
-        } else if !normalizedPrimary.isEmpty, !workingTargets.isEmpty {
-            workingTargets[0] = AdminRouteTargetInput(
-                providerId: normalizedPrimary,
-                priority: workingTargets[0].priority,
-                enabled: true
-            )
-        }
+                    Picker(
+                        "Route Target Provider",
+                        selection: Binding(
+                            get: { target.providerId },
+                            set: { newValue in
+                                applyRouteTargets(
+                                    GatewayFormSupport.updateRouteTargetProvider(
+                                        routeTargets: editableRouteTargets,
+                                        index: index,
+                                        providerID: newValue,
+                                        primaryProviderID: defaultProviderID
+                                    )
+                                )
+                            }
+                        )
+                    ) {
+                        ForEach(routeTargetProviderOptions(for: index)) { option in
+                            Text(option.title).tag(option.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(DesignTokens.surfacePrimary.opacity(0.9))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(DesignTokens.borderSubtle.opacity(0.85), lineWidth: 1)
+                    )
 
-        var normalizedTargets: [AdminRouteTargetInput] = []
-        var seenProviderIDs = Set<String>()
+                    HStack(spacing: 8) {
+                        Toggle(
+                            "Enabled",
+                            isOn: Binding(
+                                get: { target.enabled },
+                                set: { newValue in
+                                    applyRouteTargets(
+                                        GatewayFormSupport.updateRouteTargetEnabled(
+                                            routeTargets: editableRouteTargets,
+                                            index: index,
+                                            enabled: newValue,
+                                            primaryProviderID: defaultProviderID
+                                        )
+                                    )
+                                }
+                            )
+                        )
+                        .toggleStyle(.switch)
+                        .disabled(index == 0)
 
-        for target in workingTargets.sorted(by: { $0.priority < $1.priority }) {
-            let providerID = target.providerId.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !providerID.isEmpty, seenProviderIDs.insert(providerID).inserted else {
-                continue
+                        Spacer()
+
+                        smallActionButton("Up", systemImage: "arrow.up") {
+                            applyRouteTargets(
+                                GatewayFormSupport.moveRouteTarget(
+                                    routeTargets: editableRouteTargets,
+                                    from: index,
+                                    to: index - 1,
+                                    primaryProviderID: defaultProviderID
+                                )
+                            )
+                        }
+                        .disabled(index == 0)
+
+                        smallActionButton("Down", systemImage: "arrow.down") {
+                            applyRouteTargets(
+                                GatewayFormSupport.moveRouteTarget(
+                                    routeTargets: editableRouteTargets,
+                                    from: index,
+                                    to: index + 1,
+                                    primaryProviderID: defaultProviderID
+                                )
+                            )
+                        }
+                        .disabled(index == editableRouteTargets.count - 1)
+
+                        smallActionButton("Delete", systemImage: "trash") {
+                            applyRouteTargets(
+                                GatewayFormSupport.removeRouteTarget(
+                                    routeTargets: editableRouteTargets,
+                                    index: index,
+                                    primaryProviderID: defaultProviderID
+                                )
+                            )
+                        }
+                        .disabled(editableRouteTargets.count <= 1)
+                    }
+
+                    if index == 0 {
+                        Text("The first target is always enabled and is mirrored to Default Provider.")
+                            .font(.caption2)
+                            .foregroundStyle(DesignTokens.textSecondary)
+                    }
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(DesignTokens.surfacePrimary.opacity(0.76))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(DesignTokens.borderSubtle.opacity(0.8), lineWidth: 1)
+                )
             }
 
-            normalizedTargets.append(
-                AdminRouteTargetInput(
-                    providerId: providerID,
-                    priority: normalizedTargets.count,
-                    enabled: target.enabled || normalizedTargets.isEmpty
+            Button {
+                applyRouteTargets(
+                    GatewayFormSupport.addRouteTarget(
+                        routeTargets: editableRouteTargets,
+                        availableProviderIDs: availableRouteTargetProviderIDs,
+                        primaryProviderID: defaultProviderID
+                    )
                 )
+            } label: {
+                Label("Add Target", systemImage: "plus")
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .foregroundStyle(DesignTokens.textPrimary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(DesignTokens.surfacePrimary.opacity(0.9))
             )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(DesignTokens.borderSubtle.opacity(0.85), lineWidth: 1)
+            )
+            .disabled(unusedRouteTargetProviderIDs.isEmpty)
+        }
+    }
+
+    private func normalizedRouteTargets(primaryProviderID: String) -> [AdminRouteTargetInput] {
+        GatewayFormSupport.normalizedRouteTargets(
+            routeTargets: routeTargets,
+            primaryProviderID: primaryProviderID
+        )
+    }
+
+    private var availableRouteTargetProviderIDs: [String] {
+        let providerIDs = providers.map(\.id)
+        guard providerIDs.isEmpty == false else {
+            let fallback = defaultProviderID.trimmingCharacters(in: .whitespacesAndNewlines)
+            return fallback.isEmpty ? [] : [fallback]
+        }
+        return providerIDs
+    }
+
+    private var unusedRouteTargetProviderIDs: [String] {
+        let usedProviderIDs = Set(editableRouteTargets.map(\.providerId))
+        return availableRouteTargetProviderIDs.filter { usedProviderIDs.contains($0) == false }
+    }
+
+    private func applyRouteTargets(_ updatedTargets: [AdminRouteTargetInput]) {
+        let nextPrimary = updatedTargets.first?.providerId ?? defaultProviderID
+        let normalizedTargets = GatewayFormSupport.normalizedRouteTargets(
+            routeTargets: updatedTargets,
+            primaryProviderID: nextPrimary
+        )
+        routeTargets = normalizedTargets
+        if let providerID = normalizedTargets.first?.providerId {
+            defaultProviderID = providerID
+        }
+    }
+
+    private func routeTargetProviderOptions(for index: Int) -> [GatewayPickerOption] {
+        guard editableRouteTargets.indices.contains(index) else {
+            return []
         }
 
-        return normalizedTargets
+        let currentProviderID = editableRouteTargets[index].providerId
+        let usedByOthers = Set(
+            editableRouteTargets.enumerated().compactMap { offset, target in
+                offset == index ? nil : target.providerId
+            }
+        )
+        let baseOptions = providers
+            .filter { provider in
+                usedByOthers.contains(provider.id) == false || provider.id == currentProviderID
+            }
+            .map { provider in
+                GatewayPickerOption(
+                    id: provider.id,
+                    title: provider.id,
+                    subtitle: provider.name,
+                    isFallback: false
+                )
+            }
+
+        guard
+            currentProviderID.isEmpty == false,
+            baseOptions.contains(where: { $0.id == currentProviderID }) == false
+        else {
+            return baseOptions
+        }
+
+        return [
+            GatewayPickerOption(
+                id: currentProviderID,
+                title: "Current value: \(currentProviderID)",
+                subtitle: "Unavailable provider",
+                isFallback: true
+            )
+        ] + baseOptions
     }
 
     private var providerOptions: [GatewayPickerOption] {
@@ -2552,6 +2878,22 @@ private struct GatewayFormSheet: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(DesignTokens.surfacePrimary.opacity(0.88))
         )
+    }
+
+    private func smallActionButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(DesignTokens.textPrimary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(DesignTokens.surfaceSecondary.opacity(0.84))
+                )
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
     }
 
     private func gatewayMetaRow(label: String, value: String) -> some View {

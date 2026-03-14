@@ -57,8 +57,8 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 provider probe provide
 
 - `provider health list` 对应 Admin API `GET /admin/providers/health`
 - `provider probe <id>` 对应 Admin API `POST /admin/providers/{id}/probe`
-- 后台 `HealthMonitor` 现在会在 `recover_after` 到期后对 `unhealthy` Provider 发起真实轻量 HTTP probe
-- `provider probe <id>` 仍然保留为管理端手动干预入口，会把目标 Provider 的全局状态直接推进到 `probing`
+- 后台 `HealthMonitor` 现在会在 `recover_after` 到期后对 `unhealthy` 健康快照发起真实轻量 HTTP probe，并把结果分别回写到 `global` / `gateway_provider` 作用域
+- `provider probe <id>` 仍然保留为管理端手动干预入口，会把目标 Provider 的全局状态推进到 `probing`，并同步恢复该 Provider 仍处于 `unhealthy` 的 `gateway_provider` 快照
 
 ## 创建并启动网关
 
@@ -102,9 +102,12 @@ Gateway 协议补充：
 
 - `New Gateway` 与 `Edit Gateway` 已统一为工作台式编辑界面
 - `Default Provider`、`Inbound Protocol`、`Upstream Protocol` 优先通过受控选择填写
+- `Routing Targets` 区块已支持直接新增 / 删除 / 启停 / 上下移动 route target
+- `Default Provider` 会始终镜像第一跳 route target；当第一跳 provider 改动时，旧 primary 会保留并顺延为 backup
 - `Routing JSON` 会在保存前做 JSON object 校验
 - 若 Gateway 当前处于运行中，且保存内容相对旧配置确实有变化，fluxd 会自动执行 `stop -> start`
 - 原生桌面端与 `fluxctl gateway update` 都会展示自动重启结果提示
+- `fluxctl gateway create/update` 已具备等价 CLI 能力，可重复传入 `--route-target provider_id:priority[:enabled]`
 
 更新网关配置：
 

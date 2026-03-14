@@ -89,21 +89,35 @@ impl HealthMonitor {
         let mut summary = HealthMonitorTickSummary::default();
 
         for provider in providers.into_iter().filter(|provider| provider.enabled) {
-            let state = self.health_service.ensure_provider(&provider.id).await?;
+            self.health_service.ensure_provider(&provider.id).await?;
             summary.ensured += 1;
 
-            if state.status != "unhealthy" || !recover_after_due(state.recover_after.as_deref()) {
+            let due_states = self
+                .health_service
+                .states_for_provider(&provider.id)
+                .await?
+                .into_iter()
+                .filter(|state| {
+                    state.status == "unhealthy" && recover_after_due(state.recover_after.as_deref())
+                })
+                .collect::<Vec<_>>();
+
+            if due_states.is_empty() {
                 continue;
             }
 
-            self.run_probe(&provider).await?;
+            self.run_probe(&provider, &due_states).await?;
             summary.probed += 1;
         }
 
         Ok(summary)
     }
 
-    async fn run_probe(&self, provider: &Provider) -> Result<()> {
+    async fn run_probe(
+        &self,
+        provider: &Provider,
+        due_states: &[crate::domain::provider_health::ProviderHealthState],
+    ) -> Result<()> {
         match self
             .client
             .get(&provider.base_url)
@@ -112,23 +126,27 @@ impl HealthMonitor {
             .await
         {
             Ok(response) if probe_success(response.status()) => {
-                self.health_service
-                    .mark_probe_result(&provider.id, true, None)
-                    .await?;
+                for state in due_states {
+                    self.health_service
+                        .mark_probe_result_for_state(state, true, None)
+                        .await?;
+                }
             }
             Ok(response) => {
-                self.health_service
-                    .mark_probe_result(
-                        &provider.id,
-                        false,
-                        Some(&format!("probe status {}", response.status().as_u16())),
-                    )
-                    .await?;
+                let failure_reason = format!("probe status {}", response.status().as_u16());
+                for state in due_states {
+                    self.health_service
+                        .mark_probe_result_for_state(state, false, Some(&failure_reason))
+                        .await?;
+                }
             }
             Err(err) => {
-                self.health_service
-                    .mark_probe_result(&provider.id, false, Some(&err.to_string()))
-                    .await?;
+                let failure_reason = err.to_string();
+                for state in due_states {
+                    self.health_service
+                        .mark_probe_result_for_state(state, false, Some(&failure_reason))
+                        .await?;
+                }
             }
         }
 

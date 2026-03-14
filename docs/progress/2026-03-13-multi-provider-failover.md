@@ -173,6 +173,8 @@
   - 仅在 `recover_after` 到期后才对 `unhealthy` Provider 发起 probe
   - probe 成功会把全局状态推进到 `probing`
   - probe 失败会保持 `unhealthy`，并基于 `failure_streak` 延长下一次 `recover_after`
+- 2026-03-14 review follow-up：
+  - 后台 probe 现在也会恢复到期的 `gateway_provider` scoped `unhealthy` 快照，不再只覆盖全局状态
 - 当前 probe 采用对 `provider.base_url` 的轻量 HTTP GET：
   - `429` / `5xx` 视为 probe 失败
   - 其他 HTTP 状态（例如 `401`）视为 upstream 可达
@@ -215,12 +217,40 @@
   - `AdminApiClient`：解码 `route_targets`、`active_provider_id`、`health_summary`、Provider health，并新增 manual probe API
   - `ProviderListView`：展示 Provider health / 最近失败原因，并支持 manual probe
   - `GatewayListView`：展示 route target 顺序、active provider、health summary
-  - `GatewayFormSheet`：保存时保留既有 `route_targets`，默认 Provider 改动会同步第一跳 target
+  - `GatewayFormSheet`：保存时保留既有 `route_targets`；默认 Provider 改动时，旧 primary target 会保留并下沉为 backup
+- 2026-03-14 review follow-up：
+  - 手动 `provider probe` 现在会同步恢复该 Provider 仍处于 `unhealthy` 的 `gateway_provider` 快照
 - 当前仍保留的 UI 技术债：
-  - 原生端尚未提供完整的 route target 排序编辑器，只做到“展示 + 保留 + 同步第一跳”
+  - 原生端 route target 仍采用“上下移动”而非拖拽排序；这属于体验增强，不阻塞 Phase 2
 
 验证：
 
+- `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -destination 'platform=macOS'`
+
+### Task 16 已完成：原生端 `route_targets` 可配置闭环
+
+- `GatewayFormSupport` 已补齐：
+  - `normalizedRouteTargets`
+  - `addRouteTarget`
+  - `removeRouteTarget`
+  - `moveRouteTarget`
+  - `updateRouteTargetEnabled`
+  - `updateRouteTargetProvider`
+- `GatewayFormSheet` 中的 `Routing Targets` 卡片已从只读摘要改为可编辑区：
+  - 支持新增 target
+  - 支持删除 backup target
+  - 支持启用 / 禁用 backup target
+  - 支持上下移动排序
+  - 第一跳 target 始终保持启用，并持续同步到 `Default Provider`
+- `fluxctl` 已有等价 CLI 能力：
+  - `gateway create/update` 可重复传入 `--route-target provider_id:priority[:enabled]`
+  - 因此本轮未新增 CLI 参数，仅补文档说明
+- 2026-03-14 implementation follow-up：
+  - 修复了 `moveRouteTarget` 在重排后沿用旧 `priority`、导致顺序被重新归位的回归
+
+验证：
+
+- `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -destination 'platform=macOS' -only-testing:FluxDeckNativeTests/testGatewayFormSupportMovesTargetsAndKeepsPriorityContinuous`
 - `xcodebuild test -project apps/desktop-macos-native/FluxDeckNative.xcodeproj -scheme FluxDeckNative -destination 'platform=macOS'`
 
 ### 当前剩余缺口
@@ -236,7 +266,7 @@
 - 为兼容 `provider_health_states -> providers` 外键约束，Provider 删除路径已调整为先删健康快照、再删 Provider 实体
 - 当前仍保留的技术债：
   - `provider_health_states.model` 虽已入库，但还没有独立模型选路
-  - 原生端 route target 编辑仍未提供完整排序交互
+  - 原生端 route target 排序仍采用“上下移动”而非拖拽交互
 
 ## Phase 2 跟踪
 
@@ -247,6 +277,7 @@
 | 13 | `HealthMonitor` 真实主动探测 | 已完成 | 已补真实 HTTP probe、冷却窗口与最小失败退避 |
 | 14 | 健康状态粒度细化 | 已完成 | 已升级到 `global + gateway_provider (+ model 预留)`，请求路径改为 Gateway 级健康回写 |
 | 15 | 原生端链路与健康视图 | 已完成 | Native 已支持 route targets / active provider / provider health / manual probe 的最小闭环 |
+| 16 | 原生端 `route_targets` 可配置能力 | 已完成 | Native Gateway 表单已支持新增 / 删除 / 启停 / 上下移动 route targets，`fluxctl` 保持既有等价能力 |
 
 ### 跟踪更新规则
 

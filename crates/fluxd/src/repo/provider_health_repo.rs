@@ -166,7 +166,10 @@ impl ProviderHealthRepo {
         gateway_id: &str,
         model: Option<&str>,
     ) -> Result<ProviderHealthState> {
-        if let Some(existing) = self.get_scoped(provider_id, Some(gateway_id), model).await? {
+        if let Some(existing) = self
+            .get_scoped(provider_id, Some(gateway_id), model)
+            .await?
+        {
             return Ok(existing);
         }
 
@@ -209,7 +212,10 @@ fn normalize_scope(scope: &str, gateway_id: Option<&str>) -> String {
     scope.to_string()
 }
 
-fn scope_parts<'a>(gateway_id: Option<&'a str>, model: Option<&'a str>) -> (&'static str, &'a str, &'a str) {
+fn scope_parts<'a>(
+    gateway_id: Option<&'a str>,
+    model: Option<&'a str>,
+) -> (&'static str, &'a str, &'a str) {
     match gateway_id {
         Some(gateway_id) => (GATEWAY_SCOPE, gateway_id, model.unwrap_or("")),
         None => (GLOBAL_SCOPE, "", ""),

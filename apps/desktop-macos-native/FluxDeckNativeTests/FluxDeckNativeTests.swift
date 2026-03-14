@@ -1362,6 +1362,94 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertTrue(upstreamOptions.first?.isFallback == true)
     }
 
+    func testGatewayFormSupportKeepsPreviousPrimaryAsBackupWhenDefaultProviderChanges() {
+        let normalizedTargets = GatewayFormSupport.normalizedRouteTargets(
+            routeTargets: [
+                AdminRouteTargetInput(providerId: "provider_old_primary", priority: 0, enabled: true),
+                AdminRouteTargetInput(providerId: "provider_backup", priority: 1, enabled: true),
+                AdminRouteTargetInput(providerId: "provider_backup_two", priority: 2, enabled: false)
+            ],
+            primaryProviderID: "provider_new_primary"
+        )
+
+        XCTAssertEqual(
+            normalizedTargets.map(\.providerId),
+            ["provider_new_primary", "provider_old_primary", "provider_backup", "provider_backup_two"]
+        )
+        XCTAssertEqual(normalizedTargets.map(\.priority), [0, 1, 2, 3])
+        XCTAssertEqual(normalizedTargets.map(\.enabled), [true, true, true, false])
+    }
+
+    func testGatewayFormSupportAddsFirstUnusedProviderAsBackupTarget() {
+        let targets = GatewayFormSupport.addRouteTarget(
+            routeTargets: [
+                AdminRouteTargetInput(providerId: "provider_primary", priority: 0, enabled: true),
+                AdminRouteTargetInput(providerId: "provider_backup", priority: 1, enabled: true)
+            ],
+            availableProviderIDs: ["provider_primary", "provider_backup", "provider_third"],
+            primaryProviderID: "provider_primary"
+        )
+
+        XCTAssertEqual(
+            targets.map(\.providerId),
+            ["provider_primary", "provider_backup", "provider_third"]
+        )
+        XCTAssertEqual(targets.map(\.priority), [0, 1, 2])
+    }
+
+    func testGatewayFormSupportMovesTargetsAndKeepsPriorityContinuous() {
+        let targets = GatewayFormSupport.moveRouteTarget(
+            routeTargets: [
+                AdminRouteTargetInput(providerId: "provider_primary", priority: 0, enabled: true),
+                AdminRouteTargetInput(providerId: "provider_backup", priority: 1, enabled: true),
+                AdminRouteTargetInput(providerId: "provider_third", priority: 2, enabled: false)
+            ],
+            from: 2,
+            to: 1,
+            primaryProviderID: "provider_primary"
+        )
+
+        XCTAssertEqual(
+            targets.map(\.providerId),
+            ["provider_primary", "provider_third", "provider_backup"]
+        )
+        XCTAssertEqual(targets.map(\.priority), [0, 1, 2])
+        XCTAssertEqual(targets.map(\.enabled), [true, false, true])
+    }
+
+    func testGatewayFormSupportPreventsPrimaryTargetFromBeingDisabled() {
+        let targets = GatewayFormSupport.updateRouteTargetEnabled(
+            routeTargets: [
+                AdminRouteTargetInput(providerId: "provider_primary", priority: 0, enabled: true),
+                AdminRouteTargetInput(providerId: "provider_backup", priority: 1, enabled: true)
+            ],
+            index: 0,
+            enabled: false,
+            primaryProviderID: "provider_primary"
+        )
+
+        XCTAssertEqual(targets.first?.enabled, true)
+        XCTAssertEqual(targets.last?.enabled, true)
+    }
+
+    func testGatewayFormSupportRemovesBackupAndPromotesNextTarget() {
+        let targets = GatewayFormSupport.removeRouteTarget(
+            routeTargets: [
+                AdminRouteTargetInput(providerId: "provider_primary", priority: 0, enabled: true),
+                AdminRouteTargetInput(providerId: "provider_backup", priority: 1, enabled: true),
+                AdminRouteTargetInput(providerId: "provider_third", priority: 2, enabled: false)
+            ],
+            index: 1,
+            primaryProviderID: "provider_primary"
+        )
+
+        XCTAssertEqual(
+            targets.map(\.providerId),
+            ["provider_primary", "provider_third"]
+        )
+        XCTAssertEqual(targets.map(\.priority), [0, 1])
+    }
+
     func testEncodesCreatePayloadWithSnakeCaseKeys() throws {
         let providerInput = CreateProviderInput(
             id: "provider_ui",

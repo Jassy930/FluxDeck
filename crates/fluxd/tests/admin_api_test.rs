@@ -717,7 +717,10 @@ async fn admin_api_exposes_gateway_health_summary_and_active_provider() {
         gateway.get("active_provider_id"),
         Some(&json!("provider_gateway_health_b"))
     );
-    assert_eq!(gateway.get("routing_mode"), Some(&json!("ordered_failover")));
+    assert_eq!(
+        gateway.get("routing_mode"),
+        Some(&json!("ordered_failover"))
+    );
     assert_eq!(
         gateway.pointer("/health_summary/degraded_count"),
         Some(&json!(1))
@@ -738,6 +741,66 @@ async fn admin_api_exposes_gateway_health_summary_and_active_provider() {
         gateway.pointer("/route_targets/1/health_status"),
         Some(&json!("healthy"))
     );
+}
+
+#[tokio::test]
+async fn admin_api_probe_updates_gateway_scoped_health_states() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let app = build_admin_router(AdminApiState::new(pool.clone()));
+    let server = spawn_server(app).await;
+    let base = format!("http://{}", server.addr);
+    let client = reqwest::Client::new();
+
+    create_test_provider(&client, &base, "provider_health_probe_scope").await;
+
+    sqlx::query(
+        r#"
+        INSERT INTO provider_health_states (
+            id, provider_id, scope, gateway_id, model, status, failure_streak, success_streak
+        )
+        VALUES (?1, ?2, 'gateway_provider', ?3, '', 'unhealthy', 3, 0)
+        "#,
+    )
+    .bind("provider_health_probe_scope:gateway_provider:gw_probe_scope:")
+    .bind("provider_health_probe_scope")
+    .bind("gw_probe_scope")
+    .execute(&pool)
+    .await
+    .expect("insert scoped unhealthy state");
+
+    let probe_resp = client
+        .post(format!(
+            "{base}/admin/providers/provider_health_probe_scope/probe"
+        ))
+        .send()
+        .await
+        .expect("probe provider request");
+    assert_eq!(probe_resp.status(), reqwest::StatusCode::OK);
+
+    let health_items: serde_json::Value = client
+        .get(format!("{base}/admin/providers/health"))
+        .send()
+        .await
+        .expect("list provider health request")
+        .json()
+        .await
+        .expect("decode provider health");
+
+    let scoped = health_items
+        .as_array()
+        .and_then(|items| {
+            items.iter().find(|item| {
+                item.get("provider_id") == Some(&json!("provider_health_probe_scope"))
+                    && item.get("scope") == Some(&json!("gateway_provider"))
+                    && item.get("gateway_id") == Some(&json!("gw_probe_scope"))
+            })
+        })
+        .expect("scoped health item exists");
+    assert_eq!(scoped.get("status"), Some(&json!("probing")));
 }
 
 #[tokio::test]

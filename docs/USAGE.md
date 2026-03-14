@@ -209,9 +209,11 @@ cargo run -p fluxctl -- --admin-url http://127.0.0.1:7777 gateway update gateway
 原生前端编辑 Gateway 时还会额外提供：
 
 - `Runtime` 摘要卡，展示当前 `Status`、`Startup`、`Endpoint`、`Routing`
-- `Routing Targets` 辅助卡，快速确认当前 `default_provider_id` 指向的 Provider
+- `Routing Targets` 可编辑区，可直接新增 / 删除 / 启用或禁用 backup target，并支持上下移动排序
+- `Default Provider` 会始终与第一跳 target 同步；若你改动第一跳 provider，旧 primary 会保留并顺延为 backup
 - 如果 Gateway 正在运行且配置确实发生变化，保存后会由 `fluxd` 自动执行 `stop -> start`
 - 原生前端会展示自动重启成功或失败提示
+- `fluxctl gateway create/update` 已具备等价能力，可通过重复 `--route-target provider_id:priority[:enabled]` 直接构造完整链路，本轮无新增 CLI 参数
 
 说明：
 

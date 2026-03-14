@@ -158,3 +158,52 @@ async fn provider_health_service_tracks_gateway_scoped_failures_without_touching
         .expect("global state exists");
     assert_eq!(global.scope, "global");
 }
+
+#[tokio::test]
+async fn provider_health_service_probe_provider_promotes_gateway_scoped_unhealthy_state() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let provider_service = ProviderService::new(pool.clone());
+    provider_service
+        .create_provider(CreateProviderInput {
+            id: "provider_health_probe_scope".to_string(),
+            name: "Provider Health Probe Scope".to_string(),
+            kind: "openai".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: "sk-health-probe-scope".to_string(),
+            models: vec!["gpt-4o-mini".to_string()],
+            enabled: true,
+        })
+        .await
+        .expect("create provider");
+
+    let service = ProviderHealthService::new(pool.clone());
+    for _ in 0..3 {
+        service
+            .record_failure_for_gateway("gw_probe_scope", "provider_health_probe_scope", "timeout")
+            .await
+            .expect("record scoped failure");
+    }
+
+    service
+        .probe_provider("provider_health_probe_scope")
+        .await
+        .expect("probe provider");
+
+    let scoped = service
+        .get_scoped_state("provider_health_probe_scope", Some("gw_probe_scope"), None)
+        .await
+        .expect("get scoped health state")
+        .expect("scoped health state exists");
+    assert_eq!(scoped.status, "probing");
+
+    let global = service
+        .get_state("provider_health_probe_scope")
+        .await
+        .expect("get global state")
+        .expect("global state exists");
+    assert_eq!(global.status, "probing");
+}

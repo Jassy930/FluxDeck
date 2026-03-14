@@ -38,6 +38,16 @@ impl ProviderHealthService {
         self.repo.list_all().await
     }
 
+    pub async fn states_for_provider(&self, provider_id: &str) -> Result<Vec<ProviderHealthState>> {
+        Ok(self
+            .repo
+            .list_all()
+            .await?
+            .into_iter()
+            .filter(|state| state.provider_id == provider_id)
+            .collect())
+    }
+
     pub async fn ensure_provider(&self, provider_id: &str) -> Result<ProviderHealthState> {
         self.repo.ensure_default(provider_id).await
     }
@@ -62,7 +72,8 @@ impl ProviderHealthService {
         provider_id: &str,
         reason: &str,
     ) -> Result<ProviderHealthState> {
-        self.record_failure_inner(provider_id, None, None, reason).await
+        self.record_failure_inner(provider_id, None, None, reason)
+            .await
     }
 
     pub async fn record_failure_for_gateway(
@@ -92,10 +103,20 @@ impl ProviderHealthService {
         success: bool,
         failure_reason: Option<&str>,
     ) -> Result<ProviderHealthState> {
+        self.mark_probe_result_inner(provider_id, Some(gateway_id), None, success, failure_reason)
+            .await
+    }
+
+    pub async fn mark_probe_result_for_state(
+        &self,
+        state: &ProviderHealthState,
+        success: bool,
+        failure_reason: Option<&str>,
+    ) -> Result<ProviderHealthState> {
         self.mark_probe_result_inner(
-            provider_id,
-            Some(gateway_id),
-            None,
+            &state.provider_id,
+            state.gateway_id.as_deref(),
+            state.model.as_deref(),
             success,
             failure_reason,
         )
@@ -103,7 +124,15 @@ impl ProviderHealthService {
     }
 
     pub async fn probe_provider(&self, provider_id: &str) -> Result<ProviderHealthState> {
-        self.mark_probe_result(provider_id, true, None).await
+        let global = self.mark_probe_result(provider_id, true, None).await?;
+        for state in self.repo.list_all().await?.into_iter().filter(|state| {
+            state.provider_id == provider_id
+                && state.gateway_id.is_some()
+                && state.status == "unhealthy"
+        }) {
+            self.mark_probe_result_for_state(&state, true, None).await?;
+        }
+        Ok(global)
     }
 
     pub async fn record_success(&self, provider_id: &str) -> Result<ProviderHealthState> {
@@ -218,7 +247,9 @@ impl ProviderHealthService {
         let existing = self.repo.get_scoped(provider_id, gateway_id, model).await?;
         Ok(match (existing, gateway_id) {
             (Some(state), _) => state,
-            (None, Some(gateway_id)) => ProviderHealthState::gateway(provider_id, gateway_id, model),
+            (None, Some(gateway_id)) => {
+                ProviderHealthState::gateway(provider_id, gateway_id, model)
+            }
             (None, None) => ProviderHealthState::global(provider_id),
         })
     }
@@ -236,7 +267,9 @@ fn now_nanos() -> u128 {
 }
 
 fn next_recover_after(failure_streak: i64) -> String {
-    let exponent = failure_streak.saturating_sub(FAILURE_THRESHOLD_UNHEALTHY).clamp(0, 6) as u32;
+    let exponent = failure_streak
+        .saturating_sub(FAILURE_THRESHOLD_UNHEALTHY)
+        .clamp(0, 6) as u32;
     let multiplier = 1_u128 << exponent;
     now_nanos()
         .saturating_add(BASE_PROBE_BACKOFF_NANOS.saturating_mul(multiplier))

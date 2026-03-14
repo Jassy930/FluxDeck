@@ -5,6 +5,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
+use axum::{http::StatusCode, routing::get, Router};
 use fluxd::domain::gateway::CreateGatewayInput;
 use fluxd::domain::provider::CreateProviderInput;
 use fluxd::repo::gateway_repo::GatewayRepo;
@@ -15,7 +16,6 @@ use fluxd::runtime::health_monitor::HealthMonitor;
 use fluxd::service::provider_health_service::ProviderHealthService;
 use fluxd::service::provider_service::ProviderService;
 use fluxd::storage::migrate::run_migrations;
-use axum::{http::StatusCode, routing::get, Router};
 use serde_json::json;
 use tokio::net::TcpListener;
 
@@ -494,7 +494,10 @@ async fn health_monitor_respects_recover_after_before_running_real_probe() {
     .await
     .expect("expire recover_after");
 
-    let second_summary = monitor.run_once().await.expect("run health monitor second tick");
+    let second_summary = monitor
+        .run_once()
+        .await
+        .expect("run health monitor second tick");
     assert_eq!(second_summary.probed, 1);
     assert_eq!(probe_hits.load(Ordering::SeqCst), 1);
 
@@ -504,6 +507,67 @@ async fn health_monitor_respects_recover_after_before_running_real_probe() {
         .expect("get delayed provider health")
         .expect("delayed provider health exists");
     assert_eq!(state.status, "probing");
+}
+
+#[tokio::test]
+async fn health_monitor_probes_gateway_scoped_unhealthy_states() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("connect sqlite memory db");
+    run_migrations(&pool).await.expect("run migrations");
+
+    let probe_hits = Arc::new(AtomicUsize::new(0));
+    let upstream_addr = spawn_probe_server(StatusCode::UNAUTHORIZED, probe_hits.clone()).await;
+
+    let provider_service = ProviderService::new(pool.clone());
+    provider_service
+        .create_provider(CreateProviderInput {
+            id: "provider_monitor_scoped".to_string(),
+            name: "Provider Monitor Scoped".to_string(),
+            kind: "openai".to_string(),
+            base_url: format!("http://{}/v1", upstream_addr),
+            api_key: "sk-monitor-scoped".to_string(),
+            models: vec!["gpt-4o-mini".to_string()],
+            enabled: true,
+        })
+        .await
+        .expect("create provider");
+
+    let health_service = ProviderHealthService::new(pool.clone());
+    for _ in 0..3 {
+        health_service
+            .record_failure_for_gateway("gw_monitor_scope", "provider_monitor_scoped", "timeout")
+            .await
+            .expect("record scoped failure");
+    }
+
+    sqlx::query(
+        "UPDATE provider_health_states SET recover_after = '0', circuit_open_until = '0' WHERE provider_id = ?1 AND scope = 'gateway_provider' AND gateway_id = ?2 AND model = ''",
+    )
+    .bind("provider_monitor_scoped")
+    .bind("gw_monitor_scope")
+    .execute(&pool)
+    .await
+    .expect("expire scoped recover_after");
+
+    let monitor = HealthMonitor::new(pool.clone(), Duration::from_millis(50));
+    let summary = monitor.run_once().await.expect("run health monitor once");
+    assert_eq!(summary.probed, 1);
+    assert_eq!(probe_hits.load(Ordering::SeqCst), 1);
+
+    let scoped = health_service
+        .get_scoped_state("provider_monitor_scoped", Some("gw_monitor_scope"), None)
+        .await
+        .expect("get scoped provider health")
+        .expect("scoped provider health exists");
+    assert_eq!(scoped.status, "probing");
+
+    let global = health_service
+        .get_state("provider_monitor_scoped")
+        .await
+        .expect("get global provider health")
+        .expect("global provider health exists");
+    assert_eq!(global.status, "healthy");
 }
 
 #[tokio::test]
@@ -557,14 +621,14 @@ async fn health_monitor_backoffs_failed_real_probe() {
         .expect("get backoff provider health")
         .expect("backoff provider health exists");
     assert_eq!(state.status, "unhealthy");
-    assert_eq!(state.last_failure_reason.as_deref(), Some("probe status 502"));
+    assert_eq!(
+        state.last_failure_reason.as_deref(),
+        Some("probe status 502")
+    );
     assert_ne!(state.recover_after.as_deref(), Some("0"));
 }
 
-async fn spawn_probe_server(
-    status: StatusCode,
-    hits: Arc<AtomicUsize>,
-) -> std::net::SocketAddr {
+async fn spawn_probe_server(status: StatusCode, hits: Arc<AtomicUsize>) -> std::net::SocketAddr {
     let app = Router::new().route(
         "/v1",
         get({
@@ -651,7 +715,9 @@ async fn spawn_probe_target(status: StatusCode) -> std::net::SocketAddr {
         .expect("bind probe target");
     let addr = listener.local_addr().expect("probe target addr");
     tokio::spawn(async move {
-        axum::serve(listener, app).await.expect("serve probe target");
+        axum::serve(listener, app)
+            .await
+            .expect("serve probe target");
     });
     addr
 }

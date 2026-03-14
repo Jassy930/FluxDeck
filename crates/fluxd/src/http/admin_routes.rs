@@ -12,8 +12,8 @@ use serde_json::{json, Value};
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 use crate::domain::gateway::{CreateGatewayInput, Gateway, GatewayRouteTarget, UpdateGatewayInput};
-use crate::domain::provider_health::ProviderHealthState;
 use crate::domain::provider::{CreateProviderInput, Provider, UpdateProviderInput};
+use crate::domain::provider_health::ProviderHealthState;
 use crate::http::dto::BasicOk;
 use crate::repo::gateway_repo::GatewayRepo;
 use crate::runtime::gateway_manager::GatewayManager;
@@ -191,7 +191,7 @@ async fn probe_provider(
         .probe_provider(&provider_id)
         .await
     {
-        Ok(state) => (StatusCode::OK, Json(json!(state))),
+        Ok(global_state) => (StatusCode::OK, Json(json!(global_state))),
         Err(err) => (
             StatusCode::BAD_REQUEST,
             Json(json!({
@@ -408,14 +408,16 @@ async fn list_gateways(
                 let route_targets = gateway
                     .route_targets
                     .iter()
-                    .map(|route_target| GatewayRouteTargetView::from_target(
-                        route_target,
-                        effective_health_state(
-                            &health_lookup,
-                            &gateway.id,
-                            &route_target.provider_id,
-                        ),
-                    ))
+                    .map(|route_target| {
+                        GatewayRouteTargetView::from_target(
+                            route_target,
+                            effective_health_state(
+                                &health_lookup,
+                                &gateway.id,
+                                &route_target.provider_id,
+                            ),
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let health_summary = GatewayHealthSummary::from_targets(&route_targets);
                 gateways.push(GatewayWithRuntime {
@@ -563,7 +565,10 @@ fn effective_health_state<'a>(
         .or_else(|| lookup.global.get(provider_id))
 }
 
-async fn latest_active_provider_id(pool: &SqlitePool, gateway_id: &str) -> Result<Option<String>, sqlx::Error> {
+async fn latest_active_provider_id(
+    pool: &SqlitePool,
+    gateway_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar(
         r#"
         SELECT provider_id
