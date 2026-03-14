@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct TrafficAnalyticsView: View {
+    @Environment(\.locale) private var locale
     let model: TrafficAnalyticsModel
     let isLoading: Bool
     let error: String?
@@ -20,7 +21,7 @@ struct TrafficAnalyticsView: View {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundStyle(DesignTokens.statusColors.error.fill)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Failed to load traffic monitor")
+                                Text(L10n.string("traffic.error.load_failed", locale: locale))
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(DesignTokens.textPrimary)
                                 Text(error)
@@ -32,11 +33,11 @@ struct TrafficAnalyticsView: View {
                 }
 
                 if isLoading && !model.hasData {
-                    SurfaceCard(title: "Traffic Monitor") {
+                    SurfaceCard(title: L10n.string("traffic.page.title", locale: locale)) {
                         HStack(spacing: 10) {
                             ProgressView()
                                 .controlSize(.small)
-                            Text("Loading real-time traffic statistics...")
+                            Text(L10n.string("traffic.state.loading", locale: locale))
                                 .font(.caption)
                                 .foregroundStyle(DesignTokens.textSecondary)
                         }
@@ -63,18 +64,18 @@ struct TrafficAnalyticsView: View {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
-                        Text("Traffic Monitor")
+                        Text(L10n.string("traffic.page.title", locale: locale))
                             .font(.headline.weight(.semibold))
                             .foregroundStyle(DesignTokens.textPrimary)
 
                         if let lastRefreshedAt {
-                            Text("Updated \(Self.refreshFormatter.string(from: lastRefreshedAt))")
+                            Text(L10n.formatted("traffic.header.updated", locale: locale, Self.refreshFormatter.string(from: lastRefreshedAt)))
                                 .font(.caption2)
                                 .foregroundStyle(DesignTokens.textSecondary)
                         }
                     }
 
-                    Text("Live request throughput, latency and failure distribution.")
+                    Text(L10n.string("traffic.page.subtitle", locale: locale))
                         .font(.caption2)
                         .foregroundStyle(DesignTokens.textSecondary)
                 }
@@ -96,7 +97,7 @@ struct TrafficAnalyticsView: View {
                             Image(systemName: "arrow.clockwise")
                                 .font(.caption.weight(.semibold))
                         }
-                        Text("Refresh")
+                        Text(L10n.string("traffic.action.refresh", locale: locale))
                             .font(.caption.weight(.semibold))
                     }
                     .foregroundStyle(DesignTokens.textPrimary)
@@ -148,16 +149,17 @@ struct TrafficAnalyticsView: View {
 
     private var trendSection: some View {
         HStack(alignment: .top, spacing: 12) {
-            SurfaceCard(title: "Token Trend by Model") {
+            SurfaceCard(title: L10n.string("traffic.section.token_trend", locale: locale)) {
                 VStack(alignment: .leading, spacing: 10) {
                     if model.tokenTrendBuckets.isEmpty {
-                        Text("No trend buckets available for \(selectedPeriod).")
+                        Text(L10n.formatted("traffic.section.token_trend.empty", locale: locale, selectedPeriod))
                             .font(.caption)
                             .foregroundStyle(DesignTokens.textSecondary)
                     } else {
                         let renderableLines = buildTrafficTrendRenderableLines(
                             series: model.tokenTrendSeries,
-                            buckets: model.tokenTrendBuckets
+                            buckets: model.tokenTrendBuckets,
+                            locale: locale
                         )
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
@@ -186,27 +188,27 @@ struct TrafficAnalyticsView: View {
                 }
             }
 
-            SurfaceCard(title: "Routing Summary") {
+            SurfaceCard(title: L10n.string("traffic.section.routing_summary", locale: locale)) {
                 VStack(alignment: .leading, spacing: 12) {
                     StatusPill(
-                        text: "Top Gateway: \(model.topGatewayID)",
+                        text: L10n.formatted("traffic.routing.top_gateway", locale: locale, model.topGatewayID),
                         semanticColor: DesignTokens.statusColors.running
                     )
                     StatusPill(
-                        text: "Top Provider: \(model.topProviderID)",
+                        text: L10n.formatted("traffic.routing.top_provider", locale: locale, model.topProviderID),
                         semanticColor: DesignTokens.statusColors.warning
                     )
                     StatusPill(
-                        text: "Top Model: \(model.topModelName)",
+                        text: L10n.formatted("traffic.routing.top_model", locale: locale, model.topModelName),
                         semanticColor: DesignTokens.statusColors.inactive
                     )
 
                     Divider()
                         .overlay(DesignTokens.borderSubtle)
 
-                    metricRow(label: "Requests", value: "\(model.totalRequests)")
-                    metricRow(label: "Errors", value: "\(model.errorCount)")
-                    metricRow(label: "Period", value: selectedPeriod.uppercased())
+                    metricRow(label: L10n.string("common.metric.requests", locale: locale), value: "\(model.totalRequests)")
+                    metricRow(label: L10n.string("common.metric.errors", locale: locale), value: "\(model.errorCount)")
+                    metricRow(label: L10n.string("common.metric.period", locale: locale), value: selectedPeriod.uppercased())
                 }
             }
             .frame(width: 248)
@@ -215,14 +217,14 @@ struct TrafficAnalyticsView: View {
 
     private var breakdownSection: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            breakdownCard(title: "By Gateway", rows: model.compactGatewayBreakdown)
-            breakdownCard(title: "By Provider", rows: model.compactProviderBreakdown)
-            breakdownCard(title: "By Model", rows: model.compactModelBreakdown)
+            breakdownCard(title: L10n.string("traffic.breakdown.gateway", locale: locale), rows: model.compactGatewayBreakdown)
+            breakdownCard(title: L10n.string("traffic.breakdown.provider", locale: locale), rows: model.compactProviderBreakdown)
+            breakdownCard(title: L10n.string("traffic.breakdown.model", locale: locale), rows: model.compactModelBreakdown)
         }
     }
 
     private var alertsSection: some View {
-        SurfaceCard(title: "Alerts") {
+        SurfaceCard(title: L10n.string("traffic.section.alerts", locale: locale)) {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(model.alerts.enumerated()), id: \.offset) { _, alert in
                     HStack(alignment: .top, spacing: 10) {
@@ -257,12 +259,12 @@ struct TrafficAnalyticsView: View {
     }
 
     private var emptyStateCard: some View {
-        SurfaceCard(title: "Traffic Monitor") {
+        SurfaceCard(title: L10n.string("traffic.page.title", locale: locale)) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("No traffic recorded for \(selectedPeriod).")
+                Text(L10n.formatted("traffic.empty.period", locale: locale, selectedPeriod))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(DesignTokens.textPrimary)
-                Text("Once gateways start serving requests, this page will show throughput, latency, token usage and error alerts.")
+                Text(L10n.string("traffic.empty.message", locale: locale))
                     .font(.caption)
                     .foregroundStyle(DesignTokens.textSecondary)
             }
@@ -303,7 +305,7 @@ struct TrafficAnalyticsView: View {
                 .minimumScaleFactor(0.85)
 
             if item.detailRows.isEmpty {
-                Text("No detail in this period")
+                Text(L10n.string("traffic.kpi.no_detail", locale: locale))
                     .font(.caption2)
                     .foregroundStyle(DesignTokens.textSecondary)
             } else {
@@ -374,7 +376,7 @@ struct TrafficAnalyticsView: View {
     private func breakdownCard(title: String, rows: [TrafficBreakdownRow]) -> some View {
         SurfaceCard(title: title) {
             if rows.isEmpty {
-                Text("No dimension data in this period.")
+                Text(L10n.string("traffic.breakdown.empty", locale: locale))
                     .font(.caption)
                     .foregroundStyle(DesignTokens.textSecondary)
             } else {
@@ -444,12 +446,13 @@ struct TrafficAnalyticsView: View {
 }
 
 private struct TrafficTrendChart: View {
+    @Environment(\.locale) private var locale
     let series: [TrafficTokenTrendSeries]
     let buckets: [TrafficTokenTrendBucket]
     @State private var hoveredBucketIndex: Int?
 
     private var renderableLines: [TrafficTrendRenderableLine] {
-        buildTrafficTrendRenderableLines(series: series, buckets: buckets)
+        buildTrafficTrendRenderableLines(series: series, buckets: buckets, locale: locale)
     }
 
     var body: some View {
@@ -619,14 +622,14 @@ private struct TrafficTrendChart: View {
                     .foregroundStyle(DesignTokens.textPrimary)
                 Spacer()
                 if bucket.errorCount > 0 {
-                    Text("\(bucket.errorCount) err")
+                    Text(L10n.formatted("traffic.tooltip.errors", locale: locale, Int64(bucket.errorCount)))
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(DesignTokens.statusColors.error.fill)
                 }
             }
 
             HStack(alignment: .firstTextBaseline) {
-                Text("Total Tokens")
+                Text(L10n.string("traffic.tooltip.total_tokens", locale: locale))
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(DesignTokens.textSecondary)
                 Spacer()
@@ -653,7 +656,15 @@ private struct TrafficTrendChart: View {
                             .foregroundStyle(DesignTokens.textPrimary)
                     }
 
-                    Text("I \(formatTrendInteger(row.inputTokens))  O \(formatTrendInteger(row.outputTokens))  C \(formatTrendInteger(row.cachedTokens))")
+                    Text(
+                        L10n.formatted(
+                            "traffic.tooltip.token_mix",
+                            locale: locale,
+                            formatTrendInteger(row.inputTokens),
+                            formatTrendInteger(row.outputTokens),
+                            formatTrendInteger(row.cachedTokens)
+                        )
+                    )
                         .font(.caption2)
                         .foregroundStyle(DesignTokens.textSecondary.opacity(0.92))
                 }
@@ -778,11 +789,12 @@ struct TrafficTrendRenderableLine: Equatable {
 
 func buildTrafficTrendRenderableLines(
     series: [TrafficTokenTrendSeries],
-    buckets: [TrafficTokenTrendBucket]
+    buckets: [TrafficTokenTrendBucket],
+    locale: Locale = .autoupdatingCurrent
 ) -> [TrafficTrendRenderableLine] {
     [
         TrafficTrendRenderableLine(
-            name: "Total Tokens",
+            name: L10n.string("traffic.trend.legend.total_tokens", locale: locale),
             values: buckets.map(\.totalTokens),
             style: .total
         )

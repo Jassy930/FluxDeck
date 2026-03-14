@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AA0000000000000000000079 /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000078 /* AppLanguage.swift */; };
+		AA0000000000000000000081 /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000080 /* L10n.swift */; };
+		AA0000000000000000000083 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000082 /* Localizable.xcstrings */; };
 		AA0000000000000000000020 /* FluxDeckNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000010 /* FluxDeckNativeApp.swift */; };
 		AA0000000000000000000021 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* ContentView.swift */; };
 		AA0000000000000000000026 /* AppNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000018 /* AppNavigation.swift */; };
@@ -53,6 +56,9 @@
 		AA0000000000000000000016 /* ProviderListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderListView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000017 /* GatewayListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayListView.swift; sourceTree = "<group>"; };
 		AA0000000000000000000018 /* AppNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppNavigation.swift; sourceTree = "<group>"; };
+		AA0000000000000000000078 /* AppLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLanguage.swift; sourceTree = "<group>"; };
+		AA0000000000000000000080 /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
+		AA0000000000000000000082 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		AA0000000000000000000019 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
 		AA000000000000000000001A /* SurfaceCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceCard.swift; sourceTree = "<group>"; };
 		AA000000000000000000001B /* StatusPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusPill.swift; sourceTree = "<group>"; };
@@ -77,6 +83,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA0000000000000000000083 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -96,7 +103,9 @@
 				AA0000000000000000000004 /* App */,
 				AA0000000000000000000006 /* Features */,
 				AA0000000000000000000008 /* UI */,
+				AA0000000000000000000084 /* Localization */,
 				AA0000000000000000000007 /* Networking */,
+				AA0000000000000000000085 /* Resources */,
 				AA0000000000000000000005 /* FluxDeckNativeTests */,
 				AA0000000000000000000003 /* Products */,
 			);
@@ -117,6 +126,7 @@
 				AA0000000000000000000010 /* FluxDeckNativeApp.swift */,
 				AA0000000000000000000011 /* ContentView.swift */,
 				AA0000000000000000000018 /* AppNavigation.swift */,
+				AA0000000000000000000078 /* AppLanguage.swift */,
 			);
 			path = FluxDeckNative/App;
 			sourceTree = SOURCE_ROOT;
@@ -168,6 +178,22 @@
 				AA000000000000000000001E /* TopModeBar.swift */,
 			);
 			path = FluxDeckNative/UI;
+			sourceTree = SOURCE_ROOT;
+		};
+		AA0000000000000000000084 /* Localization */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000080 /* L10n.swift */,
+			);
+			path = FluxDeckNative/Localization;
+			sourceTree = SOURCE_ROOT;
+		};
+		AA0000000000000000000085 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000082 /* Localizable.xcstrings */,
+			);
+			path = FluxDeckNative/Resources;
 			sourceTree = SOURCE_ROOT;
 		};
 /* End PBXGroup section */
@@ -250,6 +276,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA0000000000000000000083 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -263,6 +290,8 @@
 				AA0000000000000000000020 /* FluxDeckNativeApp.swift in Sources */,
 				AA0000000000000000000021 /* ContentView.swift in Sources */,
 				AA0000000000000000000026 /* AppNavigation.swift in Sources */,
+				AA0000000000000000000079 /* AppLanguage.swift in Sources */,
+				AA0000000000000000000081 /* L10n.swift in Sources */,
 				AA0000000000000000000027 /* DesignTokens.swift in Sources */,
 				AA0000000000000000000028 /* SurfaceCard.swift in Sources */,
 				AA0000000000000000000029 /* StatusPill.swift in Sources */,

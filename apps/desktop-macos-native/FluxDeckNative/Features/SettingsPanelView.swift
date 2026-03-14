@@ -1,7 +1,10 @@
 import SwiftUI
 
 struct SettingsPanelView: View {
+    @Environment(\.locale) private var locale
+
     @Binding var adminURLInput: String
+    @Binding var selectedLanguage: AppLanguage
     let resolvedAdminURL: String
     let isBusy: Bool
     let errorMessage: String?
@@ -12,9 +15,9 @@ struct SettingsPanelView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                SurfaceCard(title: model.sections[0].title) {
+                SurfaceCard(title: L10n.string(model.sections[0].titleKey, locale: locale)) {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(model.sections[0].description)
+                        Text(L10n.string(model.sections[0].descriptionKey, locale: locale))
                             .font(.caption)
                             .foregroundStyle(DesignTokens.textSecondary)
 
@@ -31,15 +34,18 @@ struct SettingsPanelView: View {
                 }
 
                 HStack(alignment: .top, spacing: 16) {
-                    SurfaceCard(title: model.sections[1].title) {
+                    SurfaceCard(title: L10n.string(model.sections[1].titleKey, locale: locale)) {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(model.sections[1].description)
+                            Text(L10n.string(model.sections[1].descriptionKey, locale: locale))
                                 .font(.caption)
                                 .foregroundStyle(DesignTokens.textSecondary)
-                            StatusPill(text: model.statusText, semanticColor: errorMessage == nil ? DesignTokens.statusColors.running : DesignTokens.statusColors.error)
+                            StatusPill(
+                                text: L10n.settingsStatus(model.status, locale: locale),
+                                semanticColor: errorMessage == nil ? DesignTokens.statusColors.running : DesignTokens.statusColors.error
+                            )
 
                             HStack(spacing: 12) {
-                                Button("Apply") {
+                                Button(L10n.string(L10n.settingsActionApply, locale: locale)) {
                                     Task { await onApply() }
                                 }
                                 .buttonStyle(.plain)
@@ -47,9 +53,9 @@ struct SettingsPanelView: View {
                                 .foregroundStyle(DesignTokens.textPrimary)
                                 .disabled(isBusy)
 
-                                Button("Reset", action: onReset)
+                                Button(L10n.string(L10n.settingsActionReset, locale: locale), action: onReset)
                                     .buttonStyle(.plain)
-                                .focusable(false)
+                                    .focusable(false)
                                     .foregroundStyle(DesignTokens.textSecondary)
                                     .disabled(isBusy)
                             }
@@ -57,17 +63,35 @@ struct SettingsPanelView: View {
                     }
                     .frame(maxWidth: .infinity)
 
-                    SurfaceCard(title: model.sections[2].title) {
+                    SurfaceCard(title: L10n.string(model.sections[2].titleKey, locale: locale)) {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(model.sections[2].description)
+                            Text(L10n.string(model.sections[2].descriptionKey, locale: locale))
                                 .font(.caption)
                                 .foregroundStyle(DesignTokens.textSecondary)
-                            detailRow(label: "Current Endpoint", value: resolvedAdminURL)
-                            detailRow(label: "Busy", value: isBusy ? "Yes" : "No")
-                            detailRow(label: "Error", value: errorMessage ?? "-")
+                            detailRow(label: L10n.string(L10n.settingsDiagnosticsCurrentEndpoint, locale: locale), value: resolvedAdminURL)
+                            detailRow(label: L10n.string(L10n.settingsDiagnosticsBusy, locale: locale), value: L10n.string(isBusy ? L10n.commonValueYes : L10n.commonValueNo, locale: locale))
+                            detailRow(label: L10n.string(L10n.settingsDiagnosticsError, locale: locale), value: errorMessage ?? "-")
                         }
                     }
                     .frame(maxWidth: .infinity)
+                }
+
+                SurfaceCard(title: L10n.string(model.languageSection.titleKey, locale: locale)) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(L10n.string(model.languageSection.descriptionKey, locale: locale))
+                            .font(.caption)
+                            .foregroundStyle(DesignTokens.textSecondary)
+
+                        Picker(L10n.string(model.languageSection.titleKey, locale: locale), selection: $selectedLanguage) {
+                            ForEach(model.languageOptions) { option in
+                                Text(option.title)
+                                    .tag(option.language)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .disabled(isBusy)
+                    }
                 }
             }
             .padding(20)

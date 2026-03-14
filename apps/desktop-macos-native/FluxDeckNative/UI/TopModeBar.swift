@@ -2,9 +2,11 @@ import SwiftUI
 
 struct ShellToolbarModel {
     let title: String
+    let workspaceLabel: String
     let endpointLabel: String
     let endpointValue: String
     let lastRefreshLabel: String?
+    let refreshButtonTitle: String
     let isRefreshing: Bool
     let statusSummary: ShellStatusSummary
 
@@ -13,13 +15,16 @@ struct ShellToolbarModel {
         adminBaseURL: String,
         lastRefreshText: String?,
         isRefreshing: Bool,
-        statusSummary: ShellStatusSummary
+        statusSummary: ShellStatusSummary,
+        locale: Locale = .autoupdatingCurrent
     ) -> ShellToolbarModel {
         ShellToolbarModel(
             title: title,
-            endpointLabel: "Admin",
+            workspaceLabel: L10n.string(L10n.shellToolbarWorkspace, locale: locale),
+            endpointLabel: L10n.string(L10n.shellToolbarAdmin, locale: locale),
             endpointValue: adminBaseURL,
-            lastRefreshLabel: lastRefreshText.map { "Last refresh \($0)" },
+            lastRefreshLabel: lastRefreshText.map { L10n.lastRefresh($0, locale: locale) },
+            refreshButtonTitle: L10n.string(L10n.shellToolbarRefresh, locale: locale),
             isRefreshing: isRefreshing,
             statusSummary: statusSummary
         )
@@ -27,6 +32,8 @@ struct ShellToolbarModel {
 }
 
 struct TopModeBar: View {
+    @Environment(\.locale) private var locale
+
     let model: ShellToolbarModel
     @Binding var selectedMode: AppMode
     let onRefresh: () -> Void
@@ -35,7 +42,7 @@ struct TopModeBar: View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("Workspace")
+                    Text(model.workspaceLabel)
                         .font(.caption2.weight(.semibold))
                         .textCase(.uppercase)
                         .foregroundStyle(DesignTokens.textSecondary)
@@ -78,7 +85,7 @@ struct TopModeBar: View {
                         Button {
                             selectedMode = mode
                         } label: {
-                            Text(mode.rawValue)
+                            Text(L10n.string(mode.titleKey, locale: locale))
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(selectedMode == mode ? DesignTokens.textPrimary : DesignTokens.textSecondary)
                                 .padding(.horizontal, 12)
@@ -99,9 +106,18 @@ struct TopModeBar: View {
                 .clipShape(Capsule())
 
                 HStack(spacing: 8) {
-                    StatusPill(text: model.statusSummary.connectionLabel, semanticColor: model.statusSummary.connectionColor)
-                    StatusPill(text: model.statusSummary.gatewayLabel, semanticColor: model.statusSummary.gatewayColor)
-                    StatusPill(text: model.statusSummary.errorLabel, semanticColor: model.statusSummary.errorColor)
+                    StatusPill(
+                        text: L10n.shellConnectionState(model.statusSummary.connectionState, locale: locale),
+                        semanticColor: model.statusSummary.connectionColor
+                    )
+                    StatusPill(
+                        text: L10n.runningGatewayCount(model.statusSummary.runningGatewayCount, locale: locale),
+                        semanticColor: model.statusSummary.gatewayColor
+                    )
+                    StatusPill(
+                        text: L10n.alertCount(model.statusSummary.alertCount, locale: locale),
+                        semanticColor: model.statusSummary.errorColor
+                    )
                 }
 
                 Button(action: onRefresh) {
@@ -114,7 +130,7 @@ struct TopModeBar: View {
                                 .font(.caption.weight(.semibold))
                         }
 
-                        Text("Refresh")
+                        Text(model.refreshButtonTitle)
                             .font(.caption.weight(.semibold))
                     }
                     .foregroundStyle(DesignTokens.textPrimary)

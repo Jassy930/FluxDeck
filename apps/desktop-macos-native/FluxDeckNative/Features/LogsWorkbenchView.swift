@@ -39,11 +39,13 @@ struct LogStreamCardModel: Equatable {
     let routeText: String
     let modelText: String
     let summaryText: String
+    let statusCode: Int
     let statusText: String
     let latencyText: String
     let createdAtText: String
     let displayTimeText: String
     let protocolText: String
+    let isStreaming: Bool
     let streamText: String
     let firstByteText: String
     let tokenText: String
@@ -52,35 +54,36 @@ struct LogStreamCardModel: Equatable {
     let errorStageText: String
     let errorTypeText: String
     let errorDetailText: String
+    let rawErrorDetail: String?
     let usageText: String?
     let executionDetails: [LogDetailItem]
     let diagnosticsDetails: [LogDetailItem]
     let isFailure: Bool
 
-    static func make(log: AdminLog) -> LogStreamCardModel {
+    static func make(log: AdminLog, locale: Locale = .autoupdatingCurrent) -> LogStreamCardModel {
         let routeText = "\(log.gatewayID) -> \(log.providerID)"
         let modelText = log.modelDisplayText
         let summaryText = log.errorSummaryText != "-" ? log.errorSummaryText : modelText
         let protocolText = "\(log.inboundProtocol ?? "-") -> \(log.upstreamProtocol ?? "-")"
-        let streamText = log.stream ? "Streaming" : "Non-stream"
+        let streamText = L10n.logsStream(log.stream, locale: locale)
         let firstByteText = log.firstByteMs.map { "\($0) ms" } ?? "-"
         let tokenText = log.tokenBreakdownText
-        let compactTokenText = compactTokenSummary(log: log)
+        let compactTokenText = compactTokenSummary(log: log, locale: locale)
         let displayTimeText = compactDisplayTime(log.createdAt)
         let usageText = nonEmpty(log.usageJSON)
 
         let executionDetails = [
-            LogDetailItem(label: "Request ID", value: log.requestID, monospaced: true),
-            LogDetailItem(label: "Protocol", value: protocolText),
-            LogDetailItem(label: "Stream", value: streamText),
-            LogDetailItem(label: "First Byte", value: firstByteText)
+            LogDetailItem(label: L10n.string(L10n.logsDetailRequestID, locale: locale), value: log.requestID, monospaced: true),
+            LogDetailItem(label: L10n.string(L10n.logsDetailProtocol, locale: locale), value: protocolText),
+            LogDetailItem(label: L10n.string(L10n.logsDetailStream, locale: locale), value: streamText),
+            LogDetailItem(label: L10n.string(L10n.logsDetailFirstByte, locale: locale), value: firstByteText)
         ]
 
         let diagnosticsDetails = [
-            LogDetailItem(label: "Tokens", value: tokenText),
-            LogDetailItem(label: "Error Stage", value: log.errorStage ?? "-"),
-            LogDetailItem(label: "Error Type", value: log.errorType ?? "-"),
-            LogDetailItem(label: "Error", value: log.error ?? "-")
+            LogDetailItem(label: L10n.string(L10n.logsDetailTokens, locale: locale), value: tokenText),
+            LogDetailItem(label: L10n.string(L10n.logsDetailErrorStage, locale: locale), value: log.errorStage ?? "-"),
+            LogDetailItem(label: L10n.string(L10n.logsDetailErrorType, locale: locale), value: log.errorType ?? "-"),
+            LogDetailItem(label: L10n.string(L10n.logsDetailError, locale: locale), value: log.error ?? "-")
         ]
 
         return LogStreamCardModel(
@@ -88,11 +91,13 @@ struct LogStreamCardModel: Equatable {
             routeText: routeText,
             modelText: modelText,
             summaryText: summaryText,
+            statusCode: log.statusCode,
             statusText: "\(log.statusCode)",
             latencyText: "\(log.latencyMs) ms",
             createdAtText: log.createdAt,
             displayTimeText: displayTimeText,
             protocolText: protocolText,
+            isStreaming: log.stream,
             streamText: streamText,
             firstByteText: firstByteText,
             tokenText: tokenText,
@@ -101,6 +106,7 @@ struct LogStreamCardModel: Equatable {
             errorStageText: log.errorStage ?? "-",
             errorTypeText: log.errorType ?? "-",
             errorDetailText: log.error ?? "-",
+            rawErrorDetail: log.error,
             usageText: usageText,
             executionDetails: executionDetails,
             diagnosticsDetails: diagnosticsDetails,
@@ -108,23 +114,26 @@ struct LogStreamCardModel: Equatable {
         )
     }
 
-    private static func compactTokenSummary(log: AdminLog) -> String {
+    private static func compactTokenSummary(log: AdminLog, locale: Locale) -> String {
         var parts: [String] = []
 
         if let inputTokens = log.inputTokens {
-            parts.append("\(shortMetric(inputTokens)) in")
+            parts.append(L10n.logsCompactInput(shortMetric(inputTokens), locale: locale))
         }
         if let outputTokens = log.outputTokens {
-            parts.append("\(shortMetric(outputTokens)) out")
+            parts.append(L10n.logsCompactOutput(shortMetric(outputTokens), locale: locale))
         }
         if let cachedTokens = log.cachedTokens {
-            parts.append("\(shortMetric(cachedTokens)) c")
+            parts.append(L10n.logsCompactCached(shortMetric(cachedTokens), locale: locale))
         }
         if parts.isEmpty, let totalTokens = log.totalTokens {
-            parts.append("\(shortMetric(totalTokens)) total")
+            parts.append(L10n.logsCompactTotal(shortMetric(totalTokens), locale: locale))
         }
 
-        return parts.isEmpty ? "Tok -" : "Tok " + parts.joined(separator: " / ")
+        guard !parts.isEmpty else {
+            return L10n.string(L10n.logsCompactEmptyKey, locale: locale)
+        }
+        return L10n.string(L10n.logsCompactPrefixKey, locale: locale) + " " + parts.joined(separator: " / ")
     }
 
     private static func shortMetric(_ value: Int) -> String {
@@ -174,6 +183,7 @@ struct LogStreamCardModel: Equatable {
 }
 
 struct LogsWorkbenchView: View {
+    @Environment(\.locale) private var locale
     let logs: [AdminLog]
     let hasMore: Bool
     let isLoading: Bool
@@ -231,14 +241,14 @@ struct LogsWorkbenchView: View {
     private var filterBar: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center) {
-                panelHeader("Log Filters")
+                panelHeader(L10n.string(L10n.logsFiltersTitle, locale: locale))
                 Spacer()
                 compactMetaTag(
-                    text: hasMore ? "Loaded \(logs.count) requests" : "Loaded \(logs.count)",
+                    text: L10n.logsLoaded(logs.count, hasMore: hasMore, locale: locale),
                     tint: DesignTokens.statusColors.running.fill.opacity(0.24)
                 )
                 if hasMore {
-                    compactMetaTag(text: "More available")
+                    compactMetaTag(text: L10n.string(L10n.logsFiltersMoreAvailable, locale: locale))
                 }
             }
 
@@ -262,20 +272,20 @@ struct LogsWorkbenchView: View {
     private var requestStreamPanel: some View {
         SurfaceCard {
             VStack(alignment: .leading, spacing: 12) {
-                panelHeader("Request Stream")
+                panelHeader(L10n.string(L10n.logsSectionsRequestStream, locale: locale))
 
                 if isLoading && logs.isEmpty {
                     ProgressView()
                         .controlSize(.small)
                 } else if logs.isEmpty {
-                    Text("No request logs match current filters.")
+                    Text(L10n.string(L10n.logsEmptyFiltered, locale: locale))
                         .font(.caption)
                         .foregroundStyle(DesignTokens.textSecondary)
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
                         LazyVStack(alignment: .leading, spacing: 8) {
                             ForEach(logs) { log in
-                                let model = LogStreamCardModel.make(log: log)
+                                let model = LogStreamCardModel.make(log: log, locale: locale)
                                 logCard(
                                     model: model,
                                     isExpanded: expansionState.expandedRequestID == log.requestID
@@ -292,7 +302,7 @@ struct LogsWorkbenchView: View {
                                         ProgressView()
                                             .controlSize(.small)
                                     }
-                                    Text(isLoadingMore ? "Loading…" : "Load More")
+                                    Text(isLoadingMore ? L10n.string(L10n.logsActionsLoadingMore, locale: locale) : L10n.string(L10n.logsActionsLoadMore, locale: locale))
                                         .font(.caption.weight(.semibold))
                                 }
                                 .frame(maxWidth: .infinity)
@@ -325,12 +335,12 @@ struct LogsWorkbenchView: View {
                     .overlay(DesignTokens.borderSubtle.opacity(0.75))
 
                 VStack(alignment: .leading, spacing: 12) {
-                    detailSection(title: "Execution", items: model.executionDetails)
-                    detailSection(title: "Diagnostics", items: model.diagnosticsDetails)
+                    detailSection(title: L10n.string(L10n.logsSectionsExecution, locale: locale), items: model.executionDetails)
+                    detailSection(title: L10n.string(L10n.logsSectionsDiagnostics, locale: locale), items: model.diagnosticsDetails)
 
                     if let usageText = model.usageText {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Usage JSON")
+                            Text(L10n.string(L10n.logsSectionsUsageJSON, locale: locale))
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(DesignTokens.textSecondary)
 
@@ -375,11 +385,11 @@ struct LogsWorkbenchView: View {
 
     private var toolbarControlsRow: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            compactMenuPicker(title: "Gateway", selection: $selectedGateway, options: gatewayOptions)
-            compactMenuPicker(title: "Provider", selection: $selectedProvider, options: providerOptions)
-            compactMenuPicker(title: "Status", selection: $selectedStatus, options: statusOptions)
+            compactMenuPicker(title: L10n.string(L10n.logsFiltersGateway, locale: locale), selection: $selectedGateway, options: gatewayOptions)
+            compactMenuPicker(title: L10n.string(L10n.logsFiltersProvider, locale: locale), selection: $selectedProvider, options: providerOptions)
+            compactMenuPicker(title: L10n.string(L10n.logsFiltersStatus, locale: locale), selection: $selectedStatus, options: statusOptions)
 
-            Toggle("Only Errors", isOn: $errorsOnly)
+            Toggle(L10n.string(L10n.logsFiltersErrorsOnly, locale: locale), isOn: $errorsOnly)
                 .toggleStyle(.switch)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(DesignTokens.textSecondary)
@@ -395,14 +405,14 @@ struct LogsWorkbenchView: View {
     private var toolbarControlsFallback: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .bottom, spacing: 10) {
-                compactMenuPicker(title: "Gateway", selection: $selectedGateway, options: gatewayOptions)
-                compactMenuPicker(title: "Provider", selection: $selectedProvider, options: providerOptions)
+                compactMenuPicker(title: L10n.string(L10n.logsFiltersGateway, locale: locale), selection: $selectedGateway, options: gatewayOptions)
+                compactMenuPicker(title: L10n.string(L10n.logsFiltersProvider, locale: locale), selection: $selectedProvider, options: providerOptions)
             }
 
             HStack(alignment: .bottom, spacing: 10) {
-                compactMenuPicker(title: "Status", selection: $selectedStatus, options: statusOptions)
+                compactMenuPicker(title: L10n.string(L10n.logsFiltersStatus, locale: locale), selection: $selectedStatus, options: statusOptions)
 
-                Toggle("Only Errors", isOn: $errorsOnly)
+                Toggle(L10n.string(L10n.logsFiltersErrorsOnly, locale: locale), isOn: $errorsOnly)
                     .toggleStyle(.switch)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(DesignTokens.textSecondary)
@@ -417,7 +427,7 @@ struct LogsWorkbenchView: View {
     }
 
     private var clearFiltersButton: some View {
-        Button("Clear Filters", action: onClearFilters)
+        Button(L10n.string(L10n.logsFiltersClear, locale: locale), action: onClearFilters)
             .buttonStyle(.plain)
             .focusable(false)
             .font(.caption.weight(.semibold))
@@ -485,7 +495,7 @@ struct LogsWorkbenchView: View {
                 .layoutPriority(2)
 
             ForEach(model.metaBadges, id: \.self) { badge in
-                compactMetaTag(text: badge, tint: badgeTint(for: badge, isFailure: model.isFailure))
+                compactMetaTag(text: badge, tint: badgeTint(for: badge, model: model))
             }
         }
     }
@@ -498,14 +508,14 @@ struct LogsWorkbenchView: View {
                 .lineLimit(1)
 
             HStack(spacing: 8) {
-                compactMetaTag(text: model.metaBadges[0], tint: badgeTint(for: model.metaBadges[0], isFailure: model.isFailure))
-                compactMetaTag(text: model.metaBadges[1], tint: badgeTint(for: model.metaBadges[1], isFailure: model.isFailure))
+                compactMetaTag(text: model.metaBadges[0], tint: badgeTint(for: model.metaBadges[0], model: model))
+                compactMetaTag(text: model.metaBadges[1], tint: badgeTint(for: model.metaBadges[1], model: model))
                 Spacer(minLength: 0)
             }
 
             HStack(spacing: 8) {
-                compactMetaTag(text: model.metaBadges[2], tint: badgeTint(for: model.metaBadges[2], isFailure: model.isFailure))
-                compactMetaTag(text: model.metaBadges[3], tint: badgeTint(for: model.metaBadges[3], isFailure: model.isFailure))
+                compactMetaTag(text: model.metaBadges[2], tint: badgeTint(for: model.metaBadges[2], model: model))
+                compactMetaTag(text: model.metaBadges[3], tint: badgeTint(for: model.metaBadges[3], model: model))
                 Spacer(minLength: 0)
             }
         }
@@ -527,7 +537,7 @@ struct LogsWorkbenchView: View {
 
             Picker(title, selection: selection) {
                 ForEach(options, id: \.self) { option in
-                    Text(option).tag(option)
+                    Text(localizedOptionLabel(option)).tag(option)
                 }
             }
             .pickerStyle(.menu)
@@ -545,6 +555,10 @@ struct LogsWorkbenchView: View {
             )
         }
         .frame(minWidth: 132)
+    }
+
+    private func localizedOptionLabel(_ option: String) -> String {
+        option == "__all__" ? L10n.string("common.filter.all", locale: locale) : option
     }
 
     private func compactMetaTag(text: String, tint: Color = DesignTokens.borderSubtle.opacity(0.34)) -> some View {
@@ -631,15 +645,12 @@ struct LogsWorkbenchView: View {
         forFailure ? DesignTokens.statusColors.error.fill.opacity(0.55) : DesignTokens.borderSubtle.opacity(0.9)
     }
 
-    private func badgeTint(for badge: String, isFailure: Bool) -> Color {
-        if badge == "Streaming" {
-            return DesignTokens.statusColors.running.glow
-        }
-        if badge == "Non-stream" {
-            return DesignTokens.borderSubtle.opacity(0.32)
+    private func badgeTint(for badge: String, model: LogStreamCardModel) -> Color {
+        if badge == model.streamText {
+            return model.isStreaming ? DesignTokens.statusColors.running.glow : DesignTokens.borderSubtle.opacity(0.32)
         }
         if badge.hasSuffix(" ms") {
-            return isFailure ? DesignTokens.statusColors.error.glow : DesignTokens.borderSubtle.opacity(0.34)
+            return model.isFailure ? DesignTokens.statusColors.error.glow : DesignTokens.borderSubtle.opacity(0.34)
         }
         if badge.contains("->") {
             return DesignTokens.borderSubtle.opacity(0.28)

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ProviderListView: View {
+    @Environment(\.locale) private var locale
     let providers: [AdminProvider]
     let providerHealthStates: [AdminProviderHealthState]
     let isLoading: Bool
@@ -15,14 +16,14 @@ struct ProviderListView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Providers")
+                Text(L10n.string(L10n.providersListTitle, locale: locale))
                     .font(.title2)
                     .fontWeight(.semibold)
                 Spacer()
                 Button {
                     onCreate()
                 } label: {
-                    Label("New Provider", systemImage: "plus")
+                    Label(L10n.string(L10n.providersActionsNew, locale: locale), systemImage: "plus")
                 }
                 .focusable(false)
                 .disabled(isSubmitting)
@@ -41,16 +42,16 @@ struct ProviderListView: View {
                     HStack(spacing: 8) {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Loading providers...")
+                        Text(L10n.string(L10n.providersListLoading, locale: locale))
                             .foregroundStyle(DesignTokens.textSecondary)
                     }
                     .font(.caption)
                 }
             } else if providers.isEmpty {
                 EmptyStateView(
-                    title: "No providers",
+                    title: L10n.string(L10n.providersListEmptyTitle, locale: locale),
                     systemImage: "shippingbox",
-                    message: "Create a provider to route gateway traffic."
+                    message: L10n.string(L10n.providersListEmptyMessage, locale: locale)
                 )
             } else {
                 ScrollView {
@@ -79,26 +80,26 @@ struct ProviderListView: View {
                                         )
                                     }
 
-                                    resourceRow(label: "Endpoint", value: card.endpointText)
-                                    resourceRow(label: "Models", value: card.modelCountText)
-                                    resourceRow(label: "Health", value: card.healthStatusText)
+                                    resourceRow(label: L10n.string(L10n.providersFieldsEndpoint, locale: locale), value: card.endpointText)
+                                    resourceRow(label: L10n.string(L10n.providersFieldsModels, locale: locale), value: L10n.modelCount(card.modelCount, locale: locale))
+                                    resourceRow(label: L10n.string(L10n.providersFieldsHealth, locale: locale), value: L10n.providerHealthStatus(card.healthStatus, locale: locale))
 
-                                    if let healthDetail = card.healthDetailText, !healthDetail.isEmpty {
-                                        resourceRow(label: "Last Failure", value: healthDetail)
+                                    if let healthDetail = card.healthDetailText {
+                                        resourceRow(label: L10n.string(L10n.providersFieldsLastFailure, locale: locale), value: healthDetail)
                                     }
 
                                     StatusPill(
-                                        text: card.statusText,
+                                        text: L10n.providerStatus(card.isEnabled, locale: locale),
                                         semanticColor: provider.enabled ? DesignTokens.statusColors.running : DesignTokens.statusColors.inactive
                                     )
 
                                     StatusPill(
-                                        text: card.healthStatusText,
-                                        semanticColor: healthColor(for: card.healthStatusText)
+                                        text: L10n.providerHealthStatus(card.healthStatus, locale: locale),
+                                        semanticColor: healthColor(for: card.healthStatus)
                                     )
 
                                     HStack(spacing: 12) {
-                                        Button("Configure") {
+                                        Button(L10n.string(L10n.providersActionsConfigure, locale: locale)) {
                                             onConfigure(provider)
                                         }
                                         .buttonStyle(.plain)
@@ -106,7 +107,7 @@ struct ProviderListView: View {
                                         .foregroundStyle(DesignTokens.textPrimary)
                                         .disabled(isSubmitting)
 
-                                        Button(provider.enabled ? "Disable" : "Enable") {
+                                        Button(L10n.providerToggleAction(isEnabled: provider.enabled, locale: locale)) {
                                             onToggleEnabled(provider)
                                         }
                                         .buttonStyle(.plain)
@@ -114,7 +115,7 @@ struct ProviderListView: View {
                                         .foregroundStyle(DesignTokens.textSecondary)
                                         .disabled(isSubmitting)
 
-                                        Button("Probe") {
+                                        Button(L10n.string(L10n.providersActionsProbe, locale: locale)) {
                                             onProbe(provider)
                                         }
                                         .buttonStyle(.plain)
@@ -122,7 +123,7 @@ struct ProviderListView: View {
                                         .foregroundStyle(DesignTokens.statusColors.warning.fill)
                                         .disabled(isSubmitting)
 
-                                        Button("Delete") {
+                                        Button(L10n.string(L10n.providersActionsDelete, locale: locale)) {
                                             onDelete(provider)
                                         }
                                         .buttonStyle(.plain)
@@ -143,7 +144,7 @@ struct ProviderListView: View {
                     HStack(spacing: 8) {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Submitting provider...")
+                        Text(L10n.string(L10n.providersActionsSubmitting, locale: locale))
                             .font(.caption)
                             .foregroundStyle(DesignTokens.textSecondary)
                     }
@@ -163,7 +164,8 @@ struct ProviderListView: View {
             Text(value)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(DesignTokens.textPrimary)
-                .lineLimit(1)
+                .lineLimit(2)
+                .multilineTextAlignment(.trailing)
         }
     }
 

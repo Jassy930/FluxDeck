@@ -42,8 +42,8 @@ final class FluxDeckNativeTests: XCTestCase {
         ]
 
         XCTAssertEqual(
-            OverviewDashboardModel.make(providers: providers, gateways: gateways, logs: logs).trafficSummary.totalRequestsText,
-            "1"
+            OverviewDashboardModel.make(providers: providers, gateways: gateways, logs: logs).trafficSummary.totalRequests,
+            1
         )
         XCTAssertEqual(
             TopologyGraph.make(gateways: gateways, providers: providers, logs: logs).edges.count,
@@ -68,12 +68,22 @@ final class FluxDeckNativeTests: XCTestCase {
         let settings = SettingsPanelModel.make(
             adminBaseURL: "http://127.0.0.1:7777",
             isLoading: false,
-            hasError: false
+            hasError: false,
+            selectedLanguage: .system,
+            locale: Locale(identifier: "en")
         )
 
         XCTAssertEqual(logCard.statusText, "502")
         XCTAssertEqual(logCard.errorText, "timeout")
-        XCTAssertEqual(settings.sections.map(\.title), ["Admin API", "Refresh & Sync", "Diagnostics"])
+        XCTAssertEqual(
+            settings.sections.map(\.titleKey),
+            [
+                "settings.section.admin_api.title",
+                "settings.section.refresh_sync.title",
+                "settings.section.diagnostics.title"
+            ]
+        )
+        XCTAssertEqual(settings.status, .ready)
     }
 
     func testResourceWorkspaceModelsExposePrimaryAndSecondaryMetadata() {
@@ -144,15 +154,22 @@ final class FluxDeckNativeTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(providerCard.modelCountText, "2 models")
-        XCTAssertEqual(providerCard.healthStatusText, "DEGRADED")
+        XCTAssertEqual(providerCard.modelCount, 2)
+        XCTAssertTrue(providerCard.isEnabled)
+        XCTAssertEqual(providerCard.healthStatus, "degraded")
         XCTAssertEqual(providerCard.healthDetailText, "rate limited")
         XCTAssertEqual(gatewayCard.endpointText, "127.0.0.1:18080")
-        XCTAssertEqual(gatewayCard.runtimeBadge, "RUNNING")
+        XCTAssertEqual(gatewayCard.runtimeState, .running)
         XCTAssertEqual(gatewayCard.activeProviderText, "pv_backup")
-        XCTAssertEqual(gatewayCard.routeSummaryText, "pv [degraded] -> pv_backup [healthy]")
-        XCTAssertEqual(gatewayCard.healthSummaryText, "1 healthy · 1 degraded · 0 unhealthy")
-        XCTAssertEqual(gatewayCard.autoStartText, "ON")
+        XCTAssertEqual(
+            gatewayCard.routeTargets,
+            [
+                GatewayRouteTargetSummary(providerId: "pv", healthStatus: "degraded"),
+                GatewayRouteTargetSummary(providerId: "pv_backup", healthStatus: "healthy"),
+            ]
+        )
+        XCTAssertEqual(gatewayCard.healthSummary?.degradedCount, 1)
+        XCTAssertTrue(gatewayCard.autoStartEnabled)
     }
 
     func testShellToolbarModelBuildsEndpointAndRefreshMetadata() {
@@ -183,11 +200,13 @@ final class FluxDeckNativeTests: XCTestCase {
             statusSummary: status
         )
 
+        XCTAssertEqual(model.workspaceLabel, "Workspace")
         XCTAssertEqual(model.endpointLabel, "Admin")
         XCTAssertEqual(model.endpointValue, "http://127.0.0.1:7777")
         XCTAssertEqual(model.lastRefreshLabel, "Last refresh 19:14:53")
+        XCTAssertEqual(model.refreshButtonTitle, "Refresh")
         XCTAssertTrue(model.isRefreshing)
-        XCTAssertEqual(model.statusSummary.gatewayLabel, "1 running")
+        XCTAssertEqual(model.statusSummary.runningGatewayCount, 1)
     }
 
     func testTrafficAndConnectionsModelsAggregateLogs() {
@@ -614,9 +633,9 @@ final class FluxDeckNativeTests: XCTestCase {
             highlightMode: .top3
         )
 
-        XCTAssertEqual(byModel.summaryTitle, "Hot Paths")
-        XCTAssertEqual(byModel.mixTitle, "Model Mix")
-        XCTAssertNil(byModel.emptyStateText)
+        XCTAssertEqual(byModel.summaryTitleKey, "topology.summary.hot_paths")
+        XCTAssertEqual(byModel.mixTitleKey, "topology.summary.model_mix")
+        XCTAssertNil(byModel.emptyStateKey)
         XCTAssertEqual(byModel.hotPaths.first?.tokenText, "1,030 tok")
         XCTAssertEqual(byModel.hotPaths.first?.requestText, "4 req")
         XCTAssertEqual(byModel.hotPaths.first?.topModelText, "Top model m1")
@@ -637,12 +656,25 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(totalOnlyEdge.segments.map(\.emphasisValue), [1_030])
     }
 
+    func testTopologyControlsUseStableIdentifiersAndLocalizedTitleKeys() {
+        XCTAssertEqual(TopologyMetricMode.tokens.rawValue, "tokens")
+        XCTAssertEqual(TopologyMetricMode.requests.rawValue, "requests")
+        XCTAssertEqual(TopologyMetricMode.tokens.titleKey, "topology.metric.tokens")
+        XCTAssertEqual(TopologyFlowMode.byModel.rawValue, "by_model")
+        XCTAssertEqual(TopologyFlowMode.totalOnly.rawValue, "total_only")
+        XCTAssertEqual(TopologyFlowMode.byModel.titleKey, "topology.flow.by_model")
+        XCTAssertEqual(TopologyHighlightMode.top3.id, "top3")
+        XCTAssertEqual(TopologyHighlightMode.top3.titleKey, "topology.highlight.top3")
+        XCTAssertEqual(L10n.string(TopologyMetricMode.tokens.titleKey, locale: Locale(identifier: "en")), "Tokens")
+        XCTAssertEqual(L10n.string(TopologyMetricMode.tokens.titleKey, locale: Locale(identifier: "zh-Hans")), "令牌")
+    }
+
     func testTopologyCanvasScreenModelExposesEmptyState() {
         let emptyGraph = TopologyGraph(
             columns: [
-                TopologyColumn(title: "Entrypoints", nodes: []),
-                TopologyColumn(title: "Gateways", nodes: []),
-                TopologyColumn(title: "Providers", nodes: [])
+                TopologyColumn(titleKey: L10n.topologyColumnsEntrypoints, nodes: []),
+                TopologyColumn(titleKey: L10n.topologyColumnsGateways, nodes: []),
+                TopologyColumn(titleKey: L10n.topologyColumnsProviders, nodes: [])
             ],
             edges: []
         )
@@ -654,7 +686,10 @@ final class FluxDeckNativeTests: XCTestCase {
             highlightMode: .top5
         )
 
-        XCTAssertEqual(screen.emptyStateText, "No active token routes yet.")
+        XCTAssertEqual(screen.summaryTitleKey, "topology.summary.hot_paths")
+        XCTAssertEqual(screen.mixTitleKey, "topology.summary.model_mix")
+        XCTAssertEqual(screen.emptyStateKey, "topology.empty.active_routes")
+        XCTAssertEqual(L10n.string(screen.emptyStateKey!, locale: Locale(identifier: "en")), "No active token routes yet.")
         XCTAssertTrue(screen.hotPaths.isEmpty)
         XCTAssertTrue(screen.modelMix.isEmpty)
         XCTAssertTrue(screen.canvasEdges.isEmpty)
@@ -872,6 +907,30 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(nodeHoverState.edgeOpacity(edgeID: "gw_aux->pv_anthropic", segmentID: "gw_aux->pv_anthropic#gemini-2.5-pro"), 0.16)
     }
 
+    func testTopologyCanvasLocalizedCopyUsesExplicitLocale() throws {
+        let graph = makeSankeyFixtureGraph()
+        let screen = TopologyCanvasScreenModel.make(
+            graph: graph,
+            metricMode: .tokens,
+            flowMode: .byModel,
+            highlightMode: .top5,
+            locale: Locale(identifier: "zh-Hans")
+        )
+
+        XCTAssertEqual(screen.hotPaths.first?.topModelText, "热门模型 gpt-4o-mini")
+        XCTAssertEqual(screen.modelMix.first?.valueText, "640 令牌")
+
+        let nodeHover = try XCTUnwrap(screen.hoverPayload(for: .node(nodeID: "gw_core")))
+        XCTAssertEqual(nodeHover.rows, ["730 令牌", "4 请求", "热门模型 gpt-4o-mini", "1 错误"])
+
+        let edgeHover = try XCTUnwrap(
+            screen.hoverPayload(
+                for: .segment(edgeID: "gw_core->pv_openai", segmentID: "gw_core->pv_openai#gpt-4o-mini")
+            )
+        )
+        XCTAssertEqual(edgeHover.rows, ["模型 gpt-4o-mini", "640 令牌", "3 请求", "10 缓存", "0 错误"])
+    }
+
     func testTopologyCanvasFlattensVisualHierarchyWithoutExtraChrome() throws {
         let graph = makeSankeyFixtureGraph()
         let screen = TopologyCanvasScreenModel.make(
@@ -947,9 +1006,10 @@ final class FluxDeckNativeTests: XCTestCase {
             ]
         )
 
-        XCTAssertEqual(model.runningStatus.connectionCountText, "1")
-        XCTAssertEqual(model.networkStatus.internetLatencyText, "120 ms")
-        XCTAssertEqual(model.trafficSummary.totalRequestsText, "1")
+        XCTAssertEqual(model.runningStatus.connectionCount, 1)
+        XCTAssertEqual(model.networkStatus.internetLatencyMs, 120)
+        XCTAssertEqual(model.networkStatus.gatewayStatus, .healthy)
+        XCTAssertEqual(model.trafficSummary.totalRequests, 1)
     }
 
     func testShellStatusSummaryUsesGatewayAndErrorCounts() {
@@ -972,8 +1032,9 @@ final class FluxDeckNativeTests: XCTestCase {
             ]
         )
 
-        XCTAssertEqual(summary.connectionLabel, "Connected")
-        XCTAssertEqual(summary.errorLabel, "1 alert")
+        XCTAssertEqual(summary.connectionState, .connected)
+        XCTAssertEqual(summary.runningGatewayCount, 1)
+        XCTAssertEqual(summary.alertCount, 1)
     }
 
     func testDesignTokensExposeDarkWorkbenchPalette() {
@@ -986,10 +1047,11 @@ final class FluxDeckNativeTests: XCTestCase {
     func testNavigationGroupsExposeExpectedSections() {
         let groups = SidebarGroup.defaultGroups
 
-        XCTAssertEqual(groups.map(\.title), ["Overview", "Visualization", "Proxy", "System"])
+        XCTAssertEqual(groups.map(\.id), ["overview", "visualization", "proxy", "system"])
+        XCTAssertEqual(groups.map(\.titleKey), ["sidebar.group.overview", "sidebar.group.visualization", "sidebar.group.proxy", "sidebar.group.system"])
         XCTAssertTrue(groups[1].items.contains(.topology))
         XCTAssertTrue(groups[2].items.contains(.providers))
-        XCTAssertEqual(AppMode.allCases.map(\.rawValue), ["Backup", "Direct", "Rule", "Global"])
+        XCTAssertEqual(AppMode.allCases.map(\.rawValue), ["backup", "direct", "rule", "global"])
     }
 
     func testDecodesProvidersAndGatewaysPayload() throws {
@@ -1116,6 +1178,13 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(result.userNotice, "Gateway 配置已保存，运行中的实例已自动重启。")
     }
 
+    func testProviderAndGatewayActionCopyUsesStableState() {
+        XCTAssertEqual(L10n.providerToggleAction(isEnabled: true, locale: Locale(identifier: "en")), "Disable")
+        XCTAssertEqual(L10n.providerToggleAction(isEnabled: false, locale: Locale(identifier: "zh-Hans")), "启用")
+        XCTAssertEqual(L10n.gatewayRuntimeAction(.running, locale: Locale(identifier: "en")), "Stop")
+        XCTAssertEqual(L10n.gatewayRuntimeAction(.stopped, locale: Locale(identifier: "zh-Hans")), "启动")
+    }
+
     func testGatewayUpdateNoticeTextPrefersServerNoticeAndFallsBackLocally() {
         let gateway = AdminGateway(
             id: "gw_update",
@@ -1152,8 +1221,12 @@ final class FluxDeckNativeTests: XCTestCase {
             userNotice: nil
         )
         XCTAssertEqual(
-            gatewayUpdateNoticeText(for: failedRestart),
+            gatewayUpdateNoticeText(for: failedRestart, locale: Locale(identifier: "zh-Hans")),
             "Gateway 配置已保存，但自动重启失败：address already in use"
+        )
+        XCTAssertEqual(
+            gatewayUpdateNoticeText(for: failedRestart, locale: Locale(identifier: "en")),
+            "Gateway configuration saved, but restart failed: address already in use"
         )
 
         let unchanged = AdminGatewayUpdateResult(
@@ -1165,7 +1238,7 @@ final class FluxDeckNativeTests: XCTestCase {
             userNotice: nil
         )
         XCTAssertEqual(
-            gatewayUpdateNoticeText(for: unchanged),
+            gatewayUpdateNoticeText(for: unchanged, locale: Locale(identifier: "zh-Hans")),
             "Gateway 配置已保存。"
         )
     }
@@ -1211,8 +1284,12 @@ final class FluxDeckNativeTests: XCTestCase {
             userNotice: nil
         )
         XCTAssertEqual(
-            gatewayDeleteNoticeText(for: stoppedDelete),
+            gatewayDeleteNoticeText(for: stoppedDelete, locale: Locale(identifier: "zh-Hans")),
             "Gateway 已删除。"
+        )
+        XCTAssertEqual(
+            gatewayDeleteNoticeText(for: stoppedDelete, locale: Locale(identifier: "en")),
+            "Gateway deleted."
         )
     }
 
@@ -1226,8 +1303,27 @@ final class FluxDeckNativeTests: XCTestCase {
         """.data(using: .utf8)!
 
         XCTAssertEqual(
-            adminAPIErrorMessage(from: errorData, statusCode: 409),
-            "provider is referenced by gateways: gateway_main, gateway_backup"
+            adminAPIErrorMessage(from: errorData, statusCode: 409, locale: Locale(identifier: "zh-Hans")),
+            "供应商已被网关引用：gateway_main, gateway_backup"
+        )
+        XCTAssertEqual(
+            adminAPIErrorMessage(from: errorData, statusCode: 409, locale: Locale(identifier: "en")),
+            "Provider is referenced by gateways: gateway_main, gateway_backup"
+        )
+    }
+
+    func testAdminApiErrorMessagePreservesPlainTextAndLocalizesHttpFallback() {
+        XCTAssertEqual(
+            adminAPIErrorMessage(from: Data("plain upstream timeout".utf8), statusCode: 502, locale: Locale(identifier: "zh-Hans")),
+            "plain upstream timeout"
+        )
+        XCTAssertEqual(
+            adminAPIErrorMessage(from: Data(), statusCode: 503, locale: Locale(identifier: "en")),
+            "Request failed with HTTP 503"
+        )
+        XCTAssertEqual(
+            adminAPIErrorMessage(from: Data(), statusCode: 503, locale: Locale(identifier: "zh-Hans")),
+            "请求失败，HTTP 503"
         )
     }
 
@@ -1309,7 +1405,8 @@ final class FluxDeckNativeTests: XCTestCase {
               "compatibility_mode": "compatible"
             }
             """,
-            providers: providers
+            providers: providers,
+            locale: Locale(identifier: "en")
         )
 
         XCTAssertEqual(snapshot.title, "glm-coding")
@@ -1337,15 +1434,18 @@ final class FluxDeckNativeTests: XCTestCase {
 
         let providerOptions = GatewayFormSupport.providerOptions(
             providers: providers,
-            selectedProviderID: "legacy_provider"
+            selectedProviderID: "legacy_provider",
+            locale: Locale(identifier: "en")
         )
         let inboundOptions = GatewayFormSupport.protocolOptions(
             kind: .inbound,
-            selectedValue: "legacy-inbound"
+            selectedValue: "legacy-inbound",
+            locale: Locale(identifier: "en")
         )
         let upstreamOptions = GatewayFormSupport.protocolOptions(
             kind: .upstream,
-            selectedValue: "legacy-upstream"
+            selectedValue: "legacy-upstream",
+            locale: Locale(identifier: "en")
         )
 
         XCTAssertEqual(providerOptions.first?.id, "legacy_provider")
@@ -1714,7 +1814,8 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(model.summaryText, "provider timeout")
         XCTAssertEqual(model.modelText, "gpt-5-codex -> gpt-5")
         XCTAssertEqual(model.routeText, "gw -> pv")
-        XCTAssertEqual(model.statusText, "502")
+        XCTAssertEqual(model.statusCode, 502)
+        XCTAssertEqual(model.rawErrorDetail, "provider timeout")
     }
 
     func testLogStreamCardModelKeepsRouteModelLatencyAndTimeForSuccessfulLog() {
@@ -1732,6 +1833,8 @@ final class FluxDeckNativeTests: XCTestCase {
 
         XCTAssertEqual(model.summaryText, "gpt-5")
         XCTAssertEqual(model.routeText, "gw -> pv")
+        XCTAssertEqual(model.statusCode, 200)
+        XCTAssertNil(model.rawErrorDetail)
         XCTAssertEqual(model.latencyText, "140 ms")
         XCTAssertEqual(model.createdAtText, "2026-03-03T10:00:00Z")
     }
@@ -1765,6 +1868,30 @@ final class FluxDeckNativeTests: XCTestCase {
         XCTAssertEqual(model.summaryText, "provider timeout")
         XCTAssertEqual(model.secondaryMetaText, "Tok 1.2k in / 640 out / 300 c")
         XCTAssertEqual(model.metaBadges, ["1820 ms", "10:00:00", "openai -> anthropic", "Streaming"])
+    }
+
+    func testCompactLogRowSummaryFormattingLocalizesChineseTokens() {
+        let log = AdminLog(
+            requestID: "req_compact_zh",
+            gatewayID: "gw",
+            providerID: "pv",
+            model: "gpt-5",
+            inboundProtocol: "openai",
+            upstreamProtocol: "anthropic",
+            statusCode: 200,
+            latencyMs: 240,
+            stream: false,
+            inputTokens: 1200,
+            outputTokens: 640,
+            cachedTokens: 300,
+            totalTokens: 2140,
+            createdAt: "2026-03-03T10:00:00Z"
+        )
+
+        let model = LogStreamCardModel.make(log: log, locale: Locale(identifier: "zh-Hans"))
+
+        XCTAssertEqual(model.secondaryMetaText, "令牌 1.2k 入 / 640 出 / 300 缓")
+        XCTAssertEqual(model.metaBadges.last, "非流式")
     }
 
     func testExpandedDiagnosticsGrouping() {
@@ -2127,7 +2254,8 @@ final class FluxDeckNativeTests: XCTestCase {
         let model = TrafficAnalyticsModel.make(
             overview: overview,
             trend: trend,
-            selectedPeriod: "1h"
+            selectedPeriod: "1h",
+            locale: Locale(identifier: "en")
         )
 
         XCTAssertEqual(model.requestsPerMinuteText, "1.2")
@@ -2147,6 +2275,7 @@ final class FluxDeckNativeTests: XCTestCase {
             TrafficBreakdownRow(title: "d", requestCountText: "4", latencyText: "4", errorText: "0", tokenText: "4")
         ]
         let model = TrafficAnalyticsModel(
+            locale: Locale(identifier: "en"),
             totalRequests: 0,
             errorCount: 0,
             successCount: 0,
@@ -2195,7 +2324,8 @@ final class FluxDeckNativeTests: XCTestCase {
         let model = TrafficAnalyticsModel.make(
             overview: overview,
             trend: AdminStatsTrend(period: "24h", interval: "1h", data: []),
-            selectedPeriod: "24h"
+            selectedPeriod: "24h",
+            locale: Locale(identifier: "en")
         )
 
         XCTAssertEqual(model.kpiStripItems.count, 4)
@@ -2275,7 +2405,8 @@ final class FluxDeckNativeTests: XCTestCase {
         let model = TrafficAnalyticsModel.make(
             overview: overview,
             trend: trend,
-            selectedPeriod: "1h"
+            selectedPeriod: "1h",
+            locale: Locale(identifier: "en")
         )
 
         XCTAssertEqual(
@@ -2377,7 +2508,8 @@ final class FluxDeckNativeTests: XCTestCase {
         let model = TrafficAnalyticsModel.make(
             overview: overview,
             trend: trend,
-            selectedPeriod: "1h"
+            selectedPeriod: "1h",
+            locale: Locale(identifier: "en")
         )
 
         XCTAssertEqual(
@@ -2452,12 +2584,49 @@ final class FluxDeckNativeTests: XCTestCase {
         let model = TrafficAnalyticsModel.make(
             overview: overview,
             trend: trend,
-            selectedPeriod: "1h"
+            selectedPeriod: "1h",
+            locale: Locale(identifier: "en")
         )
 
         XCTAssertEqual(model.tokenTrendSeries.map(\.modelName), ["b", "a", "c", "d", "Other"])
         XCTAssertEqual(model.tokenTrendSeries[3].bucketValues, [0, 80])
         XCTAssertEqual(model.tokenTrendSeries[4].bucketValues, [20, 0])
+    }
+
+    func testTrafficMonitorKeepsOtherBucketStableWhenLocalizedLabelMatchesRealModel() {
+        let trend = AdminStatsTrend(
+            period: "1h",
+            interval: "5m",
+            data: [
+                AdminStatsTrendPoint(
+                    timestamp: "2026-03-11 10:00:00",
+                    requestCount: 3,
+                    avgLatency: 120,
+                    errorCount: 0,
+                    inputTokens: 300,
+                    outputTokens: 140,
+                    cachedTokens: 0,
+                    byModel: [
+                        .init(model: "a", totalTokens: 220, inputTokens: 110, outputTokens: 110, cachedTokens: 0, requestCount: 1, errorCount: 0),
+                        .init(model: "b", totalTokens: 200, inputTokens: 100, outputTokens: 100, cachedTokens: 0, requestCount: 1, errorCount: 0),
+                        .init(model: "c", totalTokens: 180, inputTokens: 90, outputTokens: 90, cachedTokens: 0, requestCount: 1, errorCount: 0),
+                        .init(model: "其他", totalTokens: 160, inputTokens: 80, outputTokens: 80, cachedTokens: 0, requestCount: 1, errorCount: 0),
+                        .init(model: "tail", totalTokens: 40, inputTokens: 20, outputTokens: 20, cachedTokens: 0, requestCount: 1, errorCount: 0)
+                    ]
+                )
+            ]
+        )
+
+        let model = TrafficAnalyticsModel.make(
+            overview: nil,
+            trend: trend,
+            selectedPeriod: "1h",
+            locale: Locale(identifier: "zh-Hans")
+        )
+
+        XCTAssertEqual(model.tokenTrendSeries.map(\.modelName), ["a", "b", "c", "其他（模型）", "其他"])
+        XCTAssertEqual(model.tokenTrendSeries.last?.bucketValues, [40])
+        XCTAssertEqual(model.tokenTrendBuckets.first?.rows.map(\.modelName), ["a", "b", "c", "其他（模型）", "其他"])
     }
 
     func testTrafficTrendIntervalUsesDenserBuckets() {
@@ -2478,7 +2647,7 @@ final class FluxDeckNativeTests: XCTestCase {
             TrafficTokenTrendBucket(timestamp: "2026-03-11 10:05:00", totalTokens: 600, errorCount: 7, rows: [])
         ]
 
-        let lines = buildTrafficTrendRenderableLines(series: series, buckets: buckets)
+        let lines = buildTrafficTrendRenderableLines(series: series, buckets: buckets, locale: Locale(identifier: "en"))
 
         XCTAssertEqual(
             lines,
@@ -2489,6 +2658,24 @@ final class FluxDeckNativeTests: XCTestCase {
                 TrafficTrendRenderableLine(name: "Other", values: [150, 0], style: .model)
             ]
         )
+    }
+
+    func testTrafficTrendRenderableLinesLocalizePrimaryTotalTitle() {
+        let series = [
+            TrafficTokenTrendSeries(modelName: "gpt-5-codex", bucketValues: [500, 300], totalTokens: 800)
+        ]
+        let buckets = [
+            TrafficTokenTrendBucket(timestamp: "2026-03-11 10:00:00", totalTokens: 850, errorCount: 2, rows: [])
+        ]
+
+        let lines = buildTrafficTrendRenderableLines(
+            series: series,
+            buckets: buckets,
+            locale: Locale(identifier: "zh-Hans")
+        )
+
+        XCTAssertEqual(lines.first?.name, "总令牌")
+        XCTAssertEqual(lines.dropFirst().first?.name, "gpt-5-codex")
     }
 
     func testTrafficTrendSmoothingSegmentsKeepEndpointsAndClampControlPoints() {
@@ -2619,7 +2806,8 @@ final class FluxDeckNativeTests: XCTestCase {
         let model = TrafficAnalyticsModel.make(
             overview: overview,
             trend: trend,
-            selectedPeriod: "1h"
+            selectedPeriod: "1h",
+            locale: Locale(identifier: "en")
         )
 
         XCTAssertEqual(model.requestsPerMinuteText, "0.0")
@@ -2650,11 +2838,13 @@ final class FluxDeckNativeTests: XCTestCase {
     func testGatewayProtocolOptionsStayAlignedWithProviderKinds() {
         let inboundOptions = GatewayFormSupport.protocolOptions(
             kind: .inbound,
-            selectedValue: "openai"
+            selectedValue: "openai",
+            locale: Locale(identifier: "en")
         )
         let upstreamOptions = GatewayFormSupport.protocolOptions(
             kind: .upstream,
-            selectedValue: "provider_default"
+            selectedValue: "provider_default",
+            locale: Locale(identifier: "en")
         )
 
         XCTAssertEqual(
@@ -2666,13 +2856,253 @@ final class FluxDeckNativeTests: XCTestCase {
             ["provider_default"] + ProviderKindOption.allCases.map(\.rawValue)
         )
         XCTAssertEqual(
-            GatewayFormSupport.protocolTitle(for: "openai-response", kind: .inbound),
+            GatewayFormSupport.protocolTitle(for: "openai-response", kind: .inbound, locale: Locale(identifier: "en")),
             "OpenAI-Response"
         )
         XCTAssertEqual(
-            GatewayFormSupport.protocolTitle(for: "provider_default", kind: .upstream),
+            GatewayFormSupport.protocolTitle(for: "provider_default", kind: .upstream, locale: Locale(identifier: "en")),
             "Provider Default"
         )
+    }
+
+    func testGatewayProtocolOptionsLocalizeSubtitles() {
+        let inboundOptions = GatewayFormSupport.protocolOptions(
+            kind: .inbound,
+            selectedValue: "openai",
+            locale: Locale(identifier: "zh-Hans")
+        )
+        let upstreamOptions = GatewayFormSupport.protocolOptions(
+            kind: .upstream,
+            selectedValue: "openai",
+            locale: Locale(identifier: "zh-Hans")
+        )
+
+        XCTAssertEqual(inboundOptions.first?.subtitle, "OpenAI 兼容客户端入口")
+        XCTAssertEqual(upstreamOptions.first?.subtitle, "将协议委托给 Provider 类型")
+        XCTAssertEqual(upstreamOptions.dropFirst().first?.subtitle, "使用 OpenAI 兼容上游转发")
+    }
+
+    func testAppLanguageMapsStorageAndLocaleIdentifiers() {
+        XCTAssertEqual(AppLanguage.system.storageValue, "system")
+        XCTAssertEqual(AppLanguage.english.storageValue, "en")
+        XCTAssertEqual(AppLanguage.simplifiedChinese.storageValue, "zh-Hans")
+        XCTAssertEqual(AppLanguage.english.localeIdentifier, "en")
+        XCTAssertEqual(AppLanguage.simplifiedChinese.localeIdentifier, "zh-Hans")
+        XCTAssertEqual(AppLanguage.from(storageValue: "unknown"), .system)
+    }
+
+    func testLocalizationHelperResolvesEnglishAndChineseStrings() {
+        XCTAssertEqual(L10n.string(L10n.settingsLanguageTitle, locale: Locale(identifier: "en")), "Language")
+        XCTAssertEqual(L10n.string(L10n.settingsLanguageTitle, locale: Locale(identifier: "zh-Hans")), "语言")
+        XCTAssertEqual(L10n.modelCount(1, locale: Locale(identifier: "en")), "1 model")
+        XCTAssertEqual(L10n.modelCount(2, locale: Locale(identifier: "zh-Hans")), "2 个模型")
+        XCTAssertEqual(L10n.settingsStatus(.ready, locale: Locale(identifier: "en")), "Ready")
+        XCTAssertEqual(L10n.settingsStatus(.ready, locale: Locale(identifier: "zh-Hans")), "就绪")
+        XCTAssertEqual(L10n.shellConnectionState(.offline, locale: Locale(identifier: "zh-Hans")), "离线")
+        XCTAssertEqual(L10n.durationMilliseconds(120, locale: Locale(identifier: "en")), "120 ms")
+        XCTAssertEqual(L10n.string("settings.action.apply", locale: Locale(identifier: "en")), "Apply")
+        XCTAssertEqual(L10n.string("settings.action.reset", locale: Locale(identifier: "zh-Hans")), "重置")
+        XCTAssertEqual(L10n.string("settings.diagnostics.current_endpoint", locale: Locale(identifier: "zh-Hans")), "当前端点")
+        XCTAssertEqual(L10n.string("settings.diagnostics.busy", locale: Locale(identifier: "en")), "Busy")
+        XCTAssertEqual(L10n.string("settings.diagnostics.error", locale: Locale(identifier: "zh-Hans")), "错误")
+        XCTAssertEqual(L10n.string("common.value.yes", locale: Locale(identifier: "zh-Hans")), "是")
+        XCTAssertEqual(L10n.string("common.value.no", locale: Locale(identifier: "en")), "No")
+        XCTAssertEqual(L10n.string("overview.network.no_gateway", locale: Locale(identifier: "zh-Hans")), "无网关")
+    }
+
+    func testWorkbenchPageCopyResolvesForEnglishAndChinese() {
+        XCTAssertEqual(L10n.string("providers.list.title", locale: Locale(identifier: "en")), "Providers")
+        XCTAssertEqual(L10n.string("providers.actions.new", locale: Locale(identifier: "zh-Hans")), "新建 Provider")
+        XCTAssertEqual(L10n.string("providers.actions.probe", locale: Locale(identifier: "zh-Hans")), "探测")
+        XCTAssertEqual(L10n.string("providers.fields.health", locale: Locale(identifier: "en")), "Health")
+        XCTAssertEqual(L10n.string("gateways.list.empty.title", locale: Locale(identifier: "en")), "No gateways")
+        XCTAssertEqual(L10n.string("gateways.fields.last_error", locale: Locale(identifier: "zh-Hans")), "最近错误")
+        XCTAssertEqual(L10n.string("gateways.fields.active_provider", locale: Locale(identifier: "zh-Hans")), "当前活跃")
+        XCTAssertEqual(L10n.string("gateways.fields.routes", locale: Locale(identifier: "en")), "Routes")
+        XCTAssertEqual(L10n.string("logs.filters.title", locale: Locale(identifier: "en")), "Log Filters")
+        XCTAssertEqual(L10n.string("logs.sections.execution", locale: Locale(identifier: "zh-Hans")), "执行")
+        XCTAssertEqual(L10n.string("topology.view.title", locale: Locale(identifier: "en")), "Topology")
+        XCTAssertEqual(L10n.string("topology.controls.highlight", locale: Locale(identifier: "zh-Hans")), "高亮")
+    }
+
+    func testGatewayFormSupportLocalizesFallbackOptionsAndSnapshotCopy() {
+        let locale = Locale(identifier: "zh-Hans")
+
+        let providerFallback = GatewayFormSupport.providerOptions(
+            providers: [],
+            selectedProviderID: "pv_missing",
+            locale: locale
+        ).first
+        let protocolFallback = GatewayFormSupport.protocolOptions(
+            kind: .upstream,
+            selectedValue: "legacy_protocol",
+            locale: locale
+        ).first
+        let snapshot = GatewayFormSupport.snapshot(
+            name: "",
+            listenHost: "",
+            listenPort: "",
+            inboundProtocol: "openai",
+            upstreamProtocol: "provider_default",
+            defaultProviderID: "",
+            defaultModel: "",
+            enabled: false,
+            autoStart: false,
+            protocolConfigJSON: "{}",
+            providers: [],
+            locale: locale
+        )
+
+        XCTAssertEqual(providerFallback?.title, "当前值：pv_missing")
+        XCTAssertEqual(providerFallback?.subtitle, "Provider 不可用")
+        XCTAssertEqual(protocolFallback?.title, "当前值：legacy_protocol")
+        XCTAssertEqual(protocolFallback?.subtitle, "不支持的已保存值")
+        XCTAssertEqual(
+            GatewayFormSupport.protocolTitle(
+                for: "provider_default",
+                kind: .upstream,
+                locale: locale
+            ),
+            "Provider 默认值"
+        )
+        XCTAssertEqual(snapshot.title, "未命名 Gateway")
+        XCTAssertEqual(snapshot.endpoint, "未配置端点")
+        XCTAssertEqual(snapshot.providerLabel, "未分配")
+        XCTAssertEqual(snapshot.runtimeStatus, "停用")
+        XCTAssertEqual(snapshot.startupMode, "手动")
+        XCTAssertEqual(snapshot.routingMode, "直连")
+        XCTAssertEqual(snapshot.footerSummary, "自动启动关闭")
+    }
+
+    func testContentAndTrafficCopyResolvesForEnglishAndChinese() {
+        XCTAssertEqual(L10n.string("dialog.delete_provider.title", locale: Locale(identifier: "en")), "Delete Provider?")
+        XCTAssertEqual(L10n.string("dialog.delete_gateway.title", locale: Locale(identifier: "zh-Hans")), "删除 Gateway？")
+        XCTAssertEqual(
+            L10n.formatted("dialog.delete_provider.message", locale: Locale(identifier: "en"), "provider_main"),
+            "Delete `provider_main` permanently. If any Gateway still references this Provider, the operation will fail."
+        )
+        XCTAssertEqual(
+            L10n.formatted("dialog.delete_gateway.message", locale: Locale(identifier: "zh-Hans"), "gateway_main"),
+            "将永久删除 `gateway_main`。无需先删除其 Provider；如果该 Gateway 正在运行，系统会先停止它再删除。"
+        )
+        XCTAssertEqual(L10n.string("overview.page.title", locale: Locale(identifier: "en")), "Overview")
+        XCTAssertEqual(L10n.string("overview.logs.open", locale: Locale(identifier: "zh-Hans")), "打开日志")
+        XCTAssertEqual(L10n.string("settings.connection.endpoint", locale: Locale(identifier: "en")), "Admin API Endpoint")
+        XCTAssertEqual(L10n.string("settings.action.apply_refresh", locale: Locale(identifier: "zh-Hans")), "应用并刷新")
+        XCTAssertEqual(L10n.string("provider_form.action.create", locale: Locale(identifier: "en")), "Create Provider")
+        XCTAssertEqual(L10n.string("gateway_form.section.routing_json", locale: Locale(identifier: "zh-Hans")), "路由 JSON")
+        XCTAssertEqual(
+            L10n.string("gateway_form.validation.routing_json_invalid", locale: Locale(identifier: "en")),
+            "Routing JSON must be a valid JSON object."
+        )
+        XCTAssertEqual(L10n.string("traffic.trend.legend.total_tokens", locale: Locale(identifier: "en")), "Total Tokens")
+        XCTAssertEqual(L10n.string("traffic.summary.top_model_share", locale: Locale(identifier: "zh-Hans")), "头部模型占比")
+        XCTAssertEqual(L10n.string("traffic.label.other", locale: Locale(identifier: "zh-Hans")), "其他")
+        XCTAssertEqual(
+            L10n.formatted("traffic.tooltip.token_mix", locale: Locale(identifier: "zh-Hans"), "120", "80", "20"),
+            "输入 120  输出 80  缓存 20"
+        )
+        XCTAssertEqual(L10n.providerHealthStatus("probing", locale: Locale(identifier: "en")), "Probing")
+        XCTAssertEqual(L10n.providerHealthStatus("degraded", locale: Locale(identifier: "zh-Hans")), "降级")
+        XCTAssertEqual(L10n.string("gateways.value.idle", locale: Locale(identifier: "zh-Hans")), "空闲")
+        XCTAssertEqual(
+            L10n.formatted("gateways.health_summary.format", locale: Locale(identifier: "en"), Int64(1), Int64(2), Int64(3), Int64(4)),
+            "1 healthy · 2 degraded · 3 unhealthy · 4 probing"
+        )
+        XCTAssertEqual(
+            L10n.formatted("admin.provider.notice.probe_started", locale: Locale(identifier: "zh-Hans"), "provider_main", L10n.providerHealthStatus("probing", locale: Locale(identifier: "zh-Hans"))),
+            "Provider provider_main 已进入 探测中 状态。"
+        )
+        XCTAssertEqual(L10n.string("gateway_form.route_targets.preview_title", locale: Locale(identifier: "en")), "Route Targets")
+        XCTAssertEqual(L10n.string("gateway_form.route_targets.add", locale: Locale(identifier: "zh-Hans")), "添加目标")
+    }
+
+    func testSettingsPanelModelExposesLanguageOptions() {
+        let model = SettingsPanelModel.make(
+            adminBaseURL: "http://127.0.0.1:7777",
+            isLoading: false,
+            hasError: false,
+            selectedLanguage: .system,
+            locale: Locale(identifier: "en")
+        )
+
+        XCTAssertEqual(model.languageSection.titleKey, L10n.settingsLanguageTitle)
+        XCTAssertEqual(model.languageOptions.map(\.language), [.system, .english, .simplifiedChinese])
+        XCTAssertEqual(model.languageOptions.map(\.title), ["Follow System", "English", "Simplified Chinese"])
+    }
+
+    func testSidebarSectionUsesStableIdentifiersAndLocalizedTitleKeys() {
+        XCTAssertEqual(SidebarSection.overview.rawValue, "overview")
+        XCTAssertEqual(SidebarSection.routeMap.rawValue, "route_map")
+        XCTAssertEqual(SidebarSection.settings.rawValue, "settings")
+
+        XCTAssertEqual(SidebarSection.overview.titleKey, "sidebar.section.overview")
+        XCTAssertEqual(SidebarSection.routeMap.titleKey, "sidebar.section.route_map")
+        XCTAssertEqual(
+            L10n.string(SidebarSection.connections.titleKey, locale: Locale(identifier: "en")),
+            "Connections"
+        )
+        XCTAssertEqual(
+            L10n.string(SidebarSection.connections.titleKey, locale: Locale(identifier: "zh-Hans")),
+            "连接"
+        )
+    }
+
+    func testSidebarGroupsAndAppModeExposeLocalizedTitleKeys() {
+        XCTAssertEqual(
+            SidebarGroup.defaultGroups.map(\.id),
+            ["overview", "visualization", "proxy", "system"]
+        )
+        XCTAssertEqual(
+            SidebarGroup.defaultGroups.map(\.titleKey),
+            [
+                "sidebar.group.overview",
+                "sidebar.group.visualization",
+                "sidebar.group.proxy",
+                "sidebar.group.system"
+            ]
+        )
+
+        XCTAssertEqual(AppMode.backup.rawValue, "backup")
+        XCTAssertEqual(AppMode.global.rawValue, "global")
+        XCTAssertEqual(AppMode.rule.titleKey, "shell.mode.rule")
+        XCTAssertEqual(L10n.string(AppMode.backup.titleKey, locale: Locale(identifier: "en")), "Backup")
+        XCTAssertEqual(L10n.string(AppMode.backup.titleKey, locale: Locale(identifier: "zh-Hans")), "兜底")
+    }
+
+    func testShellCopyUsesLocalizedKeys() {
+        let loadingSummary = ShellStatusSummary.make(isLoading: true, loadError: nil, gateways: [])
+        XCTAssertEqual(loadingSummary.connectionState, .syncing)
+        XCTAssertEqual(loadingSummary.runningGatewayCount, 0)
+        XCTAssertEqual(loadingSummary.alertCount, 0)
+
+        let chineseSummary = ShellStatusSummary.make(
+            isLoading: false,
+            loadError: "boom",
+            gateways: [],
+            locale: Locale(identifier: "zh-Hans")
+        )
+        XCTAssertEqual(chineseSummary.connectionState, .offline)
+        XCTAssertEqual(chineseSummary.runningGatewayCount, 0)
+        XCTAssertEqual(chineseSummary.alertCount, 1)
+        XCTAssertEqual(L10n.shellConnectionState(chineseSummary.connectionState, locale: Locale(identifier: "zh-Hans")), "离线")
+        XCTAssertEqual(L10n.runningGatewayCount(chineseSummary.runningGatewayCount, locale: Locale(identifier: "zh-Hans")), "0 个运行中")
+        XCTAssertEqual(L10n.alertCount(chineseSummary.alertCount, locale: Locale(identifier: "zh-Hans")), "1 条告警")
+
+        let toolbar = ShellToolbarModel.make(
+            title: "Overview",
+            adminBaseURL: "http://127.0.0.1:7777",
+            lastRefreshText: "just now",
+            isRefreshing: false,
+            statusSummary: loadingSummary,
+            locale: Locale(identifier: "zh-Hans")
+        )
+
+        XCTAssertEqual(toolbar.workspaceLabel, "工作区")
+        XCTAssertEqual(toolbar.endpointLabel, "管理端")
+        XCTAssertEqual(toolbar.lastRefreshLabel, "上次刷新 just now")
+        XCTAssertEqual(toolbar.refreshButtonTitle, "刷新")
+        XCTAssertEqual(L10n.string(L10n.sidebarBrandSubtitle, locale: Locale(identifier: "zh-Hans")), "控制平面")
     }
 
     private func makeSankeyFixtureGraph() -> TopologyGraph {

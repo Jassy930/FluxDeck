@@ -1,9 +1,15 @@
 import Foundation
 
-enum TopologyHighlightMode: Equatable {
-    case top3
-    case top5
-    case all
+enum TopologyHighlightMode: String, CaseIterable, Equatable, Identifiable {
+    case top3 = "top3"
+    case top5 = "top5"
+    case all = "all"
+
+    var id: String { rawValue }
+
+    var titleKey: String {
+        "topology.highlight.\(rawValue)"
+    }
 
     var modelLimit: Int? {
         switch self {
@@ -21,7 +27,12 @@ struct TopologyGraph {
     let columns: [TopologyColumn]
     let edges: [TopologyEdge]
 
-    static func make(gateways: [AdminGateway], providers: [AdminProvider], logs: [AdminLog]) -> TopologyGraph {
+    static func make(
+        gateways: [AdminGateway],
+        providers: [AdminProvider],
+        logs: [AdminLog],
+        locale: Locale = Locale(identifier: "en")
+    ) -> TopologyGraph {
         let gatewayByID = Dictionary(uniqueKeysWithValues: gateways.map { ($0.id, $0) })
         let providerByID = Dictionary(uniqueKeysWithValues: providers.map { ($0.id, $0) })
         let nodeStats = buildNodeStats(logs: logs, gateways: gateways)
@@ -77,7 +88,7 @@ struct TopologyGraph {
             return TopologyNode(
                 id: providerID,
                 title: providerID,
-                subtitle: "UNKNOWN PROVIDER",
+                subtitle: L10n.string(L10n.topologyUnknownProvider, locale: locale),
                 totalTokens: stats.totalTokens,
                 requestCount: stats.requestCount,
                 cachedTokens: stats.cachedTokens,
@@ -123,9 +134,9 @@ struct TopologyGraph {
 
         return TopologyGraph(
             columns: [
-                TopologyColumn(title: "Entrypoints", nodes: entrypointNodes),
-                TopologyColumn(title: "Gateways", nodes: gatewayNodes),
-                TopologyColumn(title: "Providers", nodes: providerNodes)
+                TopologyColumn(titleKey: L10n.topologyColumnsEntrypoints, nodes: entrypointNodes),
+                TopologyColumn(titleKey: L10n.topologyColumnsGateways, nodes: gatewayNodes),
+                TopologyColumn(titleKey: L10n.topologyColumnsProviders, nodes: providerNodes)
             ],
             edges: edges
         )
@@ -239,7 +250,7 @@ struct TopologyGraph {
 
 struct TopologyColumn: Identifiable {
     let id = UUID()
-    let title: String
+    let titleKey: String
     let nodes: [TopologyNode]
 }
 

@@ -60,6 +60,7 @@ struct TrafficTrendSummaryItem: Equatable {
 }
 
 struct TrafficAnalyticsModel {
+    let locale: Locale
     let totalRequests: Int
     let errorCount: Int
     let successCount: Int
@@ -111,67 +112,77 @@ struct TrafficAnalyticsModel {
 
         return [
             TrafficKpiStripItem(
-                title: "Requests / min",
+                title: L10n.string("traffic.kpi.requests_per_min", locale: locale),
                 value: requestsPerMinuteText,
                 detailRows: topGatewayStats.map {
                     TrafficKpiSupplementRow(
                         label: $0.gatewayID,
-                        value: "\(formatDecimal(requestsPerMinute(for: $0.requestCount, selectedPeriod: selectedPeriod))) rpm"
+                        value: L10n.formatted(
+                            "traffic.kpi.rpm_value",
+                            locale: locale,
+                            formatDecimal(requestsPerMinute(for: $0.requestCount, selectedPeriod: selectedPeriod))
+                        )
                     )
                 }
             ),
             TrafficKpiStripItem(
-                title: "Success Rate",
+                title: L10n.string("traffic.kpi.success_rate", locale: locale),
                 value: successRateText,
                 detailRows: topGatewayStats.map {
                     TrafficKpiSupplementRow(
                         label: $0.gatewayID,
-                        value: "\($0.successCount) ok / \($0.errorCount) err"
+                        value: L10n.formatted(
+                            "traffic.kpi.success_detail",
+                            locale: locale,
+                            Int64($0.successCount),
+                            Int64($0.errorCount)
+                        )
                     )
                 }
             ),
             TrafficKpiStripItem(
-                title: "Avg Latency",
+                title: L10n.string("traffic.kpi.avg_latency", locale: locale),
                 value: averageLatencyText,
                 detailRows: topGatewayStats.map {
                     TrafficKpiSupplementRow(
                         label: $0.gatewayID,
-                        value: "\($0.avgLatency) ms"
+                        value: L10n.durationMilliseconds($0.avgLatency, locale: locale)
                     )
                 }
             ),
             TrafficKpiStripItem(
-                title: "Total Tokens",
+                title: L10n.string("traffic.kpi.total_tokens", locale: locale),
                 value: totalTokensText,
                 detailRows: [
-                    TrafficKpiSupplementRow(label: "Input", value: formatInteger(totalInputTokens)),
-                    TrafficKpiSupplementRow(label: "Output", value: formatInteger(totalOutputTokens)),
-                    TrafficKpiSupplementRow(label: "Cached", value: formatInteger(totalCachedTokens))
+                    TrafficKpiSupplementRow(label: L10n.string("traffic.kpi.input", locale: locale), value: formatInteger(totalInputTokens)),
+                    TrafficKpiSupplementRow(label: L10n.string("traffic.kpi.output", locale: locale), value: formatInteger(totalOutputTokens)),
+                    TrafficKpiSupplementRow(label: L10n.string("traffic.kpi.cached", locale: locale), value: formatInteger(totalCachedTokens))
                 ]
             )
         ]
     }
 
-    static func make(logs: [AdminLog]) -> TrafficAnalyticsModel {
+    static func make(logs: [AdminLog], locale: Locale = .autoupdatingCurrent) -> TrafficAnalyticsModel {
         let totalRequests = logs.count
         let errorCount = logs.filter { $0.statusCode >= 400 || $0.error != nil }.count
         let successCount = max(totalRequests - errorCount, 0)
         let averageLatency = totalRequests > 0 ? logs.map(\.latencyMs).reduce(0, +) / totalRequests : 0
 
-        let topGatewayID = groupedMostFrequentValue(logs.map(\.gatewayID)) ?? "No gateway"
-        let topProviderID = groupedMostFrequentValue(logs.map(\.providerID)) ?? "No provider"
+        let topGatewayID = groupedMostFrequentValue(logs.map(\.gatewayID)) ?? L10n.string("traffic.routing.none.gateway", locale: locale)
+        let topProviderID = groupedMostFrequentValue(logs.map(\.providerID)) ?? L10n.string("traffic.routing.none.provider", locale: locale)
 
         return TrafficAnalyticsModel(
+            locale: locale,
             totalRequests: totalRequests,
             errorCount: errorCount,
             successCount: successCount,
-            averageLatencyText: "\(averageLatency) ms",
+            averageLatencyText: L10n.durationMilliseconds(averageLatency, locale: locale),
             requestsPerMinuteText: "0.0",
             successRateText: totalRequests > 0 ? formatPercent(Double(successCount) / Double(totalRequests) * 100.0) : "0.0%",
             totalTokensText: "0",
             topGatewayID: topGatewayID,
             topProviderID: topProviderID,
-            topModelName: groupedMostFrequentValue(logs.compactMap(\.model)) ?? "No model",
+            topModelName: groupedMostFrequentValue(logs.compactMap(\.model)) ?? L10n.string("traffic.routing.none.model", locale: locale),
             gatewayBreakdown: [],
             providerBreakdown: [],
             modelBreakdown: [],
@@ -185,33 +196,41 @@ struct TrafficAnalyticsModel {
             totalCachedTokens: logs.compactMap(\.cachedTokens).reduce(0, +),
             tokenTrendSeries: [],
             tokenTrendBuckets: [],
-            tokenTrendSummaryItems: defaultTokenTrendSummaryItems()
+            tokenTrendSummaryItems: defaultTokenTrendSummaryItems(locale: locale)
         )
     }
 
     static func make(
         overview: AdminStatsOverview?,
         trend: AdminStatsTrend?,
-        selectedPeriod: String
+        selectedPeriod: String,
+        locale: Locale = .autoupdatingCurrent
     ) -> TrafficAnalyticsModel {
         guard let overview else {
-            let tokenTrend = buildTokenTrend(from: trend)
+            let tokenTrend = buildTokenTrend(from: trend, locale: locale)
             return TrafficAnalyticsModel(
+                locale: locale,
                 totalRequests: 0,
                 errorCount: 0,
                 successCount: 0,
-                averageLatencyText: "0 ms",
+                averageLatencyText: L10n.durationMilliseconds(0, locale: locale),
                 requestsPerMinuteText: "0.0",
                 successRateText: "0.0%",
                 totalTokensText: "0",
-                topGatewayID: "No gateway",
-                topProviderID: "No provider",
-                topModelName: "No model",
+                topGatewayID: L10n.string("traffic.routing.none.gateway", locale: locale),
+                topProviderID: L10n.string("traffic.routing.none.provider", locale: locale),
+                topModelName: L10n.string("traffic.routing.none.model", locale: locale),
                 gatewayBreakdown: [],
                 providerBreakdown: [],
                 modelBreakdown: [],
                 trendPoints: trend?.data ?? [],
-                alerts: trend?.data.isEmpty == false ? [TrafficAlert(level: .info, title: "No overview data", detail: "Trend points are available but overview statistics are missing.")] : [],
+                alerts: trend?.data.isEmpty == false ? [
+                    TrafficAlert(
+                        level: .info,
+                        title: L10n.string("traffic.alert.overview_missing.title", locale: locale),
+                        detail: L10n.string("traffic.alert.overview_missing.detail", locale: locale)
+                    )
+                ] : [],
                 selectedPeriod: selectedPeriod,
                 hasData: false,
                 gatewayStatsForKpi: [],
@@ -227,49 +246,50 @@ struct TrafficAnalyticsModel {
         let gatewayBreakdown = overview.byGateway.map {
             TrafficBreakdownRow(
                 title: $0.gatewayID,
-                requestCountText: "\($0.requestCount) req",
-                latencyText: "\($0.avgLatency) ms",
-                errorText: "\($0.errorCount) errors",
+                requestCountText: L10n.formatted("traffic.breakdown.requests_value", locale: locale, Int64($0.requestCount)),
+                latencyText: L10n.durationMilliseconds($0.avgLatency, locale: locale),
+                errorText: L10n.formatted("traffic.breakdown.errors_value", locale: locale, Int64($0.errorCount)),
                 tokenText: formatInteger($0.totalTokens)
             )
         }
         let providerBreakdown = overview.byProvider.map {
             TrafficBreakdownRow(
                 title: $0.providerID,
-                requestCountText: "\($0.requestCount) req",
-                latencyText: "\($0.avgLatency) ms",
-                errorText: "\($0.errorCount) errors",
+                requestCountText: L10n.formatted("traffic.breakdown.requests_value", locale: locale, Int64($0.requestCount)),
+                latencyText: L10n.durationMilliseconds($0.avgLatency, locale: locale),
+                errorText: L10n.formatted("traffic.breakdown.errors_value", locale: locale, Int64($0.errorCount)),
                 tokenText: formatInteger($0.totalTokens)
             )
         }
         let modelBreakdown = overview.byModel.map {
             TrafficBreakdownRow(
                 title: $0.model,
-                requestCountText: "\($0.requestCount) req",
-                latencyText: "\($0.avgLatency) ms",
-                errorText: "\($0.errorCount) errors",
+                requestCountText: L10n.formatted("traffic.breakdown.requests_value", locale: locale, Int64($0.requestCount)),
+                latencyText: L10n.durationMilliseconds($0.avgLatency, locale: locale),
+                errorText: L10n.formatted("traffic.breakdown.errors_value", locale: locale, Int64($0.errorCount)),
                 tokenText: formatInteger($0.totalTokens)
             )
         }
 
-        let tokenTrend = buildTokenTrend(from: trend)
+        let tokenTrend = buildTokenTrend(from: trend, locale: locale)
 
         return TrafficAnalyticsModel(
+            locale: locale,
             totalRequests: overview.totalRequests,
             errorCount: overview.errorRequests,
             successCount: overview.successfulRequests,
-            averageLatencyText: "\(averageLatency(from: overview.byGateway, fallback: trend?.data)) ms",
+            averageLatencyText: L10n.durationMilliseconds(averageLatency(from: overview.byGateway, fallback: trend?.data), locale: locale),
             requestsPerMinuteText: formatDecimal(overview.requestsPerMinute),
             successRateText: formatPercent(overview.successRate),
             totalTokensText: formatInteger(overview.totalTokens),
-            topGatewayID: overview.byGateway.first?.gatewayID ?? "No gateway",
-            topProviderID: overview.byProvider.first?.providerID ?? "No provider",
-            topModelName: overview.byModel.first?.model ?? "No model",
+            topGatewayID: overview.byGateway.first?.gatewayID ?? L10n.string("traffic.routing.none.gateway", locale: locale),
+            topProviderID: overview.byProvider.first?.providerID ?? L10n.string("traffic.routing.none.provider", locale: locale),
+            topModelName: overview.byModel.first?.model ?? L10n.string("traffic.routing.none.model", locale: locale),
             gatewayBreakdown: gatewayBreakdown,
             providerBreakdown: providerBreakdown,
             modelBreakdown: modelBreakdown,
             trendPoints: trend?.data ?? [],
-            alerts: buildAlerts(overview: overview, trend: trend),
+            alerts: buildAlerts(overview: overview, trend: trend, locale: locale),
             selectedPeriod: selectedPeriod,
             hasData: overview.totalRequests > 0,
             gatewayStatsForKpi: overview.byGateway,
@@ -322,15 +342,15 @@ private func averageLatency(from gatewayStats: [AdminGatewayStats], fallback tre
     return trend.map(\.avgLatency).reduce(0, +) / trend.count
 }
 
-private func buildAlerts(overview: AdminStatsOverview, trend: AdminStatsTrend?) -> [TrafficAlert] {
+private func buildAlerts(overview: AdminStatsOverview, trend: AdminStatsTrend?, locale: Locale) -> [TrafficAlert] {
     var alerts: [TrafficAlert] = []
 
     if overview.errorRequests > 0 {
         alerts.append(
             TrafficAlert(
                 level: .error,
-                title: "Request errors detected",
-                detail: "\(overview.errorRequests) requests failed in the selected period."
+                title: L10n.string("traffic.alert.request_errors.title", locale: locale),
+                detail: L10n.formatted("traffic.alert.request_errors.detail", locale: locale, Int64(overview.errorRequests))
             )
         )
     }
@@ -339,8 +359,8 @@ private func buildAlerts(overview: AdminStatsOverview, trend: AdminStatsTrend?) 
         alerts.append(
             TrafficAlert(
                 level: .warning,
-                title: "Latency elevated",
-                detail: "One or more gateways are averaging above 1000 ms."
+                title: L10n.string("traffic.alert.latency_elevated.title", locale: locale),
+                detail: L10n.string("traffic.alert.latency_elevated.detail", locale: locale)
             )
         )
     }
@@ -349,16 +369,16 @@ private func buildAlerts(overview: AdminStatsOverview, trend: AdminStatsTrend?) 
         alerts.append(
             TrafficAlert(
                 level: .info,
-                title: "No traffic yet",
-                detail: "No requests were recorded in the selected period."
+                title: L10n.string("traffic.alert.no_traffic.title", locale: locale),
+                detail: L10n.string("traffic.alert.no_traffic.detail", locale: locale)
             )
         )
     } else if let trend, trend.data.last?.requestCount == 0 {
         alerts.append(
             TrafficAlert(
                 level: .info,
-                title: "Latest bucket is idle",
-                detail: "The most recent trend bucket shows no traffic."
+                title: L10n.string("traffic.alert.latest_bucket_idle.title", locale: locale),
+                detail: L10n.string("traffic.alert.latest_bucket_idle.detail", locale: locale)
             )
         )
     }
@@ -413,23 +433,24 @@ private func summedCachedTokens(from trend: AdminStatsTrend?) -> Int {
     trend?.data.map(\.cachedTokens).reduce(0, +) ?? 0
 }
 
-private func defaultTokenTrendSummaryItems() -> [TrafficTrendSummaryItem] {
+private func defaultTokenTrendSummaryItems(locale: Locale) -> [TrafficTrendSummaryItem] {
     [
-        TrafficTrendSummaryItem(title: "Peak Total Tokens", value: "0"),
-        TrafficTrendSummaryItem(title: "Top Model Share", value: "No model"),
-        TrafficTrendSummaryItem(title: "Peak Bucket Errors", value: "0")
+        TrafficTrendSummaryItem(title: L10n.string("traffic.summary.peak_total_tokens", locale: locale), value: "0"),
+        TrafficTrendSummaryItem(title: L10n.string("traffic.summary.top_model_share", locale: locale), value: L10n.string("traffic.summary.no_model", locale: locale)),
+        TrafficTrendSummaryItem(title: L10n.string("traffic.summary.peak_bucket_errors", locale: locale), value: "0")
     ]
 }
 
 private func buildTokenTrend(
-    from trend: AdminStatsTrend?
+    from trend: AdminStatsTrend?,
+    locale: Locale
 ) -> (
     series: [TrafficTokenTrendSeries],
     buckets: [TrafficTokenTrendBucket],
     summaryItems: [TrafficTrendSummaryItem]
 ) {
     guard let trend, !trend.data.isEmpty else {
-        return ([], [], defaultTokenTrendSummaryItems())
+        return ([], [], defaultTokenTrendSummaryItems(locale: locale))
     }
 
     let modelTotals = trend.data.reduce(into: [String: Int]()) { partialResult, point in
@@ -450,17 +471,25 @@ private func buildTokenTrend(
 
     let topModelNameSet = Set(topModelNames)
     let includesOther = modelTotals.keys.contains { !topModelNameSet.contains($0) }
-    let seriesNames = topModelNames + (includesOther ? [otherTokenTrendLabel] : [])
-    var seriesValues: [String: [Int]] = Dictionary(uniqueKeysWithValues: seriesNames.map { ($0, [Int]()) })
+    let otherTokenTrendLabel = L10n.string("traffic.label.other", locale: locale)
+    let otherTokenTrendKey = "__other__"
+    let seriesKeys = topModelNames + (includesOther ? [otherTokenTrendKey] : [])
+    var seriesValues: [String: [Int]] = Dictionary(uniqueKeysWithValues: seriesKeys.map { ($0, [Int]()) })
     var buckets: [TrafficTokenTrendBucket] = []
 
     for point in trend.data {
         var aggregatedRows: [String: TrafficTokenTrendBucketRow] = [:]
 
         for bucket in point.byModel {
-            let rowName = topModelNameSet.contains(bucket.model) ? bucket.model : otherTokenTrendLabel
-            let existing = aggregatedRows[rowName] ?? TrafficTokenTrendBucketRow(
-                modelName: rowName,
+            let rowKey = topModelNameSet.contains(bucket.model) ? bucket.model : otherTokenTrendKey
+            let displayName = tokenTrendDisplayName(
+                for: rowKey,
+                originalModelName: bucket.model,
+                otherLabel: otherTokenTrendLabel,
+                locale: locale
+            )
+            let existing = aggregatedRows[rowKey] ?? TrafficTokenTrendBucketRow(
+                modelName: displayName,
                 totalTokens: 0,
                 inputTokens: 0,
                 outputTokens: 0,
@@ -468,8 +497,8 @@ private func buildTokenTrend(
                 requestCount: 0,
                 errorCount: 0
             )
-            aggregatedRows[rowName] = TrafficTokenTrendBucketRow(
-                modelName: rowName,
+            aggregatedRows[rowKey] = TrafficTokenTrendBucketRow(
+                modelName: displayName,
                 totalTokens: existing.totalTokens + bucket.totalTokens,
                 inputTokens: existing.inputTokens + bucket.inputTokens,
                 outputTokens: existing.outputTokens + bucket.outputTokens,
@@ -479,8 +508,8 @@ private func buildTokenTrend(
             )
         }
 
-        for name in seriesNames {
-            seriesValues[name, default: []].append(aggregatedRows[name]?.totalTokens ?? 0)
+        for key in seriesKeys {
+            seriesValues[key, default: []].append(aggregatedRows[key]?.totalTokens ?? 0)
         }
 
         let rows = aggregatedRows.values
@@ -502,10 +531,10 @@ private func buildTokenTrend(
         )
     }
 
-    let series = seriesNames.map { name in
-        let bucketValues = seriesValues[name] ?? []
+    let series = seriesKeys.map { key in
+        let bucketValues = seriesValues[key] ?? []
         return TrafficTokenTrendSeries(
-            modelName: name,
+            modelName: tokenTrendDisplayName(for: key, originalModelName: key, otherLabel: otherTokenTrendLabel, locale: locale),
             bucketValues: bucketValues,
             totalTokens: bucketValues.reduce(0, +)
         )
@@ -520,18 +549,31 @@ private func buildTokenTrend(
        overallTotalTokens > 0 {
         topModelShareValue = "\(topModelName) \(formatPercent(Double(topModelTotal) / Double(overallTotalTokens) * 100.0))"
     } else {
-        topModelShareValue = "No model"
+        topModelShareValue = L10n.string("traffic.summary.no_model", locale: locale)
     }
 
     return (
         series,
         buckets,
         [
-            TrafficTrendSummaryItem(title: "Peak Total Tokens", value: formatInteger(peakTotalTokens)),
-            TrafficTrendSummaryItem(title: "Top Model Share", value: topModelShareValue),
-            TrafficTrendSummaryItem(title: "Peak Bucket Errors", value: String(peakBucketErrors))
+            TrafficTrendSummaryItem(title: L10n.string("traffic.summary.peak_total_tokens", locale: locale), value: formatInteger(peakTotalTokens)),
+            TrafficTrendSummaryItem(title: L10n.string("traffic.summary.top_model_share", locale: locale), value: topModelShareValue),
+            TrafficTrendSummaryItem(title: L10n.string("traffic.summary.peak_bucket_errors", locale: locale), value: String(peakBucketErrors))
         ]
     )
 }
 
-private let otherTokenTrendLabel = "Other"
+private func tokenTrendDisplayName(
+    for key: String,
+    originalModelName: String,
+    otherLabel: String,
+    locale: Locale
+) -> String {
+    if key == "__other__" {
+        return otherLabel
+    }
+    if originalModelName == otherLabel {
+        return L10n.string(L10n.trafficLabelOtherModel, locale: locale)
+    }
+    return originalModelName
+}

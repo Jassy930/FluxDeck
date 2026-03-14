@@ -1,38 +1,46 @@
 import SwiftUI
 
+enum ShellConnectionState: Equatable {
+    case syncing
+    case offline
+    case connected
+}
+
 struct ShellStatusSummary {
-    let connectionLabel: String
-    let gatewayLabel: String
-    let errorLabel: String
+    let connectionState: ShellConnectionState
+    let runningGatewayCount: Int
+    let alertCount: Int
     let connectionColor: DesignTokens.SemanticColor
     let gatewayColor: DesignTokens.SemanticColor
     let errorColor: DesignTokens.SemanticColor
 
-    static func make(isLoading: Bool, loadError: String?, gateways: [AdminGateway]) -> ShellStatusSummary {
+    static func make(
+        isLoading: Bool,
+        loadError: String?,
+        gateways: [AdminGateway],
+        locale _: Locale = .autoupdatingCurrent
+    ) -> ShellStatusSummary {
         let runningCount = gateways.filter { runtimeCategory(for: $0) == .running }.count
         let gatewayErrorCount = gateways.filter { runtimeCategory(for: $0) == .error }.count
         let alertCount = gatewayErrorCount + (loadError == nil ? 0 : 1)
 
-        let connectionLabel: String
+        let connectionState: ShellConnectionState
         let connectionColor: DesignTokens.SemanticColor
         if isLoading {
-            connectionLabel = "Syncing"
+            connectionState = .syncing
             connectionColor = DesignTokens.statusColors.warning
         } else if gateways.isEmpty, loadError != nil {
-            connectionLabel = "Offline"
+            connectionState = .offline
             connectionColor = DesignTokens.statusColors.error
         } else {
-            connectionLabel = "Connected"
+            connectionState = .connected
             connectionColor = DesignTokens.statusColors.running
         }
 
-        let gatewayLabel = runningCount == 1 ? "1 running" : "\(runningCount) running"
-        let errorLabel = alertCount == 1 ? "1 alert" : "\(alertCount) alerts"
-
         return ShellStatusSummary(
-            connectionLabel: connectionLabel,
-            gatewayLabel: gatewayLabel,
-            errorLabel: errorLabel,
+            connectionState: connectionState,
+            runningGatewayCount: runningCount,
+            alertCount: alertCount,
             connectionColor: connectionColor,
             gatewayColor: runningCount > 0 ? DesignTokens.statusColors.running : DesignTokens.statusColors.inactive,
             errorColor: alertCount > 0 ? DesignTokens.statusColors.error : DesignTokens.statusColors.inactive
@@ -75,7 +83,7 @@ struct AppShellView<Content: View>: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-                .ignoresSafeArea()
+            .ignoresSafeArea()
 
             HStack(spacing: 0) {
                 SidebarView(

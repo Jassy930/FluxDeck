@@ -5,14 +5,12 @@ struct ProviderWorkspaceCard {
     let title: String
     let kindBadge: String
     let endpointText: String
-    let modelCountText: String
-    let statusText: String
-    let healthStatusText: String
+    let modelCount: Int
+    let isEnabled: Bool
+    let healthStatus: String
     let healthDetailText: String?
 
     static func make(provider: AdminProvider, healthStates: [AdminProviderHealthState] = []) -> ProviderWorkspaceCard {
-        let modelCount = provider.models.count
-        let modelCountText = modelCount == 1 ? "1 model" : "\(modelCount) models"
         let health = preferredHealthState(for: provider.id, states: healthStates)
 
         return ProviderWorkspaceCard(
@@ -20,52 +18,53 @@ struct ProviderWorkspaceCard {
             title: provider.name,
             kindBadge: provider.kind.uppercased(),
             endpointText: provider.baseURL,
-            modelCountText: modelCountText,
-            statusText: provider.enabled ? "ENABLED" : "DISABLED",
-            healthStatusText: health?.status.uppercased() ?? "HEALTHY",
-            healthDetailText: health?.lastFailureReason
+            modelCount: provider.models.count,
+            isEnabled: provider.enabled,
+            healthStatus: normalizedHealthStatus(health?.status),
+            healthDetailText: nonEmpty(health?.lastFailureReason)
         )
     }
+}
+
+struct GatewayRouteTargetSummary: Equatable {
+    let providerId: String
+    let healthStatus: String?
 }
 
 struct GatewayWorkspaceCard {
     let id: String
     let title: String
     let endpointText: String
-    let runtimeBadge: String
+    let runtimeState: GatewayRuntimeCategory
     let providerText: String
-    let activeProviderText: String
-    let routeSummaryText: String
-    let healthSummaryText: String
-    let autoStartText: String
+    let activeProviderText: String?
+    let routeTargets: [GatewayRouteTargetSummary]
+    let healthSummary: AdminGatewayHealthSummary?
+    let autoStartEnabled: Bool
     let lastErrorText: String?
 
     static func make(gateway: AdminGateway) -> GatewayWorkspaceCard {
         let category = runtimeCategory(for: gateway)
-        let routeSummary = gateway.routeTargets
+        let routeTargets = gateway.routeTargets
             .sorted { $0.priority < $1.priority }
             .map { target in
-                if let health = nonEmpty(target.healthStatus) {
-                    return "\(target.providerId) [\(health)]"
-                }
-                return target.providerId
+                GatewayRouteTargetSummary(
+                    providerId: target.providerId,
+                    healthStatus: nonEmpty(target.healthStatus).map(normalizedHealthStatus)
+                )
             }
-            .joined(separator: " -> ")
-        let summary = gateway.healthSummary.map { healthSummary in
-            "\(healthSummary.healthyCount) healthy · \(healthSummary.degradedCount) degraded · \(healthSummary.unhealthyCount) unhealthy"
-        } ?? "No health summary"
 
         return GatewayWorkspaceCard(
             id: gateway.id,
             title: gateway.name,
             endpointText: "\(gateway.listenHost):\(gateway.listenPort)",
-            runtimeBadge: category.rawValue.uppercased(),
+            runtimeState: category,
             providerText: gateway.defaultProviderId,
-            activeProviderText: gateway.activeProviderId ?? "Idle",
-            routeSummaryText: routeSummary.isEmpty ? gateway.defaultProviderId : routeSummary,
-            healthSummaryText: summary,
-            autoStartText: gateway.autoStart ? "ON" : "OFF",
-            lastErrorText: gateway.lastError
+            activeProviderText: nonEmpty(gateway.activeProviderId),
+            routeTargets: routeTargets,
+            healthSummary: gateway.healthSummary,
+            autoStartEnabled: gateway.autoStart,
+            lastErrorText: nonEmpty(gateway.lastError)
         )
     }
 }
@@ -83,4 +82,23 @@ private func nonEmpty(_ value: String?) -> String? {
         return nil
     }
     return value
+}
+
+private func normalizedHealthStatus(_ rawValue: String?) -> String {
+    let normalized = rawValue?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+
+    switch normalized {
+    case "degraded":
+        return "degraded"
+    case "unhealthy":
+        return "unhealthy"
+    case "probing":
+        return "probing"
+    case "healthy":
+        return "healthy"
+    default:
+        return "unknown"
+    }
 }

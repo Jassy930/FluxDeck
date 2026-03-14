@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(\.locale) private var locale
     @AppStorage("fluxdeck.native.admin_base_url") private var persistedAdminBaseURL = defaultAdminBaseURL
+    @AppStorage("fluxdeck.native.language_preference") private var persistedLanguagePreference = AppLanguage.system.storageValue
     @State private var providers: [AdminProvider] = []
     @State private var providerHealthStates: [AdminProviderHealthState] = []
     @State private var gateways: [AdminGateway] = []
@@ -40,23 +42,32 @@ struct ContentView: View {
         ShellStatusSummary.make(
             isLoading: isLoading,
             loadError: loadError,
-            gateways: gateways
+            gateways: gateways,
+            locale: locale
         )
     }
 
     private var shellToolbarModel: ShellToolbarModel {
         ShellToolbarModel.make(
-            title: selectedSection?.rawValue ?? SidebarSection.overview.rawValue,
+            title: L10n.string(selectedSection?.titleKey ?? SidebarSection.overview.titleKey, locale: locale),
             adminBaseURL: client.displayBaseURL,
             lastRefreshText: lastRefreshedAt.map { Self.refreshFormatter.string(from: $0) },
             isRefreshing: isLoading || isSubmitting,
-            statusSummary: shellStatusSummary
+            statusSummary: shellStatusSummary,
+            locale: locale
         )
     }
 
     private var client: AdminApiClient {
         let url = normalizedAdminBaseURL(persistedAdminBaseURL) ?? URL(string: defaultAdminBaseURL)!
         return AdminApiClient(baseURL: url)
+    }
+
+    private var selectedLanguageBinding: Binding<AppLanguage> {
+        Binding(
+            get: { AppLanguage.from(storageValue: persistedLanguagePreference) },
+            set: { persistedLanguagePreference = $0.storageValue }
+        )
     }
 
     private var logsTaskKey: String {
@@ -174,7 +185,7 @@ struct ContentView: View {
             )
         }
         .alert(
-            "Delete Provider?",
+            L10n.string("dialog.delete_provider.title", locale: locale),
             isPresented: Binding(
                 get: { providerPendingDelete != nil },
                 set: { isPresented in
@@ -184,7 +195,7 @@ struct ContentView: View {
                 }
             ),
             actions: {
-                Button("Delete", role: .destructive) {
+                Button(L10n.string("dialog.delete.action.delete", locale: locale), role: .destructive) {
                     guard let provider = providerPendingDelete else {
                         return
                     }
@@ -193,17 +204,17 @@ struct ContentView: View {
                         await deleteProvider(provider)
                     }
                 }
-                Button("Cancel", role: .cancel) {
+                Button(L10n.string("dialog.delete.action.cancel", locale: locale), role: .cancel) {
                     providerPendingDelete = nil
                 }
             },
             message: {
                 let providerID = providerPendingDelete?.id ?? "provider"
-                Text("Delete `\(providerID)` permanently. If any Gateway still references this Provider, the operation will fail.")
+                Text(L10n.formatted("dialog.delete_provider.message", locale: locale, providerID))
             }
         )
         .alert(
-            "Delete Gateway?",
+            L10n.string("dialog.delete_gateway.title", locale: locale),
             isPresented: Binding(
                 get: { gatewayPendingDelete != nil },
                 set: { isPresented in
@@ -213,7 +224,7 @@ struct ContentView: View {
                 }
             ),
             actions: {
-                Button("Delete", role: .destructive) {
+                Button(L10n.string("dialog.delete.action.delete", locale: locale), role: .destructive) {
                     guard let gateway = gatewayPendingDelete else {
                         return
                     }
@@ -222,13 +233,13 @@ struct ContentView: View {
                         await deleteGateway(gateway)
                     }
                 }
-                Button("Cancel", role: .cancel) {
+                Button(L10n.string("dialog.delete.action.cancel", locale: locale), role: .cancel) {
                     gatewayPendingDelete = nil
                 }
             },
             message: {
                 let gatewayID = gatewayPendingDelete?.id ?? "gateway"
-                Text("Delete `\(gatewayID)` permanently. This does not require deleting its Provider first. If this Gateway is running, the system will stop it before deletion.")
+                Text(L10n.formatted("dialog.delete_gateway.message", locale: locale, gatewayID))
             }
         )
     }
@@ -241,7 +252,8 @@ struct ContentView: View {
                 model: OverviewDashboardModel.make(
                     providers: providers,
                     gateways: gateways,
-                    logs: dashboardLogs
+                    logs: dashboardLogs,
+                    locale: locale
                 ),
                 isLoading: isLoading,
                 logs: recentLogs(dashboardLogs),
@@ -336,7 +348,8 @@ struct ContentView: View {
                 model: TrafficAnalyticsModel.make(
                     overview: trafficOverview,
                     trend: trafficTrend,
-                    selectedPeriod: selectedTrafficPeriod
+                    selectedPeriod: selectedTrafficPeriod,
+                    locale: locale
                 ),
                 isLoading: isTrafficLoading,
                 error: trafficError,
@@ -360,25 +373,29 @@ struct ContentView: View {
                 graph: TopologyGraph.make(
                     gateways: gateways,
                     providers: providers,
-                    logs: dashboardLogs
+                    logs: dashboardLogs,
+                    locale: locale
                 )
             )
         case .routeMap:
             PlaceholderDetailView(
-                title: "Route Map",
+                title: L10n.string("placeholder.route_map.title", locale: locale),
                 systemImage: SidebarSection.routeMap.icon,
-                message: "Route map visualization will be added in the redesigned native workbench."
+                message: L10n.string("placeholder.route_map.message", locale: locale)
             )
         case .settings:
             SettingsPanelView(
                 adminURLInput: $adminBaseURLInput,
+                selectedLanguage: selectedLanguageBinding,
                 resolvedAdminURL: client.displayBaseURL,
                 isBusy: isLoading || isSubmitting,
                 errorMessage: settingsError,
                 model: SettingsPanelModel.make(
                     adminBaseURL: client.displayBaseURL,
                     isLoading: isLoading || isSubmitting,
-                    hasError: settingsError != nil
+                    hasError: settingsError != nil,
+                    selectedLanguage: selectedLanguageBinding.wrappedValue,
+                    locale: selectedLanguageBinding.wrappedValue.resolvedLocale
                 ),
                 onApply: { await applyAdminBaseURL() },
                 onReset: {
@@ -398,7 +415,7 @@ struct ContentView: View {
                 .font(.caption)
                 .lineLimit(2)
             Spacer()
-            Button("Retry") {
+            Button(L10n.string("shell.error.retry", locale: locale)) {
                 Task {
                     await refreshAll()
                 }
@@ -409,7 +426,7 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Refresh error: \(loadError)")
+        .accessibilityLabel(L10n.formatted("shell.error.refresh_accessibility", locale: locale, loadError))
     }
 
     @MainActor
@@ -493,7 +510,7 @@ struct ContentView: View {
                 editingProvider = nil
             }
             loadError = nil
-            operationNotice = "Provider 已删除。"
+            operationNotice = L10n.string("admin.provider.notice.deleted", locale: locale)
             await refreshAll()
         } catch {
             loadError = error.localizedDescription
@@ -510,7 +527,12 @@ struct ContentView: View {
         do {
             let result = try await client.probeProvider(id: provider.id)
             loadError = nil
-            operationNotice = "Provider \(provider.id) 已进入 \(result.status) 探测状态。"
+            operationNotice = L10n.formatted(
+                L10n.adminProviderProbeStarted,
+                locale: locale,
+                provider.id,
+                L10n.providerHealthStatus(result.status, locale: locale)
+            )
             await refreshAll()
         } catch {
             loadError = error.localizedDescription
@@ -602,7 +624,7 @@ struct ContentView: View {
         return formatter
     }()
 
-    private static let logFilterAll = "All"
+    private static let logFilterAll = "__all__"
     private static let dashboardLogLimit = 20
     private static let logsPageLimit = 50
     private static let defaultTrafficPeriod = "1h"
@@ -725,7 +747,7 @@ struct ContentView: View {
     @MainActor
     private func applyAdminBaseURL() async {
         guard let normalizedURL = normalizedAdminBaseURL(adminBaseURLInput) else {
-            settingsError = "Admin URL 仅支持 http/https，例如 http://127.0.0.1:7777。"
+            settingsError = L10n.string("settings.connection.validation.invalid_url", locale: locale)
             return
         }
 
@@ -755,379 +777,6 @@ private func providersAndGatewaysIDs(_ values: [String]) -> [String] {
     Array(Set(values)).sorted()
 }
 
-private struct OverviewView: View {
-    let metrics: DashboardMetrics
-    let isLoading: Bool
-    let logs: [AdminLog]
-    let onOpenAllLogs: () -> Void
-    let onDrillDownLog: (AdminLog) -> Void
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Overview")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 180), spacing: 12)],
-                    spacing: 12
-                ) {
-                    MetricCard(title: "Providers", value: "\(metrics.providerCount)", tint: .blue)
-                    MetricCard(title: "Gateways", value: "\(metrics.gatewayCount)", tint: .indigo)
-                    MetricCard(title: "Running", value: "\(metrics.runningGatewayCount)", tint: .green)
-                    MetricCard(title: "Errors", value: "\(metrics.errorGatewayCount)", tint: .red)
-                }
-
-                if isLoading {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Refreshing dashboard data...")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Recent Logs")
-                            .font(.headline)
-                        Spacer()
-                        Button("Open Logs") {
-                            onOpenAllLogs()
-                        }
-                        .buttonStyle(.link)
-                        .focusable(false)
-                    }
-
-                    if logs.isEmpty {
-                        Text("No recent logs.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(logs) { log in
-                            Button {
-                                onDrillDownLog(log)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Text(log.requestID)
-                                        .font(.caption.monospaced())
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                        .frame(width: 180, alignment: .leading)
-
-                                    Text("\(log.gatewayID) -> \(log.providerID)")
-                                        .font(.caption)
-                                        .lineLimit(1)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                                    Text("\(log.statusCode)")
-                                        .font(.caption.bold())
-                                        .foregroundStyle(color(for: log.statusCode))
-                                        .frame(width: 40, alignment: .trailing)
-
-                                    Text("\(log.latencyMs) ms")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 68, alignment: .trailing)
-
-                                    Text(log.createdAt)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                        .frame(width: 170, alignment: .trailing)
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                            .focusable(false)
-                            .accessibilityLabel("Open log \(log.requestID)")
-                        }
-                    }
-                }
-            }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func color(for statusCode: Int) -> Color {
-        switch statusCode {
-        case 200..<300:
-            return .green
-        case 400..<500:
-            return .orange
-        case 500..<600:
-            return .red
-        default:
-            return .secondary
-        }
-    }
-}
-
-private struct MetricCard: View {
-    let title: String
-    let value: String
-    let tint: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-                .foregroundStyle(tint)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-}
-
-private struct LogsPanelView: View {
-    let logs: [AdminLog]
-    let totalCount: Int
-    let isLoading: Bool
-    let error: String?
-    let gatewayOptions: [String]
-    let providerOptions: [String]
-    let statusOptions: [String]
-    @Binding var selectedGateway: String
-    @Binding var selectedProvider: String
-    @Binding var selectedStatus: String
-    @Binding var errorsOnly: Bool
-    let onClearFilters: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Logs")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            HStack(spacing: 12) {
-                Picker("Gateway", selection: $selectedGateway) {
-                    ForEach(gatewayOptions, id: \.self) { option in
-                        Text(option).tag(option)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Picker("Provider", selection: $selectedProvider) {
-                    ForEach(providerOptions, id: \.self) { option in
-                        Text(option).tag(option)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Picker("Status", selection: $selectedStatus) {
-                    ForEach(statusOptions, id: \.self) { option in
-                        Text(option).tag(option)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Toggle("Only Errors", isOn: $errorsOnly)
-                    .toggleStyle(.switch)
-
-                Spacer()
-
-                Button("Clear Filters") {
-                    onClearFilters()
-                }
-                .buttonStyle(.link)
-                .focusable(false)
-
-                Text("Showing \(logs.count) / \(totalCount)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let error {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-            ZStack {
-                List(logs) { log in
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text(log.requestID)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 170, alignment: .leading)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(log.gatewayID) -> \(log.providerID)")
-                                .font(.caption)
-                            Text(log.model ?? "-")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(width: 230, alignment: .leading)
-
-                        Text("\(log.statusCode)")
-                            .font(.caption.bold())
-                            .foregroundStyle(color(for: log.statusCode))
-                            .frame(width: 48, alignment: .leading)
-
-                        Text("\(log.latencyMs) ms")
-                            .font(.caption)
-                            .frame(width: 72, alignment: .leading)
-
-                        Text(log.createdAt)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-
-                        Spacer()
-                    }
-                    .padding(.vertical, 2)
-                }
-                .listStyle(.inset)
-
-                if isLoading && logs.isEmpty {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Loading logs...")
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.caption)
-                    .padding(12)
-                    .background(.thinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                } else if logs.isEmpty {
-                    EmptyStateView(
-                        title: "No logs",
-                        systemImage: "list.bullet.rectangle.portrait",
-                        message: "No request logs match current filters."
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .transaction { transaction in
-                transaction.animation = nil
-            }
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    }
-
-    private func color(for statusCode: Int) -> Color {
-        switch statusCode {
-        case 200..<300:
-            return .green
-        case 400..<500:
-            return .orange
-        case 500..<600:
-            return .red
-        default:
-            return .secondary
-        }
-    }
-}
-
-private struct SettingsView: View {
-    @Binding var adminURLInput: String
-    let resolvedAdminURL: String
-    let isBusy: Bool
-    let errorMessage: String?
-    let onApply: () async -> Void
-    let onReset: () -> Void
-
-    @FocusState private var isAddressFocused: Bool
-
-    var body: some View {
-        Form {
-            Section("Connection") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Admin API Endpoint", systemImage: "network")
-                        .font(.headline)
-
-                    Text("Configure the fluxd Admin API address used by this native shell.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    TextField("http://127.0.0.1:7777", text: $adminURLInput)
-                        .font(.system(.body, design: .monospaced))
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isAddressFocused)
-                        .onSubmit {
-                            Task {
-                                await onApply()
-                            }
-                        }
-
-                    if let errorMessage {
-                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .accessibilityLabel("Settings error: \(errorMessage)")
-                    }
-                }
-            }
-
-            Section("Applied") {
-                LabeledContent("Current Endpoint") {
-                    Text(resolvedAdminURL)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .lineLimit(1)
-                }
-
-                HStack(spacing: 10) {
-                    if isBusy {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Refreshing...")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Spacer()
-
-                    Button("Reset Default") {
-                        onReset()
-                        isAddressFocused = true
-                    }
-                    .focusable(false)
-                    .disabled(isBusy)
-
-                    Button("Apply & Refresh") {
-                        Task {
-                            await onApply()
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .focusable(false)
-                    .disabled(isBusy)
-                    .keyboardShortcut(.return, modifiers: [.command])
-                }
-            }
-
-            Section("Notes") {
-                Label("Default local endpoint: http://127.0.0.1:7777", systemImage: "checkmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Label("Only http/https URLs are accepted.", systemImage: "shield")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("This native shell only consumes fluxd Admin API and does not duplicate backend business logic.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
 private struct ProviderFormSheet: View {
     enum Mode {
         case create
@@ -1139,6 +788,7 @@ private struct ProviderFormSheet: View {
     let onCreate: (CreateProviderInput) async -> Void
     let onUpdate: (String, UpdateProviderInput) async -> Void
 
+    @Environment(\.locale) private var locale
     @Environment(\.dismiss) private var dismiss
 
     @State private var id: String
@@ -1194,60 +844,60 @@ private struct ProviderFormSheet: View {
                     providerSummaryCard
 
                     HStack(alignment: .top, spacing: 14) {
-                        SurfaceCard(title: "Identity") {
+                        SurfaceCard(title: L10n.string("provider_form.section.identity", locale: locale)) {
                             VStack(alignment: .leading, spacing: 12) {
                                 if isCreateMode {
-                                    providerField(title: "Provider ID", caption: "Stable routing key used across gateways.") {
+                                    providerField(title: L10n.string("provider_form.field.provider_id", locale: locale), caption: L10n.string("provider_form.field.provider_id.caption_create", locale: locale)) {
                                         textInput(placeholder: "provider_main", text: $id, monospaced: true)
                                     }
                                 } else {
-                                    providerField(title: "Provider ID", caption: "Locked after creation to keep downstream routes stable.") {
+                                    providerField(title: L10n.string("provider_form.field.provider_id", locale: locale), caption: L10n.string("provider_form.field.provider_id.caption_edit", locale: locale)) {
                                         readOnlyValue(id, monospaced: true)
                                     }
                                 }
 
-                                providerField(title: "Display Name") {
+                                providerField(title: L10n.string("provider_form.field.display_name", locale: locale)) {
                                     textInput(placeholder: "Main Provider", text: $name)
                                 }
 
-                                providerField(title: "Kind", caption: "Choose one of the supported upstream provider types.") {
+                                providerField(title: L10n.string("provider_form.field.kind", locale: locale), caption: L10n.string("provider_form.field.kind.caption", locale: locale)) {
                                     providerKindPicker(selection: $kind)
                                 }
                             }
                         }
                         .frame(maxWidth: .infinity)
 
-                        SurfaceCard(title: "Runtime") {
+                        SurfaceCard(title: L10n.string("provider_form.section.runtime", locale: locale)) {
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack {
-                                    Text(enabled ? "Routing enabled" : "Routing disabled")
+                                    Text(L10n.string(enabled ? "provider_form.runtime.routing_enabled" : "provider_form.runtime.routing_disabled", locale: locale))
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(DesignTokens.textPrimary)
                                     Spacer()
-                                    Toggle("Enabled", isOn: $enabled)
+                                    Toggle(L10n.string("provider_form.toggle.enabled", locale: locale), isOn: $enabled)
                                         .toggleStyle(.switch)
                                         .labelsHidden()
                                 }
 
-                                Text("Quick state snapshot for this upstream profile.")
+                                Text(L10n.string("provider_form.runtime.snapshot_caption", locale: locale))
                                     .font(.caption)
                                     .foregroundStyle(DesignTokens.textSecondary)
 
                                 dividerLine
 
                                 VStack(alignment: .leading, spacing: 10) {
-                                    providerMetaRow(label: "Status", value: enabled ? "Active" : "Disabled")
-                                    providerMetaRow(label: "Models", value: "\(parsedModelCount)")
-                                    providerMetaRow(label: "Auth", value: apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Missing" : "Configured")
+                                    providerMetaRow(label: L10n.string("provider_form.meta.status", locale: locale), value: L10n.string(enabled ? "provider_form.meta.status_active" : "provider_form.meta.status_disabled", locale: locale))
+                                    providerMetaRow(label: L10n.string("provider_form.meta.models", locale: locale), value: "\(parsedModelCount)")
+                                    providerMetaRow(label: L10n.string("provider_form.meta.auth", locale: locale), value: L10n.string(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "provider_form.meta.auth_missing" : "provider_form.meta.auth_configured", locale: locale))
                                 }
                             }
                         }
                         .frame(width: 220)
                     }
 
-                    SurfaceCard(title: "Connection") {
+                    SurfaceCard(title: L10n.string("provider_form.section.connection", locale: locale)) {
                         VStack(alignment: .leading, spacing: 12) {
-                            providerField(title: "Base URL", caption: "Use a full upstream endpoint, including the version path when needed.") {
+                            providerField(title: L10n.string("provider_form.field.base_url", locale: locale), caption: L10n.string("provider_form.field.base_url.caption", locale: locale)) {
                                 textInput(placeholder: "https://api.openai.com/v1", text: $baseURL, monospaced: true)
                             }
 
@@ -1256,15 +906,15 @@ private struct ProviderFormSheet: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 3) {
-                                        Text("API Key")
+                                        Text(L10n.string("provider_form.field.api_key", locale: locale))
                                             .font(.subheadline.weight(.semibold))
                                             .foregroundStyle(DesignTokens.textPrimary)
-                                        Text("Stored locally and used for upstream authentication.")
+                                        Text(L10n.string("provider_form.field.api_key.caption", locale: locale))
                                             .font(.caption)
                                             .foregroundStyle(DesignTokens.textSecondary)
                                     }
                                     Spacer()
-                                    Button(showApiKey ? "Hide" : "Reveal") {
+                                    Button(L10n.string(showApiKey ? "provider_form.action.hide" : "provider_form.action.reveal", locale: locale)) {
                                         showApiKey.toggle()
                                     }
                                     .buttonStyle(.plain)
@@ -1292,9 +942,9 @@ private struct ProviderFormSheet: View {
                         }
                     }
 
-                    SurfaceCard(title: "Models") {
+                    SurfaceCard(title: L10n.string("provider_form.section.models", locale: locale)) {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("List one or multiple models. Separate by comma or line break.")
+                            Text(L10n.string("provider_form.models.caption", locale: locale))
                                 .font(.caption)
                                 .foregroundStyle(DesignTokens.textSecondary)
 
@@ -1318,7 +968,7 @@ private struct ProviderFormSheet: View {
                                     .font(.caption)
                                     .foregroundStyle(DesignTokens.textSecondary)
                                 Spacer()
-                                Label(enabled ? "Ready for routing" : "Disabled from routing", systemImage: enabled ? "checkmark.circle.fill" : "pause.circle.fill")
+                                Label(L10n.string(enabled ? "provider_form.models.ready" : "provider_form.models.disabled", locale: locale), systemImage: enabled ? "checkmark.circle.fill" : "pause.circle.fill")
                                     .font(.caption)
                                     .foregroundStyle(enabled ? DesignTokens.statusColors.running.fill : DesignTokens.textSecondary)
                             }
@@ -1334,7 +984,7 @@ private struct ProviderFormSheet: View {
                                     Text(validationError)
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(DesignTokens.textPrimary)
-                                    Text("Please review the highlighted configuration before saving.")
+                                    Text(L10n.string("provider_form.validation.review", locale: locale))
                                         .font(.caption)
                                         .foregroundStyle(DesignTokens.textSecondary)
                                 }
@@ -1351,7 +1001,7 @@ private struct ProviderFormSheet: View {
 
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(isCreateMode ? "Create a reusable upstream profile" : "Update provider routing configuration")
+                    Text(L10n.string(isCreateMode ? "provider_form.footer.create" : "provider_form.footer.update", locale: locale))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(DesignTokens.textPrimary)
                     Text(parsedModelsPreview)
@@ -1361,7 +1011,7 @@ private struct ProviderFormSheet: View {
 
                 Spacer()
 
-                Button("Cancel") {
+                Button(L10n.string("common.action.cancel", locale: locale)) {
                     dismiss()
                 }
                 .buttonStyle(.plain)
@@ -1387,7 +1037,7 @@ private struct ProviderFormSheet: View {
                             ProgressView()
                                 .controlSize(.small)
                         }
-                        Text(isCreateMode ? "Create Provider" : "Save Changes")
+                        Text(L10n.string(isCreateMode ? "provider_form.action.create" : "common.action.save_changes", locale: locale))
                             .font(.subheadline.weight(.semibold))
                     }
                     .foregroundStyle(Color.white)
@@ -1427,10 +1077,10 @@ private struct ProviderFormSheet: View {
                 .frame(width: 28, height: 28)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(isCreateMode ? "Create Provider" : "Configure Provider")
+                Text(L10n.string(isCreateMode ? "provider_form.header.create" : "provider_form.header.edit", locale: locale))
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(DesignTokens.textPrimary)
-                Text("Manage upstream endpoint, API key and model routing in one compact control surface.")
+                Text(L10n.string("provider_form.header.subtitle", locale: locale))
                     .font(.caption)
                     .foregroundStyle(DesignTokens.textSecondary)
                     .lineLimit(1)
@@ -1439,7 +1089,7 @@ private struct ProviderFormSheet: View {
             Spacer()
 
             StatusPill(
-                text: enabled ? "Enabled" : "Disabled",
+                text: L10n.string(enabled ? "provider_form.status.enabled" : "provider_form.status.disabled", locale: locale),
                 semanticColor: enabled ? DesignTokens.statusColors.running : DesignTokens.statusColors.inactive
             )
         }
@@ -1451,14 +1101,14 @@ private struct ProviderFormSheet: View {
     private var providerSummaryCard: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(isCreateMode ? "Provider Profile" : "Provider Snapshot")
+                Text(L10n.string(isCreateMode ? "provider_form.summary.profile" : "provider_form.summary.snapshot", locale: locale))
                     .font(.caption2.weight(.semibold))
                     .textCase(.uppercase)
                     .foregroundStyle(DesignTokens.textSecondary)
-                Text(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled Provider" : name)
+                Text(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? L10n.string("provider_form.summary.untitled", locale: locale) : name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(DesignTokens.textPrimary)
-                Text(baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No endpoint configured" : baseURL)
+                Text(baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? L10n.string("provider_form.summary.no_endpoint", locale: locale) : baseURL)
                     .font(.caption.monospaced())
                     .foregroundStyle(DesignTokens.textSecondary)
                     .lineLimit(1)
@@ -1467,9 +1117,9 @@ private struct ProviderFormSheet: View {
             Spacer(minLength: 16)
 
             HStack(spacing: 8) {
-                compactMetric(title: "Kind", value: providerKindLabel(for: kind))
-                compactMetric(title: "Models", value: "\(parsedModelCount)")
-                compactMetric(title: "Auth", value: apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Off" : "On")
+                compactMetric(title: L10n.string("provider_form.metric.kind", locale: locale), value: providerKindLabel(for: kind))
+                compactMetric(title: L10n.string("provider_form.metric.models", locale: locale), value: "\(parsedModelCount)")
+                compactMetric(title: L10n.string("provider_form.metric.auth", locale: locale), value: L10n.string(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "provider_form.metric.auth_off" : "provider_form.metric.auth_on", locale: locale))
             }
         }
         .padding(.horizontal, 14)
@@ -1571,7 +1221,7 @@ private struct ProviderFormSheet: View {
     }
 
     private func providerKindPicker(selection: Binding<String>) -> some View {
-        Picker("Kind", selection: selection) {
+        Picker(L10n.string("provider_form.field.kind", locale: locale), selection: selection) {
             if let unsupportedKindLabel {
                 Text(unsupportedKindLabel)
                     .tag(kind)
@@ -1636,7 +1286,7 @@ private struct ProviderFormSheet: View {
             return nil
         }
 
-        return "Unsupported current value: \(kind)"
+        return L10n.formatted("provider_form.kind.unsupported_current_value", locale: locale, kind)
     }
 
     private func providerKindLabel(for rawValue: String) -> String {
@@ -1659,24 +1309,24 @@ private struct ProviderFormSheet: View {
             .filter { !$0.isEmpty }
 
         if isCreateMode && normalizedID.isEmpty {
-            validationError = "ID is required."
+            validationError = L10n.string("provider_form.validation.id_required", locale: locale)
             return
         }
 
         guard !normalizedName.isEmpty, !normalizedKind.isEmpty, !normalizedBaseURL.isEmpty, !normalizedApiKey.isEmpty else {
-            validationError = "Name, Kind, Base URL and API Key are required."
+            validationError = L10n.string("provider_form.validation.required_fields", locale: locale)
             return
         }
         guard ProviderKindOption(rawValue: normalizedKind) != nil else {
-            validationError = "Choose one of the supported provider kinds."
+            validationError = L10n.string("provider_form.validation.unsupported_kind", locale: locale)
             return
         }
         guard URL(string: normalizedBaseURL) != nil else {
-            validationError = "Base URL must be a valid URL."
+            validationError = L10n.string("provider_form.validation.invalid_base_url", locale: locale)
             return
         }
         guard !parsedModels.isEmpty else {
-            validationError = "At least one model is required."
+            validationError = L10n.string("provider_form.validation.model_required", locale: locale)
             return
         }
 
@@ -1714,8 +1364,11 @@ private struct ProviderFormSheet: View {
     }
 
     private var parsedModelsPreview: String {
-        let count = parsedModelCount
-        return count == 1 ? "1 model configured" : "\(count) models configured"
+        L10n.formatted(
+            parsedModelCount == 1 ? "provider_form.models.count.one" : "provider_form.models.count.other",
+            locale: locale,
+            Int64(parsedModelCount)
+        )
     }
 }
 
@@ -1759,7 +1412,7 @@ struct GatewayFormSnapshot: Equatable {
 }
 
 enum GatewayFormSupport {
-    static func providerOptions(providers: [AdminProvider], selectedProviderID: String) -> [GatewayPickerOption] {
+    static func providerOptions(providers: [AdminProvider], selectedProviderID: String, locale: Locale = .autoupdatingCurrent) -> [GatewayPickerOption] {
         let normalizedSelectedID = selectedProviderID.trimmingCharacters(in: .whitespacesAndNewlines)
         let baseOptions = providers.map { provider in
             GatewayPickerOption(id: provider.id, title: provider.id, subtitle: provider.name, isFallback: false)
@@ -1773,16 +1426,16 @@ enum GatewayFormSupport {
         return [
             GatewayPickerOption(
                 id: normalizedSelectedID,
-                title: "Current value: \(normalizedSelectedID)",
-                subtitle: "Unavailable provider",
+                title: L10n.formatted("gateway_form.option.current_value", locale: locale, normalizedSelectedID),
+                subtitle: L10n.string("gateway_form.option.unavailable_provider", locale: locale),
                 isFallback: true
             )
         ] + baseOptions
     }
 
-    static func protocolOptions(kind: GatewayProtocolKind, selectedValue: String) -> [GatewayPickerOption] {
+    static func protocolOptions(kind: GatewayProtocolKind, selectedValue: String, locale: Locale = .autoupdatingCurrent) -> [GatewayPickerOption] {
         let normalizedSelectedValue = selectedValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseOptions = defaultProtocolOptions(for: kind)
+        let baseOptions = defaultProtocolOptions(for: kind, locale: locale)
 
         guard !normalizedSelectedValue.isEmpty,
               baseOptions.contains(where: { $0.id == normalizedSelectedValue }) == false else {
@@ -1792,8 +1445,8 @@ enum GatewayFormSupport {
         return [
             GatewayPickerOption(
                 id: normalizedSelectedValue,
-                title: "Current value: \(normalizedSelectedValue)",
-                subtitle: "Unsupported saved value",
+                title: L10n.formatted("gateway_form.option.current_value", locale: locale, normalizedSelectedValue),
+                subtitle: L10n.string("gateway_form.option.unsupported_saved_value", locale: locale),
                 isFallback: true
             )
         ] + baseOptions
@@ -1810,7 +1463,8 @@ enum GatewayFormSupport {
         enabled: Bool,
         autoStart: Bool,
         protocolConfigJSON: String,
-        providers: [AdminProvider]
+        providers: [AdminProvider],
+        locale: Locale = .autoupdatingCurrent
     ) -> GatewayFormSnapshot {
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedHost = listenHost.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1818,20 +1472,20 @@ enum GatewayFormSupport {
         let normalizedProviderID = defaultProviderID.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedProtocolConfig = protocolConfigJSON.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let title = normalizedName.isEmpty ? "Untitled Gateway" : normalizedName
-        let endpoint = normalizedHost.isEmpty || normalizedPort.isEmpty ? "No endpoint configured" : "\(normalizedHost):\(normalizedPort)"
-        let protocolSummary = "\(protocolTitle(for: inboundProtocol, kind: .inbound)) -> \(protocolTitle(for: upstreamProtocol, kind: .upstream))"
+        let title = normalizedName.isEmpty ? L10n.string("gateway_form.summary.untitled", locale: locale) : normalizedName
+        let endpoint = normalizedHost.isEmpty || normalizedPort.isEmpty ? L10n.string("gateway_form.summary.no_endpoint", locale: locale) : "\(normalizedHost):\(normalizedPort)"
+        let protocolSummary = "\(protocolTitle(for: inboundProtocol, kind: .inbound, locale: locale)) -> \(protocolTitle(for: upstreamProtocol, kind: .upstream, locale: locale))"
         let routingMode: String
 
         if let parsed = try? JSONValue.parseObject(from: normalizedProtocolConfig.isEmpty ? "{}" : normalizedProtocolConfig), !parsed.isEmpty {
-            routingMode = "Mapped"
+            routingMode = L10n.string("gateway_form.routing.mapped", locale: locale)
         } else if upstreamProtocol.trimmingCharacters(in: .whitespacesAndNewlines) == "provider_default" {
-            routingMode = "Direct"
+            routingMode = L10n.string("gateway_form.routing.direct", locale: locale)
         } else {
-            routingMode = "Bridge"
+            routingMode = L10n.string("gateway_form.routing.bridge", locale: locale)
         }
 
-        let providerLabel = normalizedProviderID.isEmpty ? "Unassigned" : (providers.first(where: { $0.id == normalizedProviderID })?.id ?? normalizedProviderID)
+        let providerLabel = normalizedProviderID.isEmpty ? L10n.string("gateway_form.provider.unassigned", locale: locale) : (providers.first(where: { $0.id == normalizedProviderID })?.id ?? normalizedProviderID)
 
         _ = defaultModel
 
@@ -1840,23 +1494,28 @@ enum GatewayFormSupport {
             endpoint: endpoint,
             providerLabel: providerLabel,
             protocolSummary: protocolSummary,
-            runtimeStatus: enabled ? "Active" : "Disabled",
-            startupMode: autoStart ? "Automatic" : "Manual",
+            runtimeStatus: L10n.string(enabled ? "gateway_form.runtime.active" : "gateway_form.runtime.disabled", locale: locale),
+            startupMode: L10n.string(autoStart ? "gateway_form.startup.automatic" : "gateway_form.startup.manual", locale: locale),
             routingMode: routingMode,
-            footerSummary: endpoint == "No endpoint configured"
-                ? (autoStart ? "Auto Start On" : "Auto Start Off")
-                : "\(endpoint) · \(autoStart ? "Auto Start On" : "Auto Start Off")"
+            footerSummary: endpoint == L10n.string("gateway_form.summary.no_endpoint", locale: locale)
+                ? L10n.string(autoStart ? "gateway_form.footer.auto_start_on" : "gateway_form.footer.auto_start_off", locale: locale)
+                : L10n.formatted(
+                    "gateway_form.footer.endpoint_with_auto_start",
+                    locale: locale,
+                    endpoint,
+                    L10n.string(autoStart ? "gateway_form.footer.auto_start_on" : "gateway_form.footer.auto_start_off", locale: locale)
+                )
         )
     }
 
-    static func protocolTitle(for rawValue: String, kind: GatewayProtocolKind) -> String {
+    static func protocolTitle(for rawValue: String, kind: GatewayProtocolKind, locale: Locale = .autoupdatingCurrent) -> String {
         let normalizedRawValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !normalizedRawValue.isEmpty else {
             return "-"
         }
 
-        return defaultProtocolOptions(for: kind).first(where: { $0.id == normalizedRawValue })?.title ?? normalizedRawValue
+        return defaultProtocolOptions(for: kind, locale: locale).first(where: { $0.id == normalizedRawValue })?.title ?? normalizedRawValue
     }
 
     static func normalizedRouteTargets(
@@ -2016,25 +1675,30 @@ enum GatewayFormSupport {
         return normalizedRouteTargets(routeTargets: normalizedTargets, primaryProviderID: nextPrimary)
     }
 
-    private static func defaultProtocolOptions(for kind: GatewayProtocolKind) -> [GatewayPickerOption] {
+    private static func defaultProtocolOptions(for kind: GatewayProtocolKind, locale: Locale = .autoupdatingCurrent) -> [GatewayPickerOption] {
         switch kind {
         case .inbound:
             return ProviderKindOption.allCases.map { option in
                 GatewayPickerOption(
                     id: option.rawValue,
                     title: option.label,
-                    subtitle: option.inboundProtocolSubtitle,
+                    subtitle: option.inboundProtocolSubtitle(locale: locale),
                     isFallback: false
                 )
             }
         case .upstream:
             return [
-                GatewayPickerOption(id: "provider_default", title: "Provider Default", subtitle: "Delegate protocol to provider kind", isFallback: false),
+                GatewayPickerOption(
+                    id: "provider_default",
+                    title: L10n.string("gateway_form.protocol.provider_default", locale: locale),
+                    subtitle: L10n.string("gateway_form.protocol.provider_default.caption", locale: locale),
+                    isFallback: false
+                ),
             ] + ProviderKindOption.allCases.map { option in
                 GatewayPickerOption(
                     id: option.rawValue,
                     title: option.label,
-                    subtitle: option.upstreamProtocolSubtitle,
+                    subtitle: option.upstreamProtocolSubtitle(locale: locale),
                     isFallback: false
                 )
             }
@@ -2054,6 +1718,7 @@ private struct GatewayFormSheet: View {
     let onCreate: (CreateGatewayInput) async -> Void
     let onUpdate: (String, UpdateGatewayInput) async -> Void
 
+    @Environment(\.locale) private var locale
     @Environment(\.dismiss) private var dismiss
 
     @State private var id = ""
@@ -2129,100 +1794,103 @@ private struct GatewayFormSheet: View {
                     gatewaySummaryCard
 
                     HStack(alignment: .top, spacing: 14) {
-                        SurfaceCard(title: "Identity") {
+                        SurfaceCard(title: L10n.string("gateway_form.section.identity", locale: locale)) {
                             VStack(alignment: .leading, spacing: 12) {
                                 if isCreateMode {
-                                    gatewayField(title: "Gateway ID", caption: "Stable local route identifier used by admin workflows.") {
+                                    gatewayField(title: L10n.string("gateway_form.field.gateway_id", locale: locale), caption: L10n.string("gateway_form.field.gateway_id.caption_create", locale: locale)) {
                                         textInput(placeholder: "gateway_main", text: $id, monospaced: true)
                                     }
                                 } else {
-                                    gatewayField(title: "Gateway ID", caption: "Locked after creation to keep local clients and scripts stable.") {
+                                    gatewayField(title: L10n.string("gateway_form.field.gateway_id", locale: locale), caption: L10n.string("gateway_form.field.gateway_id.caption_edit", locale: locale)) {
                                         readOnlyValue(id, monospaced: true)
                                     }
                                 }
 
-                                gatewayField(title: "Display Name") {
+                                gatewayField(title: L10n.string("gateway_form.field.display_name", locale: locale)) {
                                     textInput(placeholder: "Gateway Main", text: $name)
                                 }
 
-                                gatewayField(title: "Default Provider", caption: "Choose the upstream provider that receives unmatched traffic.") {
+                                gatewayField(title: L10n.string("gateway_form.field.default_provider", locale: locale), caption: L10n.string("gateway_form.field.default_provider.caption", locale: locale)) {
                                     providerPicker
                                 }
 
-                                gatewayField(title: "Route Targets", caption: "Review the ordered failover chain here. Detailed editing lives in the Routing Targets panel.") {
+                                gatewayField(
+                                    title: L10n.string(L10n.gatewayFormRouteTargetsPreviewTitle, locale: locale),
+                                    caption: L10n.string(L10n.gatewayFormRouteTargetsPreviewCaption, locale: locale)
+                                ) {
                                     routeTargetPreview
                                 }
 
-                                gatewayField(title: "Default Model", caption: "Optional model hint for clients that omit the model field.") {
+                                gatewayField(title: L10n.string("gateway_form.field.default_model", locale: locale), caption: L10n.string("gateway_form.field.default_model.caption", locale: locale)) {
                                     textInput(placeholder: "gpt-4o-mini", text: $defaultModel, monospaced: true)
                                 }
                             }
                         }
                         .frame(maxWidth: .infinity)
 
-                        SurfaceCard(title: "Runtime") {
+                        SurfaceCard(title: L10n.string("gateway_form.section.runtime", locale: locale)) {
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack {
-                                    Text(enabled ? "Routing enabled" : "Routing disabled")
+                                    Text(L10n.string(enabled ? "gateway_form.runtime.routing_enabled" : "gateway_form.runtime.routing_disabled", locale: locale))
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(DesignTokens.textPrimary)
                                     Spacer()
-                                    Toggle("Enabled", isOn: $enabled)
+                                    Toggle(L10n.string("gateway_form.toggle.enabled", locale: locale), isOn: $enabled)
                                         .toggleStyle(.switch)
                                         .labelsHidden()
                                 }
 
                                 HStack {
-                                    Text(autoStart ? "Auto start on fluxd launch" : "Manual startup")
+                                    Text(L10n.string(autoStart ? "gateway_form.startup.auto_start_on_launch" : "gateway_form.startup.manual_short", locale: locale))
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(DesignTokens.textPrimary)
                                     Spacer()
-                                    Toggle("Auto Start", isOn: $autoStart)
+                                    Toggle(L10n.string("gateway_form.toggle.auto_start", locale: locale), isOn: $autoStart)
                                         .toggleStyle(.switch)
                                         .labelsHidden()
                                 }
 
-                                Text("Quick runtime snapshot for the current gateway profile.")
+                                Text(L10n.string("gateway_form.runtime.snapshot_caption", locale: locale))
                                     .font(.caption)
                                     .foregroundStyle(DesignTokens.textSecondary)
 
                                 dividerLine
 
                                 VStack(alignment: .leading, spacing: 10) {
-                                    gatewayMetaRow(label: "Status", value: snapshot.runtimeStatus)
-                                    gatewayMetaRow(label: "Startup", value: snapshot.startupMode)
-                                    gatewayMetaRow(label: "Endpoint", value: snapshot.endpoint)
-                                    gatewayMetaRow(label: "Routing", value: snapshot.routingMode)
+                                    gatewayMetaRow(label: L10n.string("gateway_form.meta.status", locale: locale), value: snapshot.runtimeStatus)
+                                    gatewayMetaRow(label: L10n.string("gateway_form.meta.startup", locale: locale), value: snapshot.startupMode)
+                                    gatewayMetaRow(label: L10n.string("gateway_form.meta.endpoint", locale: locale), value: snapshot.endpoint)
+                                    gatewayMetaRow(label: L10n.string("gateway_form.meta.routing", locale: locale), value: snapshot.routingMode)
                                 }
                             }
                         }
                         .frame(width: 240)
                     }
 
-                    SurfaceCard(title: "Network & Protocols") {
+                    SurfaceCard(title: L10n.string("gateway_form.section.network_protocols", locale: locale)) {
                         HStack(alignment: .top, spacing: 12) {
-                            gatewayField(title: "Listen Host", caption: "Local bind address for the gateway process.") {
+                            gatewayField(title: L10n.string("gateway_form.field.listen_host", locale: locale), caption: L10n.string("gateway_form.field.listen_host.caption", locale: locale)) {
                                 textInput(placeholder: "127.0.0.1", text: $listenHost, monospaced: true)
                             }
 
-                            gatewayField(title: "Listen Port", caption: "Expose a unique local port between 1 and 65535.") {
+                            gatewayField(title: L10n.string("gateway_form.field.listen_port", locale: locale), caption: L10n.string("gateway_form.field.listen_port.caption", locale: locale)) {
                                 textInput(placeholder: "18080", text: $listenPort, monospaced: true)
                             }
 
-                            gatewayField(title: "Inbound Protocol", caption: "Client-facing protocol accepted at the local endpoint.") {
+                            gatewayField(title: L10n.string("gateway_form.field.inbound_protocol", locale: locale), caption: L10n.string("gateway_form.field.inbound_protocol.caption", locale: locale)) {
                                 protocolPicker(kind: .inbound, selection: $inboundProtocol)
                             }
 
-                            gatewayField(title: "Upstream Protocol", caption: "Protocol used when forwarding to the selected provider.") {
+                            gatewayField(title: L10n.string("gateway_form.field.upstream_protocol", locale: locale), caption: L10n.string("gateway_form.field.upstream_protocol.caption", locale: locale)) {
                                 protocolPicker(kind: .upstream, selection: $upstreamProtocol)
                             }
                         }
                     }
 
                     HStack(alignment: .top, spacing: 14) {
-                        SurfaceCard(title: "Routing JSON") {
+                        SurfaceCard(title: L10n.string("gateway_form.section.routing_json", locale: locale)) {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text("Protocol compatibility and routing overrides are stored with the gateway profile. If this instance is currently running and the configuration changes, FluxDeck will restart it automatically after save.")
+                                Text(L10n.string("gateway_form.routing_json.caption", locale: locale))
                                     .font(.caption)
                                     .foregroundStyle(DesignTokens.textSecondary)
 
@@ -2250,14 +1918,14 @@ private struct GatewayFormSheet: View {
                         }
                         .frame(maxWidth: .infinity)
 
-                        SurfaceCard(title: "Routing Targets") {
+                        SurfaceCard(title: L10n.string("gateway_form.section.routing_targets", locale: locale)) {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text("Configure the ordered failover chain used by this gateway. The first target is the active default upstream.")
+                                Text(L10n.string("gateway_form.routing_targets.caption", locale: locale))
                                     .font(.caption)
                                     .foregroundStyle(DesignTokens.textSecondary)
 
                                 if providers.isEmpty {
-                                    Text("No providers available yet.")
+                                    Text(L10n.string("gateway_form.provider.none_yet", locale: locale))
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(DesignTokens.textPrimary)
                                 } else {
@@ -2277,7 +1945,7 @@ private struct GatewayFormSheet: View {
                                     Text(validationError)
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(DesignTokens.textPrimary)
-                                    Text("Review the required fields before saving this gateway configuration.")
+                                    Text(L10n.string("gateway_form.validation.review", locale: locale))
                                         .font(.caption)
                                         .foregroundStyle(DesignTokens.textSecondary)
                                 }
@@ -2294,7 +1962,7 @@ private struct GatewayFormSheet: View {
 
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(isCreateMode ? "Create a local gateway profile" : "Update local routing and protocol configuration")
+                    Text(L10n.string(isCreateMode ? "gateway_form.footer.create" : "gateway_form.footer.update", locale: locale))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(DesignTokens.textPrimary)
                     Text(snapshot.footerSummary)
@@ -2304,7 +1972,7 @@ private struct GatewayFormSheet: View {
 
                 Spacer()
 
-                Button("Cancel") {
+                Button(L10n.string("common.action.cancel", locale: locale)) {
                     dismiss()
                 }
                 .buttonStyle(.plain)
@@ -2330,7 +1998,7 @@ private struct GatewayFormSheet: View {
                             ProgressView()
                                 .controlSize(.small)
                         }
-                        Text(isCreateMode ? "Create Gateway" : "Save Changes")
+                        Text(L10n.string(isCreateMode ? "gateway_form.action.create" : "common.action.save_changes", locale: locale))
                             .font(.subheadline.weight(.semibold))
                     }
                     .foregroundStyle(Color.white)
@@ -2373,22 +2041,22 @@ private struct GatewayFormSheet: View {
         let normalizedProtocolConfig = protocolConfigJSON.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if isCreateMode && normalizedID.isEmpty {
-            validationError = "ID is required."
+            validationError = L10n.string("gateway_form.validation.id_required", locale: locale)
             return
         }
 
         guard !normalizedName.isEmpty, !normalizedHost.isEmpty, !normalizedProtocol.isEmpty, !normalizedUpstreamProtocol.isEmpty else {
-            validationError = "Name, Host and Protocols are required."
+            validationError = L10n.string("gateway_form.validation.required_fields", locale: locale)
             return
         }
 
         guard !normalizedProviderID.isEmpty else {
-            validationError = "Default Provider is required."
+            validationError = L10n.string("gateway_form.validation.default_provider_required", locale: locale)
             return
         }
 
         guard let port = Int(listenPort.trimmingCharacters(in: .whitespacesAndNewlines)), (1...65535).contains(port) else {
-            validationError = "Listen Port must be a valid port number (1-65535)."
+            validationError = L10n.string("gateway_form.validation.listen_port_invalid", locale: locale)
             return
         }
 
@@ -2396,7 +2064,7 @@ private struct GatewayFormSheet: View {
         do {
             parsedProtocolConfig = try JSONValue.parseObject(from: normalizedProtocolConfig.isEmpty ? "{}" : normalizedProtocolConfig)
         } catch {
-            validationError = "Protocol Config JSON must be a valid JSON object."
+            validationError = L10n.string("gateway_form.validation.routing_json_invalid", locale: locale)
             return
         }
 
@@ -2462,7 +2130,8 @@ private struct GatewayFormSheet: View {
             enabled: enabled,
             autoStart: autoStart,
             protocolConfigJSON: protocolConfigJSON,
-            providers: providers
+            providers: providers,
+            locale: locale
         )
     }
 
@@ -2481,7 +2150,7 @@ private struct GatewayFormSheet: View {
                         .font(.caption.weight(.medium))
                         .foregroundStyle(DesignTokens.textPrimary)
                     Spacer()
-                    Text(target.enabled ? "enabled" : "disabled")
+                    Text(L10n.string(target.enabled ? L10n.resourceProviderStatusEnabled : L10n.resourceProviderStatusDisabled, locale: locale))
                         .font(.caption2)
                         .foregroundStyle(DesignTokens.textSecondary)
                 }
@@ -2494,21 +2163,25 @@ private struct GatewayFormSheet: View {
             ForEach(Array(editableRouteTargets.enumerated()), id: \.offset) { index, target in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
-                        Text(index == 0 ? "Primary" : "Backup #\(index)")
+                        Text(
+                            index == 0
+                                ? L10n.string(L10n.gatewayFormRouteTargetsPrimary, locale: locale)
+                                : L10n.formatted(L10n.gatewayFormRouteTargetsBackup, locale: locale, Int64(index))
+                        )
                             .font(.caption2.weight(.semibold))
                             .textCase(.uppercase)
                             .foregroundStyle(DesignTokens.textSecondary)
                         Spacer()
                         if index == 0 {
                             StatusPill(
-                                text: "Default",
+                                text: L10n.string(L10n.gatewayFormRouteTargetsDefault, locale: locale),
                                 semanticColor: DesignTokens.statusColors.running
                             )
                         }
                     }
 
                     Picker(
-                        "Route Target Provider",
+                        L10n.string(L10n.gatewayFormRouteTargetsPickerProvider, locale: locale),
                         selection: Binding(
                             get: { target.providerId },
                             set: { newValue in
@@ -2543,7 +2216,7 @@ private struct GatewayFormSheet: View {
 
                     HStack(spacing: 8) {
                         Toggle(
-                            "Enabled",
+                            L10n.string(L10n.resourceProviderStatusEnabled, locale: locale),
                             isOn: Binding(
                                 get: { target.enabled },
                                 set: { newValue in
@@ -2563,7 +2236,7 @@ private struct GatewayFormSheet: View {
 
                         Spacer()
 
-                        smallActionButton("Up", systemImage: "arrow.up") {
+                        smallActionButton(L10n.string(L10n.gatewayFormRouteTargetsMoveUp, locale: locale), systemImage: "arrow.up") {
                             applyRouteTargets(
                                 GatewayFormSupport.moveRouteTarget(
                                     routeTargets: editableRouteTargets,
@@ -2575,7 +2248,7 @@ private struct GatewayFormSheet: View {
                         }
                         .disabled(index == 0)
 
-                        smallActionButton("Down", systemImage: "arrow.down") {
+                        smallActionButton(L10n.string(L10n.gatewayFormRouteTargetsMoveDown, locale: locale), systemImage: "arrow.down") {
                             applyRouteTargets(
                                 GatewayFormSupport.moveRouteTarget(
                                     routeTargets: editableRouteTargets,
@@ -2587,7 +2260,7 @@ private struct GatewayFormSheet: View {
                         }
                         .disabled(index == editableRouteTargets.count - 1)
 
-                        smallActionButton("Delete", systemImage: "trash") {
+                        smallActionButton(L10n.string("common.action.delete", locale: locale), systemImage: "trash") {
                             applyRouteTargets(
                                 GatewayFormSupport.removeRouteTarget(
                                     routeTargets: editableRouteTargets,
@@ -2600,7 +2273,7 @@ private struct GatewayFormSheet: View {
                     }
 
                     if index == 0 {
-                        Text("The first target is always enabled and is mirrored to Default Provider.")
+                        Text(L10n.string(L10n.gatewayFormRouteTargetsPrimaryHint, locale: locale))
                             .font(.caption2)
                             .foregroundStyle(DesignTokens.textSecondary)
                     }
@@ -2625,7 +2298,7 @@ private struct GatewayFormSheet: View {
                     )
                 )
             } label: {
-                Label("Add Target", systemImage: "plus")
+                Label(L10n.string(L10n.gatewayFormRouteTargetsAdd, locale: locale), systemImage: "plus")
             }
             .buttonStyle(.plain)
             .focusable(false)
@@ -2711,15 +2384,15 @@ private struct GatewayFormSheet: View {
         return [
             GatewayPickerOption(
                 id: currentProviderID,
-                title: "Current value: \(currentProviderID)",
-                subtitle: "Unavailable provider",
+                title: L10n.formatted("gateway_form.option.current_value", locale: locale, currentProviderID),
+                subtitle: L10n.string("gateway_form.option.unavailable_provider", locale: locale),
                 isFallback: true
             )
         ] + baseOptions
     }
 
     private var providerOptions: [GatewayPickerOption] {
-        GatewayFormSupport.providerOptions(providers: providers, selectedProviderID: defaultProviderID)
+        GatewayFormSupport.providerOptions(providers: providers, selectedProviderID: defaultProviderID, locale: locale)
     }
 
     private var routingValidationError: String? {
@@ -2733,7 +2406,7 @@ private struct GatewayFormSheet: View {
             _ = try JSONValue.parseObject(from: normalizedProtocolConfig)
             return nil
         } catch {
-            return "Routing JSON must be a valid JSON object."
+            return L10n.string("gateway_form.validation.routing_json_invalid", locale: locale)
         }
     }
 
@@ -2745,10 +2418,10 @@ private struct GatewayFormSheet: View {
                 .frame(width: 28, height: 28)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(isCreateMode ? "Create Gateway" : "Configure Gateway")
+                Text(L10n.string(isCreateMode ? "gateway_form.header.create" : "gateway_form.header.edit", locale: locale))
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(DesignTokens.textPrimary)
-                Text("Manage the local endpoint, protocol bridge and default upstream route in one compact control surface.")
+                Text(L10n.string("gateway_form.header.subtitle", locale: locale))
                     .font(.caption)
                     .foregroundStyle(DesignTokens.textSecondary)
                     .lineLimit(1)
@@ -2757,7 +2430,7 @@ private struct GatewayFormSheet: View {
             Spacer()
 
             StatusPill(
-                text: enabled ? "Enabled" : "Disabled",
+                text: L10n.string(enabled ? "provider_form.status.enabled" : "provider_form.status.disabled", locale: locale),
                 semanticColor: enabled ? DesignTokens.statusColors.running : DesignTokens.statusColors.inactive
             )
         }
@@ -2769,7 +2442,7 @@ private struct GatewayFormSheet: View {
     private var gatewaySummaryCard: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(isCreateMode ? "Gateway Profile" : "Gateway Snapshot")
+                Text(L10n.string(isCreateMode ? "gateway_form.summary.profile" : "gateway_form.summary.snapshot", locale: locale))
                     .font(.caption2.weight(.semibold))
                     .textCase(.uppercase)
                     .foregroundStyle(DesignTokens.textSecondary)
@@ -2785,9 +2458,9 @@ private struct GatewayFormSheet: View {
             Spacer(minLength: 16)
 
             HStack(spacing: 8) {
-                compactMetric(title: "Inbound", value: GatewayFormSupport.protocolTitle(for: inboundProtocol, kind: .inbound))
-                compactMetric(title: "Upstream", value: GatewayFormSupport.protocolTitle(for: upstreamProtocol, kind: .upstream))
-                compactMetric(title: "Provider", value: snapshot.providerLabel)
+                compactMetric(title: L10n.string("gateway_form.metric.inbound", locale: locale), value: GatewayFormSupport.protocolTitle(for: inboundProtocol, kind: .inbound, locale: locale))
+                compactMetric(title: L10n.string("gateway_form.metric.upstream", locale: locale), value: GatewayFormSupport.protocolTitle(for: upstreamProtocol, kind: .upstream, locale: locale))
+                compactMetric(title: L10n.string("gateway_form.metric.provider", locale: locale), value: snapshot.providerLabel)
             }
         }
         .padding(.horizontal, 14)
@@ -2805,9 +2478,9 @@ private struct GatewayFormSheet: View {
     private var providerPicker: some View {
         Group {
             if providerOptions.isEmpty {
-                readOnlyValue("No providers available")
+                readOnlyValue(L10n.string("gateway_form.provider.none_available", locale: locale))
             } else {
-                Picker("Default Provider", selection: $defaultProviderID) {
+                Picker(L10n.string("gateway_form.field.default_provider", locale: locale), selection: $defaultProviderID) {
                     ForEach(providerOptions) { option in
                         Text(option.title)
                             .tag(option.id)
@@ -2831,9 +2504,12 @@ private struct GatewayFormSheet: View {
     }
 
     private func protocolPicker(kind: GatewayProtocolKind, selection: Binding<String>) -> some View {
-        let options = GatewayFormSupport.protocolOptions(kind: kind, selectedValue: selection.wrappedValue)
+        let options = GatewayFormSupport.protocolOptions(kind: kind, selectedValue: selection.wrappedValue, locale: locale)
 
-        return Picker(kind == .inbound ? "Inbound Protocol" : "Upstream Protocol", selection: selection) {
+        return Picker(
+            kind == .inbound ? L10n.string("gateway_form.field.inbound_protocol", locale: locale) : L10n.string("gateway_form.field.upstream_protocol", locale: locale),
+            selection: selection
+        ) {
             ForEach(options) { option in
                 Text(option.title)
                     .tag(option.id)

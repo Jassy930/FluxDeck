@@ -113,41 +113,41 @@ enum ProviderKindOption: String, CaseIterable, Identifiable {
         }
     }
 
-    var inboundProtocolSubtitle: String {
+    func inboundProtocolSubtitle(locale: Locale = .autoupdatingCurrent) -> String {
         switch self {
         case .openAI:
-            return "OpenAI-compatible client ingress"
+            return L10n.string("provider_kind.openai.inbound_subtitle", locale: locale)
         case .openAIResponse:
-            return "OpenAI Responses / Codex-style ingress"
+            return L10n.string("provider_kind.openai_response.inbound_subtitle", locale: locale)
         case .gemini:
-            return "Gemini-compatible client ingress"
+            return L10n.string("provider_kind.gemini.inbound_subtitle", locale: locale)
         case .anthropic:
-            return "Anthropic messages ingress"
+            return L10n.string("provider_kind.anthropic.inbound_subtitle", locale: locale)
         case .azureOpenAI:
-            return "Azure OpenAI-compatible ingress"
+            return L10n.string("provider_kind.azure_openai.inbound_subtitle", locale: locale)
         case .newAPI:
-            return "New API-compatible client ingress"
+            return L10n.string("provider_kind.new_api.inbound_subtitle", locale: locale)
         case .ollama:
-            return "Ollama-compatible client ingress"
+            return L10n.string("provider_kind.ollama.inbound_subtitle", locale: locale)
         }
     }
 
-    var upstreamProtocolSubtitle: String {
+    func upstreamProtocolSubtitle(locale: Locale = .autoupdatingCurrent) -> String {
         switch self {
         case .openAI:
-            return "Forward using OpenAI-compatible upstream"
+            return L10n.string("provider_kind.openai.upstream_subtitle", locale: locale)
         case .openAIResponse:
-            return "Forward using OpenAI Responses-compatible upstream"
+            return L10n.string("provider_kind.openai_response.upstream_subtitle", locale: locale)
         case .gemini:
-            return "Forward using Gemini-compatible upstream"
+            return L10n.string("provider_kind.gemini.upstream_subtitle", locale: locale)
         case .anthropic:
-            return "Forward using Anthropic upstream"
+            return L10n.string("provider_kind.anthropic.upstream_subtitle", locale: locale)
         case .azureOpenAI:
-            return "Forward using Azure OpenAI-compatible upstream"
+            return L10n.string("provider_kind.azure_openai.upstream_subtitle", locale: locale)
         case .newAPI:
-            return "Forward using New API-compatible upstream"
+            return L10n.string("provider_kind.new_api.upstream_subtitle", locale: locale)
         case .ollama:
-            return "Forward using Ollama-compatible upstream"
+            return L10n.string("provider_kind.ollama.upstream_subtitle", locale: locale)
         }
     }
 }
@@ -1251,36 +1251,37 @@ func buildDashboardMetrics(providers: [AdminProvider], gateways: [AdminGateway])
     )
 }
 
-func gatewayUpdateNoticeText(for result: AdminGatewayUpdateResult) -> String {
+func gatewayUpdateNoticeText(for result: AdminGatewayUpdateResult, locale: Locale = .autoupdatingCurrent) -> String {
     if let userNotice = result.userNotice, !userNotice.isEmpty {
         return userNotice
     }
     if let lastError = result.lastError, !lastError.isEmpty {
-        return "Gateway 配置已保存，但自动重启失败：\(lastError)"
+        return L10n.adminGatewayUpdateSavedRestartFailed(lastError, locale: locale)
     }
     if result.restartPerformed {
-        return "Gateway 配置已保存，运行中的实例已自动重启。"
+        return L10n.adminGatewayUpdateSavedRestarted(locale: locale)
     }
-    return "Gateway 配置已保存。"
+    return L10n.adminGatewayUpdateSaved(locale: locale)
 }
 
-func gatewayDeleteNoticeText(for result: AdminGatewayDeleteResult) -> String {
+func gatewayDeleteNoticeText(for result: AdminGatewayDeleteResult, locale: Locale = .autoupdatingCurrent) -> String {
     if let userNotice = result.userNotice, !userNotice.isEmpty {
         return userNotice
     }
     if result.stopPerformed {
-        return "Gateway 已删除。运行中的实例已先停止。"
+        return L10n.adminGatewayDeletedStopped(locale: locale)
     }
-    return "Gateway 已删除。"
+    return L10n.adminGatewayDeleted(locale: locale)
 }
 
-func adminAPIErrorMessage(from data: Data, statusCode: Int) -> String {
+func adminAPIErrorMessage(from data: Data, statusCode: Int, locale: Locale = .autoupdatingCurrent) -> String {
     if
         let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
         let error = object["error"] as? String
     {
-        if let ids = object["referenced_by_gateway_ids"] as? [String], !ids.isEmpty {
-            return "\(error): \(ids.joined(separator: ", "))"
+        if error == "provider is referenced by gateways",
+           let ids = object["referenced_by_gateway_ids"] as? [String], !ids.isEmpty {
+            return L10n.adminErrorProviderReferencedByGateways(ids.joined(separator: ", "), locale: locale)
         }
         return error
     }
@@ -1290,7 +1291,7 @@ func adminAPIErrorMessage(from data: Data, statusCode: Int) -> String {
         return plainText
     }
 
-    return "Request failed with HTTP \(statusCode)"
+    return L10n.adminErrorRequestFailedHttp(statusCode, locale: locale)
 }
 
 func filterLogs(

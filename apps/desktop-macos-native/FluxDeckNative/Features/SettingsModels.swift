@@ -1,31 +1,73 @@
 import Foundation
 
 struct SettingsPanelSection: Equatable {
+    let titleKey: String
+    let descriptionKey: String
+}
+
+enum SettingsPanelStatus: Equatable {
+    case needsAttention
+    case refreshing
+    case notConfigured
+    case ready
+}
+
+struct SettingsLanguageOption: Equatable, Identifiable {
+    let language: AppLanguage
     let title: String
-    let description: String
+
+    var id: String { language.id }
 }
 
 struct SettingsPanelModel {
     let sections: [SettingsPanelSection]
-    let statusText: String
+    let status: SettingsPanelStatus
+    let languageSection: SettingsPanelSection
+    let languageOptions: [SettingsLanguageOption]
 
-    static func make(adminBaseURL: String, isLoading: Bool, hasError: Bool) -> SettingsPanelModel {
-        let statusText: String
+    static func make(
+        adminBaseURL: String,
+        isLoading: Bool,
+        hasError: Bool,
+        selectedLanguage: AppLanguage,
+        locale: Locale = .autoupdatingCurrent
+    ) -> SettingsPanelModel {
+        _ = selectedLanguage
+
+        let status: SettingsPanelStatus
         if hasError {
-            statusText = "Needs attention"
+            status = .needsAttention
         } else if isLoading {
-            statusText = "Refreshing"
+            status = .refreshing
         } else {
-            statusText = adminBaseURL.isEmpty ? "Not configured" : "Ready"
+            status = adminBaseURL.isEmpty ? .notConfigured : .ready
         }
 
         return SettingsPanelModel(
             sections: [
-                SettingsPanelSection(title: "Admin API", description: "Configure the fluxd Admin API endpoint used by the native shell."),
-                SettingsPanelSection(title: "Refresh & Sync", description: "Apply, refresh and reset connection settings without leaving the workbench."),
-                SettingsPanelSection(title: "Diagnostics", description: "Review current endpoint and shell state for troubleshooting.")
+                SettingsPanelSection(
+                    titleKey: L10n.settingsSectionAdminApiTitle,
+                    descriptionKey: L10n.settingsSectionAdminApiDescription
+                ),
+                SettingsPanelSection(
+                    titleKey: L10n.settingsSectionRefreshSyncTitle,
+                    descriptionKey: L10n.settingsSectionRefreshSyncDescription
+                ),
+                SettingsPanelSection(
+                    titleKey: L10n.settingsSectionDiagnosticsTitle,
+                    descriptionKey: L10n.settingsSectionDiagnosticsDescription
+                )
             ],
-            statusText: statusText
+            status: status,
+            languageSection: SettingsPanelSection(
+                titleKey: L10n.settingsLanguageTitle,
+                descriptionKey: L10n.settingsLanguageDescription
+            ),
+            languageOptions: [
+                SettingsLanguageOption(language: .system, title: L10n.string(L10n.settingsLanguageOptionSystem, locale: locale)),
+                SettingsLanguageOption(language: .english, title: L10n.string(L10n.settingsLanguageOptionEnglish, locale: locale)),
+                SettingsLanguageOption(language: .simplifiedChinese, title: L10n.string(L10n.settingsLanguageOptionSimplifiedChinese, locale: locale))
+            ]
         )
     }
 }

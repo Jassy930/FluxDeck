@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SidebarView: View {
+    @Environment(\.locale) private var locale
+
     let groups: [SidebarGroup]
     @Binding var selectedSection: SidebarSection?
 
@@ -11,7 +13,7 @@ struct SidebarView: View {
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(DesignTokens.textPrimary)
 
-                Text("Control Plane")
+                Text(L10n.string(L10n.sidebarBrandSubtitle, locale: locale))
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(DesignTokens.textSecondary)
                     .textCase(.uppercase)
@@ -21,9 +23,9 @@ struct SidebarView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    ForEach(groups, id: \.title) { group in
+                    ForEach(groups, id: \.id) { group in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(group.title)
+                            Text(L10n.string(group.titleKey, locale: locale))
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(DesignTokens.textSecondary.opacity(0.88))
                                 .textCase(.uppercase)
@@ -37,7 +39,7 @@ struct SidebarView: View {
                                         HStack(spacing: 10) {
                                             Image(systemName: section.icon)
                                                 .frame(width: 16)
-                                            Text(section.rawValue)
+                                            Text(L10n.string(section.titleKey, locale: locale))
                                                 .font(.subheadline.weight(isSelected(section) ? .semibold : .regular))
                                             Spacer(minLength: 0)
                                         }

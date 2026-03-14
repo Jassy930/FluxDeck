@@ -1,15 +1,19 @@
 import Foundation
 
 enum SidebarSection: String, CaseIterable, Hashable {
-    case overview = "Overview"
-    case traffic = "Traffic"
-    case connections = "Connections"
-    case logs = "Logs"
-    case topology = "Topology"
-    case routeMap = "Route Map"
-    case providers = "Providers"
-    case gateways = "Gateways"
-    case settings = "Settings"
+    case overview = "overview"
+    case traffic = "traffic"
+    case connections = "connections"
+    case logs = "logs"
+    case topology = "topology"
+    case routeMap = "route_map"
+    case providers = "providers"
+    case gateways = "gateways"
+    case settings = "settings"
+
+    var titleKey: String {
+        "sidebar.section.\(rawValue)"
+    }
 
     var icon: String {
         switch self {
@@ -35,21 +39,26 @@ enum SidebarSection: String, CaseIterable, Hashable {
     }
 }
 
-struct SidebarGroup: Equatable {
-    let title: String
+struct SidebarGroup: Equatable, Hashable {
+    let id: String
+    let titleKey: String
     let items: [SidebarSection]
 
     static let defaultGroups: [SidebarGroup] = [
-        SidebarGroup(title: "Overview", items: [.overview, .traffic, .connections, .logs]),
-        SidebarGroup(title: "Visualization", items: [.topology, .routeMap]),
-        SidebarGroup(title: "Proxy", items: [.providers, .gateways]),
-        SidebarGroup(title: "System", items: [.settings])
+        SidebarGroup(id: "overview", titleKey: "sidebar.group.overview", items: [.overview, .traffic, .connections, .logs]),
+        SidebarGroup(id: "visualization", titleKey: "sidebar.group.visualization", items: [.topology, .routeMap]),
+        SidebarGroup(id: "proxy", titleKey: "sidebar.group.proxy", items: [.providers, .gateways]),
+        SidebarGroup(id: "system", titleKey: "sidebar.group.system", items: [.settings])
     ]
 }
 
 enum AppMode: String, CaseIterable, Hashable {
-    case backup = "Backup"
-    case direct = "Direct"
-    case rule = "Rule"
-    case global = "Global"
+    case backup = "backup"
+    case direct = "direct"
+    case rule = "rule"
+    case global = "global"
+
+    var titleKey: String {
+        "shell.mode.\(rawValue)"
+    }
 }

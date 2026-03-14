@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct GatewayListView: View {
+    @Environment(\.locale) private var locale
     let gateways: [AdminGateway]
     let isLoading: Bool
     let isSubmitting: Bool
@@ -14,14 +15,14 @@ struct GatewayListView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Gateways")
+                Text(L10n.string(L10n.gatewaysListTitle, locale: locale))
                     .font(.title2)
                     .fontWeight(.semibold)
                 Spacer()
                 Button {
                     onCreate()
                 } label: {
-                    Label("New Gateway", systemImage: "plus")
+                    Label(L10n.string(L10n.gatewaysActionsNew, locale: locale), systemImage: "plus")
                 }
                 .focusable(false)
                 .disabled(isSubmitting)
@@ -48,16 +49,16 @@ struct GatewayListView: View {
                     HStack(spacing: 8) {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Loading gateways...")
+                        Text(L10n.string(L10n.gatewaysListLoading, locale: locale))
                             .foregroundStyle(DesignTokens.textSecondary)
                     }
                     .font(.caption)
                 }
             } else if gateways.isEmpty {
                 EmptyStateView(
-                    title: "No gateways",
+                    title: L10n.string(L10n.gatewaysListEmptyTitle, locale: locale),
                     systemImage: "point.3.connected.trianglepath.dotted",
-                    message: "Create and start a gateway to expose the OpenAI-compatible endpoint."
+                    message: L10n.string(L10n.gatewaysListEmptyMessage, locale: locale)
                 )
             } else {
                 ScrollView {
@@ -78,22 +79,22 @@ struct GatewayListView: View {
                                                 .foregroundStyle(DesignTokens.textSecondary)
                                         }
                                         Spacer()
-                                        StatusPill(text: card.runtimeBadge, semanticColor: colorToken(for: category))
+                                        StatusPill(text: L10n.gatewayRuntimeStatus(card.runtimeState, locale: locale), semanticColor: colorToken(for: category))
                                     }
 
-                                    resourceRow(label: "Endpoint", value: card.endpointText)
-                                    resourceRow(label: "Primary", value: card.providerText)
-                                    resourceRow(label: "Active", value: card.activeProviderText)
-                                    resourceRow(label: "Routes", value: card.routeSummaryText)
-                                    resourceRow(label: "Health", value: card.healthSummaryText)
-                                    resourceRow(label: "Auto Start", value: card.autoStartText)
+                                    resourceRow(label: L10n.string(L10n.gatewaysFieldsEndpoint, locale: locale), value: card.endpointText)
+                                    resourceRow(label: L10n.string(L10n.gatewaysFieldsProvider, locale: locale), value: card.providerText)
+                                    resourceRow(label: L10n.string(L10n.gatewaysFieldsAutoStart, locale: locale), value: L10n.autoStart(card.autoStartEnabled, locale: locale))
+                                    resourceRow(label: L10n.string(L10n.gatewaysFieldsActiveProvider, locale: locale), value: activeProviderText(for: card))
+                                    resourceRow(label: L10n.string(L10n.gatewaysFieldsRoutes, locale: locale), value: routeSummaryText(for: card))
+                                    resourceRow(label: L10n.string(L10n.gatewaysFieldsHealth, locale: locale), value: healthSummaryText(for: card))
 
                                     if let lastError = card.lastErrorText, !lastError.isEmpty {
-                                        resourceRow(label: "Last Error", value: lastError)
+                                        resourceRow(label: L10n.string(L10n.gatewaysFieldsLastError, locale: locale), value: lastError)
                                     }
 
                                     HStack(spacing: 12) {
-                                        Button("Edit") {
+                                        Button(L10n.string(L10n.gatewaysActionsEdit, locale: locale)) {
                                             onConfigure(gateway)
                                         }
                                         .buttonStyle(.plain)
@@ -109,7 +110,7 @@ struct GatewayListView: View {
                                         .foregroundStyle(DesignTokens.textSecondary)
                                         .disabled(isSubmitting)
 
-                                        Button("Delete") {
+                                        Button(L10n.string(L10n.gatewaysActionsDelete, locale: locale)) {
                                             onDelete(gateway)
                                         }
                                         .buttonStyle(.plain)
@@ -130,7 +131,7 @@ struct GatewayListView: View {
                     HStack(spacing: 8) {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Applying gateway action...")
+                        Text(L10n.string(L10n.gatewaysActionsApplying, locale: locale))
                             .font(.caption)
                             .foregroundStyle(DesignTokens.textSecondary)
                     }
@@ -155,7 +156,46 @@ struct GatewayListView: View {
     }
 
     private func actionText(for category: GatewayRuntimeCategory) -> String {
-        category == .running ? "Stop" : "Start"
+        L10n.gatewayRuntimeAction(category, locale: locale)
+    }
+
+    private func activeProviderText(for card: GatewayWorkspaceCard) -> String {
+        card.activeProviderText ?? L10n.string(L10n.gatewaysValueIdle, locale: locale)
+    }
+
+    private func routeSummaryText(for card: GatewayWorkspaceCard) -> String {
+        guard card.routeTargets.isEmpty == false else {
+            return card.providerText
+        }
+
+        return card.routeTargets
+            .map { target in
+                guard let healthStatus = target.healthStatus else {
+                    return target.providerId
+                }
+                return L10n.formatted(
+                    L10n.gatewaysRouteTargetWithHealth,
+                    locale: locale,
+                    target.providerId,
+                    L10n.providerHealthStatus(healthStatus, locale: locale)
+                )
+            }
+            .joined(separator: " -> ")
+    }
+
+    private func healthSummaryText(for card: GatewayWorkspaceCard) -> String {
+        guard let summary = card.healthSummary else {
+            return L10n.string(L10n.gatewaysHealthSummaryNone, locale: locale)
+        }
+
+        return L10n.formatted(
+            L10n.gatewaysHealthSummaryFormat,
+            locale: locale,
+            Int64(summary.healthyCount),
+            Int64(summary.degradedCount),
+            Int64(summary.unhealthyCount),
+            Int64(summary.probingCount)
+        )
     }
 
     private func resourceRow(label: String, value: String) -> some View {

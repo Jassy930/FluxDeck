@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct OverviewDashboardView: View {
+    @Environment(\.locale) private var locale
+
     let model: OverviewDashboardModel
     let isLoading: Bool
     let logs: [AdminLog]
@@ -11,47 +13,56 @@ struct OverviewDashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-                    SurfaceCard(title: "Running Status") {
+                    SurfaceCard(title: L10n.string("overview.section.running_status", locale: locale)) {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack(spacing: 8) {
-                                StatusPill(text: "Gateways \(model.runningStatus.runningGatewayCountText)", semanticColor: DesignTokens.statusColors.running)
-                                StatusPill(text: "Errors \(model.runningStatus.errorGatewayCountText)", semanticColor: model.runningStatus.errorGatewayCountText == "0" ? DesignTokens.statusColors.inactive : DesignTokens.statusColors.error)
+                                StatusPill(
+                                    text: L10n.formatted("overview.status.gateways", locale: locale, Int64(model.runningStatus.runningGatewayCount)),
+                                    semanticColor: DesignTokens.statusColors.running
+                                )
+                                StatusPill(
+                                    text: L10n.formatted("overview.status.errors", locale: locale, Int64(model.runningStatus.errorGatewayCount)),
+                                    semanticColor: model.runningStatus.errorGatewayCount == 0 ? DesignTokens.statusColors.inactive : DesignTokens.statusColors.error
+                                )
                             }
 
-                            overviewMetricRow(label: "Connections", value: model.runningStatus.connectionCountText)
-                            overviewMetricRow(label: "Providers", value: model.runningStatus.providerCountText)
+                            overviewMetricRow(label: L10n.string("overview.metric.connections", locale: locale), value: "\(model.runningStatus.connectionCount)")
+                            overviewMetricRow(label: L10n.string("overview.metric.providers", locale: locale), value: "\(model.runningStatus.providerCount)")
                         }
                     }
 
-                    SurfaceCard(title: "Network Status") {
+                    SurfaceCard(title: L10n.string("overview.section.network_status", locale: locale)) {
                         VStack(alignment: .leading, spacing: 12) {
-                            StatusPill(text: model.networkStatus.gatewayStatusText, semanticColor: model.networkStatus.gatewayStatusText == "Healthy" ? DesignTokens.statusColors.running : DesignTokens.statusColors.warning)
-                            overviewMetricRow(label: "Internet", value: model.networkStatus.internetLatencyText)
-                            overviewMetricRow(label: "Gateway", value: model.networkStatus.adminEndpointText)
+                            StatusPill(
+                                text: L10n.overviewGatewayStatus(model.networkStatus.gatewayStatus, locale: locale),
+                                semanticColor: model.networkStatus.gatewayStatus == .healthy ? DesignTokens.statusColors.running : DesignTokens.statusColors.warning
+                            )
+                            overviewMetricRow(label: L10n.string("overview.metric.internet", locale: locale), value: L10n.durationMilliseconds(model.networkStatus.internetLatencyMs, locale: locale))
+                            overviewMetricRow(label: L10n.string("overview.metric.gateway", locale: locale), value: model.networkStatus.adminEndpointText)
                         }
                     }
                 }
 
                 HStack(alignment: .top, spacing: 16) {
-                    SurfaceCard(title: "Traffic Summary") {
+                    SurfaceCard(title: L10n.string("overview.section.traffic_summary", locale: locale)) {
                         VStack(alignment: .leading, spacing: 12) {
                             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                                overviewMetricTile(label: "Total Requests", value: model.trafficSummary.totalRequestsText)
-                                overviewMetricTile(label: "Successful", value: model.trafficSummary.successCountText)
-                                overviewMetricTile(label: "Errors", value: model.trafficSummary.errorCountText)
-                                overviewMetricTile(label: "Gateways", value: model.runningStatus.runningGatewayCountText)
+                                overviewMetricTile(label: L10n.string("overview.metric.total_requests", locale: locale), value: "\(model.trafficSummary.totalRequests)")
+                                overviewMetricTile(label: L10n.string("overview.metric.successful", locale: locale), value: "\(model.trafficSummary.successCount)")
+                                overviewMetricTile(label: L10n.string("overview.metric.errors", locale: locale), value: "\(model.trafficSummary.errorCount)")
+                                overviewMetricTile(label: L10n.string("overview.metric.gateways", locale: locale), value: "\(model.runningStatus.runningGatewayCount)")
                             }
                         }
                     }
                     .frame(width: 432)
 
-                    SurfaceCard(title: "Recent Requests") {
+                    SurfaceCard(title: L10n.string("overview.section.recent_requests", locale: locale)) {
                         if isLoading && logs.isEmpty {
-                            Text("Loading overview...")
+                            Text(L10n.string("overview.state.loading", locale: locale))
                                 .font(.caption)
                                 .foregroundStyle(DesignTokens.textSecondary)
                         } else if logs.isEmpty {
-                            Text("No recent traffic yet.")
+                            Text(L10n.string("overview.state.empty", locale: locale))
                                 .font(.caption)
                                 .foregroundStyle(DesignTokens.textSecondary)
                         } else {
@@ -72,7 +83,7 @@ struct OverviewDashboardView: View {
 
                                             Spacer(minLength: 12)
 
-                                            Text("\(log.latencyMs) ms")
+                                            Text(L10n.durationMilliseconds(log.latencyMs, locale: locale))
                                                 .font(.caption.weight(.medium))
                                                 .foregroundStyle(DesignTokens.textSecondary)
                                         }
@@ -82,7 +93,7 @@ struct OverviewDashboardView: View {
                                     .focusable(false)
                                 }
 
-                                Button("Open All Logs", action: onOpenAllLogs)
+                                Button(L10n.string("overview.logs.open_all", locale: locale), action: onOpenAllLogs)
                                     .focusable(false)
                                     .font(.caption.weight(.medium))
                                     .foregroundStyle(DesignTokens.textPrimary)

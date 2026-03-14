@@ -1,22 +1,31 @@
 import SwiftUI
 
 enum TopologyMetricMode: String, CaseIterable, Identifiable {
-    case tokens = "Tokens"
-    case requests = "Requests"
+    case tokens = "tokens"
+    case requests = "requests"
 
     var id: String { rawValue }
+
+    var titleKey: String {
+        "topology.metric.\(rawValue)"
+    }
 }
 
 enum TopologyFlowMode: String, CaseIterable, Identifiable {
-    case byModel = "By Model"
-    case totalOnly = "Total Only"
+    case byModel = "by_model"
+    case totalOnly = "total_only"
 
     var id: String { rawValue }
+
+    var titleKey: String {
+        "topology.flow.\(rawValue)"
+    }
 }
 
 struct TopologyCanvasSegmentModel: Identifiable {
     let id: String
     let title: String
+    let isTotal: Bool
     let totalTokens: Int
     let emphasisValue: Int
     let requestCount: Int
@@ -59,19 +68,19 @@ struct TopologyNodeCardModel: Hashable {
     let secondaryMetricText: String
     let tertiaryMetricText: String?
 
-    static func make(node: TopologyNode) -> TopologyNodeCardModel {
+    static func make(node: TopologyNode, locale: Locale = Locale(identifier: "en")) -> TopologyNodeCardModel {
         let tertiaryMetricText: String?
         if node.cachedTokens > 0 {
-            tertiaryMetricText = "\(formatTopologyNumber(node.cachedTokens)) cached"
+            tertiaryMetricText = L10n.topologyCachedValue(formatTopologyNumber(node.cachedTokens), locale: locale)
         } else if node.errorCount > 0 {
-            tertiaryMetricText = "\(node.errorCount) err"
+            tertiaryMetricText = L10n.topologyErrorValue(String(node.errorCount), locale: locale)
         } else {
             tertiaryMetricText = nil
         }
 
         return TopologyNodeCardModel(
-            primaryMetricText: "\(formatTopologyNumber(node.totalTokens)) tok",
-            secondaryMetricText: "\(formatTopologyNumber(node.requestCount)) req",
+            primaryMetricText: L10n.topologyTokenValue(formatTopologyNumber(node.totalTokens), locale: locale),
+            secondaryMetricText: L10n.topologyRequestValue(formatTopologyNumber(node.requestCount), locale: locale),
             tertiaryMetricText: tertiaryMetricText
         )
     }
@@ -234,9 +243,9 @@ struct TopologyCanvasScreenModel {
     let nodeSummaries: [String: TopologyCanvasNodeSummary]
     let hotPaths: [TopologyHotPathRow]
     let modelMix: [TopologyModelMixItem]
-    let summaryTitle: String
-    let mixTitle: String
-    let emptyStateText: String?
+    let summaryTitleKey: String
+    let mixTitleKey: String
+    let emptyStateKey: String?
     private let nodeTooltipPayloads: [String: TopologyCanvasTooltipPayload]
     private let segmentTooltipPayloads: [String: TopologyCanvasTooltipPayload]
     private let nodeConnectedEdges: [String: Set<String>]
@@ -246,7 +255,8 @@ struct TopologyCanvasScreenModel {
         graph: TopologyGraph,
         metricMode: TopologyMetricMode,
         flowMode: TopologyFlowMode,
-        highlightMode: TopologyHighlightMode
+        highlightMode: TopologyHighlightMode,
+        locale: Locale = Locale(identifier: "en")
     ) -> TopologyCanvasScreenModel {
         let highlightedGraph = graph.applyingHighlightMode(highlightMode)
         let sourceEdges = summaryEdges(from: highlightedGraph)
@@ -267,7 +277,8 @@ struct TopologyCanvasScreenModel {
                     for: edge,
                     metricMode: metricMode,
                     flowMode: flowMode,
-                    colorLookup: colorLookup
+                    colorLookup: colorLookup,
+                    locale: locale
                 )
             )
         }
@@ -284,19 +295,19 @@ struct TopologyCanvasScreenModel {
                 TopologyHotPathRow(
                     id: edge.id,
                     routeText: routeText(for: edge, nodeLookup: nodeLookup),
-                    tokenText: "\(formatTopologyNumber(edge.totalTokens)) tok",
-                    requestText: "\(formatTopologyNumber(edge.requestCount)) req",
-                    topModelText: "Top model \(edge.segments.first?.modelName ?? "unknown")"
+                    tokenText: L10n.topologyTokenValue(formatTopologyNumber(edge.totalTokens), locale: locale),
+                    requestText: L10n.topologyRequestValue(formatTopologyNumber(edge.requestCount), locale: locale),
+                    topModelText: L10n.topologyHotPathTopModel(edge.segments.first?.modelName ?? "unknown", locale: locale)
                 )
             }
 
-        let modelMix = buildModelMix(from: sourceEdges, colorLookup: colorLookup)
-        let nodeSummaries = buildNodeSummaries(from: highlightedGraph, edges: canvasEdges)
-        let nodeTooltipPayloads = buildNodeTooltipPayloads(from: highlightedGraph, edges: canvasEdges, nodeLookup: nodeLookup)
-        let segmentTooltipPayloads = buildSegmentTooltipPayloads(from: canvasEdges)
+        let modelMix = buildModelMix(from: sourceEdges, colorLookup: colorLookup, locale: locale)
+        let nodeSummaries = buildNodeSummaries(from: highlightedGraph, edges: canvasEdges, locale: locale)
+        let nodeTooltipPayloads = buildNodeTooltipPayloads(from: highlightedGraph, edges: canvasEdges, nodeLookup: nodeLookup, locale: locale)
+        let segmentTooltipPayloads = buildSegmentTooltipPayloads(from: canvasEdges, locale: locale)
         let nodeConnectedEdges = buildNodeConnectedEdges(from: canvasEdges)
         let nodeConnectedNodes = buildNodeConnectedNodes(from: canvasEdges)
-        let emptyStateText = highlightedGraph.edges.isEmpty ? "No active token routes yet." : nil
+        let emptyStateKey = highlightedGraph.edges.isEmpty ? L10n.topologyEmptyActiveRoutes : nil
 
         return TopologyCanvasScreenModel(
             graph: highlightedGraph,
@@ -304,9 +315,9 @@ struct TopologyCanvasScreenModel {
             nodeSummaries: nodeSummaries,
             hotPaths: hotPaths,
             modelMix: modelMix,
-            summaryTitle: "Hot Paths",
-            mixTitle: "Model Mix",
-            emptyStateText: emptyStateText,
+            summaryTitleKey: L10n.topologySummaryHotPaths,
+            mixTitleKey: L10n.topologySummaryModelMix,
+            emptyStateKey: emptyStateKey,
             nodeTooltipPayloads: nodeTooltipPayloads,
             segmentTooltipPayloads: segmentTooltipPayloads,
             nodeConnectedEdges: nodeConnectedEdges,
@@ -385,7 +396,8 @@ struct TopologyCanvasScreenModel {
         for edge: TopologyEdge,
         metricMode: TopologyMetricMode,
         flowMode: TopologyFlowMode,
-        colorLookup: [String: DesignTokens.SemanticColor]
+        colorLookup: [String: DesignTokens.SemanticColor],
+        locale: Locale
     ) -> [TopologyCanvasSegmentModel] {
         switch flowMode {
         case .byModel:
@@ -398,6 +410,7 @@ struct TopologyCanvasScreenModel {
                 return TopologyCanvasSegmentModel(
                     id: segment.id,
                     title: segment.modelName,
+                    isTotal: false,
                     totalTokens: segment.totalTokens,
                     emphasisValue: emphasisValue,
                     requestCount: segment.requestCount,
@@ -416,7 +429,8 @@ struct TopologyCanvasScreenModel {
             return [
                 TopologyCanvasSegmentModel(
                     id: "\(edge.id)#total",
-                    title: "Total",
+                    title: L10n.string(L10n.topologyLabelTotal, locale: locale),
+                    isTotal: true,
                     totalTokens: edge.totalTokens,
                     emphasisValue: emphasisValue,
                     requestCount: edge.requestCount,
@@ -439,7 +453,8 @@ struct TopologyCanvasScreenModel {
 
     private static func buildModelMix(
         from edges: [TopologyEdge],
-        colorLookup: [String: DesignTokens.SemanticColor]
+        colorLookup: [String: DesignTokens.SemanticColor],
+        locale: Locale
     ) -> [TopologyModelMixItem] {
         let aggregate = edges
             .flatMap(\.segments)
@@ -461,7 +476,7 @@ struct TopologyCanvasScreenModel {
                     id: item.key,
                     title: item.key,
                     totalValue: item.value,
-                    valueText: "\(formatTopologyNumber(item.value)) tok",
+                    valueText: L10n.topologyTokenValue(formatTopologyNumber(item.value), locale: locale),
                     shareText: formatTopologyPercent(Double(item.value) / Double(total)),
                     semanticColor: colorLookup[item.key] ?? DesignTokens.topologyModelColor(for: item.key, rankedIndex: nil)
                 )
@@ -499,7 +514,8 @@ struct TopologyCanvasScreenModel {
 
     private static func buildNodeSummaries(
         from graph: TopologyGraph,
-        edges: [TopologyCanvasEdgeModel]
+        edges: [TopologyCanvasEdgeModel],
+        locale: Locale
     ) -> [String: TopologyCanvasNodeSummary] {
         graph.columns
             .flatMap(\.nodes)
@@ -515,8 +531,8 @@ struct TopologyCanvasScreenModel {
                     }
                 let topModelName = relatedSegments.first?.title ?? "unknown"
                 let detailComponents = [
-                    node.cachedTokens > 0 ? "\(formatTopologyNumber(node.cachedTokens)) cached" : nil,
-                    node.errorCount > 0 ? "\(node.errorCount) err" : nil
+                    node.cachedTokens > 0 ? L10n.topologyCachedValue(formatTopologyNumber(node.cachedTokens), locale: locale) : nil,
+                    node.errorCount > 0 ? L10n.topologyErrorValue(String(node.errorCount), locale: locale) : nil
                 ].compactMap { $0 }
                 let detailLine = detailComponents.isEmpty ? node.subtitle : detailComponents.joined(separator: " · ")
 
@@ -524,7 +540,10 @@ struct TopologyCanvasScreenModel {
                     id: node.id,
                     title: node.title,
                     subtitle: node.subtitle,
-                    metricLine: "\(formatTopologyNumber(node.totalTokens)) tok · \(formatTopologyNumber(node.requestCount)) req",
+                    metricLine: [
+                        L10n.topologyTokenValue(formatTopologyNumber(node.totalTokens), locale: locale),
+                        L10n.topologyRequestValue(formatTopologyNumber(node.requestCount), locale: locale)
+                    ].joined(separator: " · "),
                     detailLine: detailLine,
                     hoverSummary: TopologyCanvasNodeHoverSummary(
                         topModelName: topModelName,
@@ -538,9 +557,10 @@ struct TopologyCanvasScreenModel {
     private static func buildNodeTooltipPayloads(
         from graph: TopologyGraph,
         edges: [TopologyCanvasEdgeModel],
-        nodeLookup: [String: TopologyNode]
+        nodeLookup: [String: TopologyNode],
+        locale: Locale
     ) -> [String: TopologyCanvasTooltipPayload] {
-        buildNodeSummaries(from: graph, edges: edges)
+        buildNodeSummaries(from: graph, edges: edges, locale: locale)
             .reduce(into: [String: TopologyCanvasTooltipPayload]()) { partialResult, item in
                 guard let node = nodeLookup[item.key] else {
                     return
@@ -549,17 +569,18 @@ struct TopologyCanvasScreenModel {
                 partialResult[item.key] = TopologyCanvasTooltipPayload(
                     title: item.value.title,
                     rows: [
-                        "\(formatTopologyNumber(node.totalTokens)) tok",
-                        "\(formatTopologyNumber(node.requestCount)) req",
-                        "Top model \(item.value.hoverSummary.topModelName)",
-                        "\(item.value.hoverSummary.errorCount) err"
+                        L10n.topologyTokenValue(formatTopologyNumber(node.totalTokens), locale: locale),
+                        L10n.topologyRequestValue(formatTopologyNumber(node.requestCount), locale: locale),
+                        L10n.topologyHotPathTopModel(item.value.hoverSummary.topModelName, locale: locale),
+                        L10n.topologyErrorValue(String(item.value.hoverSummary.errorCount), locale: locale)
                     ]
                 )
             }
     }
 
     private static func buildSegmentTooltipPayloads(
-        from edges: [TopologyCanvasEdgeModel]
+        from edges: [TopologyCanvasEdgeModel],
+        locale: Locale
     ) -> [String: TopologyCanvasTooltipPayload] {
         edges
             .flatMap { edge in
@@ -569,11 +590,11 @@ struct TopologyCanvasScreenModel {
                         TopologyCanvasTooltipPayload(
                             title: edge.routeText,
                             rows: [
-                                "Model \(segment.title)",
-                                "\(formatTopologyNumber(segment.totalTokens)) tok",
-                                "\(formatTopologyNumber(segment.requestCount)) req",
-                                "\(formatTopologyNumber(segment.cachedTokens)) cached",
-                                "\(segment.errorCount) err"
+                                L10n.topologyTooltipModel(segment.title, locale: locale),
+                                L10n.topologyTokenValue(formatTopologyNumber(segment.totalTokens), locale: locale),
+                                L10n.topologyRequestValue(formatTopologyNumber(segment.requestCount), locale: locale),
+                                L10n.topologyCachedValue(formatTopologyNumber(segment.cachedTokens), locale: locale),
+                                L10n.topologyErrorValue(String(segment.errorCount), locale: locale)
                             ]
                         )
                     )
@@ -609,6 +630,8 @@ struct TopologyCanvasScreenModel {
 }
 
 struct TopologyCanvasView: View {
+    @Environment(\.locale) private var locale
+
     let graph: TopologyGraph
 
     @State private var metricMode: TopologyMetricMode = .tokens
@@ -624,7 +647,8 @@ struct TopologyCanvasView: View {
             graph: graph,
             metricMode: metricMode,
             flowMode: flowMode,
-            highlightMode: highlightMode
+            highlightMode: highlightMode,
+            locale: locale
         )
     }
 
@@ -637,10 +661,10 @@ struct TopologyCanvasView: View {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Topology")
+                        Text(L10n.string(L10n.topologyViewTitle, locale: locale))
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(DesignTokens.textPrimary)
-                        Text("Sankey flow with inline model density and hover diagnostics.")
+                        Text(L10n.string(L10n.topologyViewSubtitle, locale: locale))
                             .font(.caption)
                             .foregroundStyle(DesignTokens.textSecondary)
                     }
@@ -651,8 +675,8 @@ struct TopologyCanvasView: View {
                         .frame(maxWidth: 500)
                 }
 
-                if let emptyStateText = screenModel.emptyStateText {
-                    emptyStateCard(text: emptyStateText)
+                if let emptyStateKey = screenModel.emptyStateKey {
+                    emptyStateCard(text: L10n.string(emptyStateKey, locale: locale))
                 } else {
                     TopologyCanvas(
                         graph: screenModel.graph,
@@ -667,9 +691,9 @@ struct TopologyCanvasView: View {
                 }
 
                 HStack(alignment: .top, spacing: 16) {
-                    SurfaceCard(title: screenModel.summaryTitle) {
+                    SurfaceCard(title: L10n.string(screenModel.summaryTitleKey, locale: locale)) {
                         if screenModel.hotPaths.isEmpty {
-                            Text(screenModel.emptyStateText ?? "No active routes yet.")
+                            Text(L10n.string(screenModel.emptyStateKey ?? L10n.topologyEmptyActiveRoutes, locale: locale))
                                 .font(.caption)
                                 .foregroundStyle(DesignTokens.textSecondary)
                         } else {
@@ -696,9 +720,9 @@ struct TopologyCanvasView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .topLeading)
 
-                    SurfaceCard(title: screenModel.mixTitle) {
+                    SurfaceCard(title: L10n.string(screenModel.mixTitleKey, locale: locale)) {
                         if screenModel.modelMix.isEmpty {
-                            Text(screenModel.emptyStateText ?? "No model composition yet.")
+                            Text(L10n.string(screenModel.emptyStateKey ?? L10n.topologyEmptyActiveRoutes, locale: locale))
                                 .font(.caption)
                                 .foregroundStyle(DesignTokens.textSecondary)
                         } else {
@@ -734,10 +758,10 @@ struct TopologyCanvasView: View {
 
     private var topologyControlStrip: some View {
         HStack(alignment: .center, spacing: controlStripLayout.groupSpacing) {
-            topologyControlGroup(accessibilityLabel: "Metric") {
-                Picker("Metric", selection: $metricMode) {
+            topologyControlGroup(accessibilityLabel: L10n.string(L10n.topologyControlsMetric, locale: locale)) {
+                Picker(L10n.string(L10n.topologyControlsMetric, locale: locale), selection: $metricMode) {
                     ForEach(TopologyMetricMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
+                        Text(L10n.topologyMetricTitle(mode, locale: locale)).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -747,10 +771,10 @@ struct TopologyCanvasView: View {
                 topologyControlDivider
             }
 
-            topologyControlGroup(accessibilityLabel: "Flow") {
-                Picker("Flow", selection: $flowMode) {
+            topologyControlGroup(accessibilityLabel: L10n.string(L10n.topologyControlsFlow, locale: locale)) {
+                Picker(L10n.string(L10n.topologyControlsFlow, locale: locale), selection: $flowMode) {
                     ForEach(TopologyFlowMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
+                        Text(L10n.topologyFlowTitle(mode, locale: locale)).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -760,11 +784,11 @@ struct TopologyCanvasView: View {
                 topologyControlDivider
             }
 
-            topologyControlGroup(accessibilityLabel: "Highlight") {
-                Picker("Highlight", selection: $highlightMode) {
-                    Text("Top 3").tag(TopologyHighlightMode.top3)
-                    Text("Top 5").tag(TopologyHighlightMode.top5)
-                    Text("All").tag(TopologyHighlightMode.all)
+            topologyControlGroup(accessibilityLabel: L10n.string(L10n.topologyControlsHighlight, locale: locale)) {
+                Picker(L10n.string(L10n.topologyControlsHighlight, locale: locale), selection: $highlightMode) {
+                    Text(L10n.topologyHighlightTitle(.top3, locale: locale)).tag(TopologyHighlightMode.top3)
+                    Text(L10n.topologyHighlightTitle(.top5, locale: locale)).tag(TopologyHighlightMode.top5)
+                    Text(L10n.topologyHighlightTitle(.all, locale: locale)).tag(TopologyHighlightMode.all)
                 }
                 .pickerStyle(.segmented)
             }
@@ -826,7 +850,7 @@ struct TopologyCanvasView: View {
 
     private func emptyStateCard(text: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Awaiting traffic")
+            Text(L10n.string(L10n.topologyEmptyAwaitingTraffic, locale: locale))
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(DesignTokens.textPrimary)
             Text(text)
@@ -843,6 +867,7 @@ struct TopologyCanvasView: View {
 }
 
 private struct TopologyCanvas: View {
+    @Environment(\.locale) private var locale
     let graph: TopologyGraph
     let edges: [TopologyCanvasEdgeModel]
     let nodeSummaries: [String: TopologyCanvasNodeSummary]
@@ -902,7 +927,7 @@ private struct TopologyCanvas: View {
                         }
                         .overlay(alignment: .topLeading) {
                             if stageLayout.showsColumnHeaders {
-                                Text(column.title)
+                                Text(L10n.string(column.titleKey, locale: locale))
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(DesignTokens.textSecondary)
                                     .offset(y: -24)
@@ -1019,7 +1044,7 @@ private struct TopologyCanvas: View {
                         centerPath: centerPath,
                         thickness: thickness,
                         semanticColor: segment.semanticColor,
-                        isTotal: segment.title == "Total"
+                        isTotal: segment.isTotal
                     )
                 )
 
